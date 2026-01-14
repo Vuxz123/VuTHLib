@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Core.unity
+    guid: b0192ba7e019d1a46943e0be8f97fd93
+  - enabled: 0
+    path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Boostrap.unity
+    guid: 2cd1f87b12006f04990ca9b074bd2e7e
+  - enabled: 0
+    path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Home.unity
+    guid: d9a56d9b646af1f4d8d0789e88699592
+  - enabled: 0
+    path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/GamePlay.unity
+    guid: e25659144d5681c44bc0874eda467f57
+  m_configObjects:
+    com.unity.addressableassets: {fileID: 11400000, guid: c8c18f25aa4734948b79879eea0093ff, type: 2}

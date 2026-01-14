@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: Default Local Group
+  m_EditorClassIdentifier: 
+  m_GroupName: Default Local Group
+  m_Data:
+    m_SerializedData: []
+  m_GUID: 1b34e7b0da4775646a98b8138eb177bf
+  m_SerializeEntries:
+  - m_GUID: 2cd1f87b12006f04990ca9b074bd2e7e
+    m_Address: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Boostrap.unity
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: d9a56d9b646af1f4d8d0789e88699592
+    m_Address: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Home.unity
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: e25659144d5681c44bc0874eda467f57
+    m_Address: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/GamePlay.unity
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  m_ReadOnly: 0
+  m_Settings: {fileID: 11400000, guid: 3f3c22561fbc30145bfa5bd9ef125dcc, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 48eb30d9589127d4a8d32484342e5c07, type: 2}
+    - {fileID: 11400000, guid: 83650b1ebcf1b514083071c4e640ac77, type: 2}
