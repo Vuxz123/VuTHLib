@@ -1,9 +1,8 @@
 ﻿using Common.Editor.UI;
-using TScript;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor
+namespace TScript.Editor
 {
     [CustomEditor(typeof(NewBehaviourScript))]
     public class NewBehaviourScriptEditor : UnityEditor.Editor
@@ -127,7 +126,7 @@ namespace Common.Editor
                         GUI.Label(rect, $"{index.row},{index.column}", EditorStyles.centeredGreyMiniLabel);
                     }
                 },
-                gridId: $"InventoryGrid_{script.GetInstanceID()}",
+                gridId: $"InventoryGrid_{script.GetEntityId()}",
                 maxVisibleHeight: 240f,
                 allowHorizontalScroll: true
             );

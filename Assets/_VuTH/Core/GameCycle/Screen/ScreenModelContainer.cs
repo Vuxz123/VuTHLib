@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using Common.SharedLib;
 using Common.SharedLib.Log;
-using Core.Generated;
 
 namespace Core.GameCycle.Screen
 {
@@ -22,11 +21,11 @@ namespace Core.GameCycle.Screen
             _screens = new Dictionary<ScreenIdentifier, ScreenModel>();
             foreach (var screen in ss)
             {
-                if (screen.screenId == ScreenIds.Boostrap)
+                if (screen.screenId == DefaultScreenIds.Boostrap)
                     bootstrapScreen = screen;
-                else if (screen.screenId == ScreenIds.Home)
+                else if (screen.screenId == DefaultScreenIds.Home)
                     homeScreen = screen;
-                else if (screen.screenId == ScreenIds.GamePlay) 
+                else if (screen.screenId == DefaultScreenIds.GamePlay) 
                     gameplayScreen = screen;
                 
                 _screens.Add(screen.screenId, screen);

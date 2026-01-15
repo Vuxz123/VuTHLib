@@ -172,7 +172,7 @@ namespace Common.Editor.UI
             uv = new Rect(0f, 0f, 1f, 1f);
             if (obj == null) return null;
 
-            int id = obj.GetInstanceID();
+            int id = obj.GetEntityId();
             if (PreviewCache.TryGetValue(id, out Texture cached) && cached != null)
             {
                 // If we have a cached UV for this entry, return it as well

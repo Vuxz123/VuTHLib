@@ -85,7 +85,7 @@ namespace Common.Editor.UI
             }
 
             _currentPayload = new ImGuiDragPayload(
-                id: obj.GetInstanceID(),
+                id: obj.GetEntityId(),
                 obj: obj,
                 type: obj.GetType(),
                 label: label,

@@ -9,6 +9,8 @@ namespace Core.GameCycle.ScreenFlow
     )]
     public class ScreenFlowGraph : ScriptableObject
     {
+        public const string FileExtension = ".sf";
+        
         [Header("Graph")]
         [SerializeField] private string startNodeGuid;
 

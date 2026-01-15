@@ -26,11 +26,11 @@ namespace Common.Editor.Field
             public bool PreventDuplicates;
             public DedupMode DedupMode = DedupMode.AutoUnique;
             public bool Loaded; // flag to avoid reloading
-            public HashSet<int> Selected = new HashSet<int>();
+            public HashSet<int> Selected = new();
             public int? DraggingIndex; // currently dragged row original index
             public int? DragInsertIndex; // live target insert index visualization (absolute array index)
-            public List<Rect> CurrentRowRects = new List<Rect>(); // rects for visible rows (ordered)
-            public List<int> CurrentVisibleIndices = new List<int>(); // mapping visible order -> real array index
+            public List<Rect> CurrentRowRects = new(); // rects for visible rows (ordered)
+            public List<int> CurrentVisibleIndices = new(); // mapping visible order -> real array index
         }
 
         // Persistence helpers
@@ -52,12 +52,12 @@ namespace Common.Editor.Field
             EditorPrefs.SetInt(baseKey + "_dedup", (int)st.DedupMode);
         }
 
-        private static readonly Dictionary<string, ViewState> SStates = new Dictionary<string, ViewState>();
+        private static readonly Dictionary<string, ViewState> SStates = new();
 
         private static ViewState GetState(SerializedProperty p)
         {
             if (p == null) return new ViewState();
-            var key = p.serializedObject.targetObject.GetInstanceID() + ":" + p.propertyPath;
+            var key = p.serializedObject.targetObject.GetEntityId() + ":" + p.propertyPath;
             if (!SStates.TryGetValue(key, out var st))
             {
                 st = new ViewState();
@@ -300,7 +300,7 @@ namespace Common.Editor.Field
                 else if (insertAbs <= state.CurrentVisibleIndices[0])
                     y = rects[0].yMin - 2f;
                 else if (insertAbs > state.CurrentVisibleIndices[rects.Count - 1])
-                    y = rects[rects.Count - 1].yMax + 2f;
+                    y = rects[^1].yMax + 2f;
                 else
                 {
                     // Find indices bounding insertAbs
@@ -319,7 +319,7 @@ namespace Common.Editor.Field
                     else if (upperIdx >= 0)
                         y = rects[upperIdx].yMin - 2f;
                     else // fallback
-                        y = rects[rects.Count - 1].yMax + 2f;
+                        y = rects[^1].yMax + 2f;
                 }
                 var lineRect = new Rect(0, y, EditorGUIUtility.currentViewWidth, 2f);
                 EditorGUI.DrawRect(lineRect, new Color(0.2f, 0.8f, 1f, 0.9f));
@@ -365,7 +365,7 @@ namespace Common.Editor.Field
             {
                 var sa = PropertyKeyString(keysProp.GetArrayElementAtIndex(a)) ?? string.Empty;
                 var sb = PropertyKeyString(keysProp.GetArrayElementAtIndex(b)) ?? string.Empty;
-                int cmp = string.Compare(sa, sb, System.StringComparison.Ordinal);
+                int cmp = string.Compare(sa, sb, StringComparison.Ordinal);
                 return descending ? -cmp : cmp;
             }
 
@@ -545,14 +545,14 @@ namespace Common.Editor.Field
                 case SerializedPropertyType.Integer:
                 {
                     // Distinguish between int and long via p.type
-                    if (p.type == nameof(System.Int64) || p.type == "long")
+                    if (p.type is nameof(Int64) or "long")
                         return p.longValue.ToString();
                     return p.intValue.ToString();
                 }
                 case SerializedPropertyType.Float:
                 {
                     // Distinguish between float and double via p.type
-                    if (p.type == nameof(System.Double) || p.type == "double")
+                    if (p.type is nameof(Double) or "double")
                         return p.doubleValue.ToString(CultureInfo.InvariantCulture);
                     return p.floatValue.ToString(CultureInfo.InvariantCulture);
                 }
@@ -574,10 +574,10 @@ namespace Common.Editor.Field
             if (p == null) return string.Empty;
             return p.propertyType switch
             {
-                SerializedPropertyType.Integer => p.type is nameof(System.Int64) or "long"
+                SerializedPropertyType.Integer => p.type is nameof(Int64) or "long"
                     ? p.longValue.ToString()
                     : p.intValue.ToString(),
-                SerializedPropertyType.Float => p.type is nameof(System.Double) or "double"
+                SerializedPropertyType.Float => p.type is nameof(Double) or "double"
                     ? p.doubleValue.ToString(CultureInfo.InvariantCulture)
                     : p.floatValue.ToString(CultureInfo.InvariantCulture),
                 SerializedPropertyType.Boolean => p.boolValue.ToString(),
@@ -608,10 +608,10 @@ namespace Common.Editor.Field
                 var part = copy.propertyType switch
                 {
                     SerializedPropertyType.String => copy.stringValue,
-                    SerializedPropertyType.Integer => (copy.type == nameof(System.Int64) || copy.type == "long")
+                    SerializedPropertyType.Integer => copy.type is nameof(Int64) or "long"
                         ? copy.longValue.ToString()
                         : copy.intValue.ToString(),
-                    SerializedPropertyType.Float => (copy.type == nameof(System.Double) || copy.type == "double")
+                    SerializedPropertyType.Float => copy.type is nameof(Double) or "double"
                         ? copy.doubleValue.ToString(CultureInfo.InvariantCulture)
                         : copy.floatValue.ToString(CultureInfo.InvariantCulture),
                     SerializedPropertyType.Boolean => copy.boolValue.ToString(),
@@ -674,7 +674,10 @@ namespace Common.Editor.Field
             }
         }
 
-        private static void ShowRowContextMenu(int index, SerializedProperty keysProp, SerializedProperty valuesProp, System.Action<int> onRemove)
+        private static void ShowRowContextMenu(int index, 
+            SerializedProperty keysProp, 
+            SerializedProperty valuesProp, 
+            Action<int> onRemove)
         {
             var menu = new GenericMenu();
             menu.AddItem(new GUIContent("Duplicate"), false, () => DuplicateRow(index, keysProp, valuesProp));
@@ -775,7 +778,7 @@ namespace Common.Editor.Field
                     AssignPrimitive(v, valStr);
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.LogError("Import JSON failed: " + ex.Message);
             }
@@ -811,8 +814,7 @@ namespace Common.Editor.Field
 
         private static string EscapeJsonString(string s)
         {
-            if (string.IsNullOrEmpty(s)) return string.Empty;
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            return string.IsNullOrEmpty(s) ? string.Empty : s.Replace("\\", @"\\").Replace("\"", "\\\"");
         }
 
         private static List<(string key, string val)> ParseSimpleJsonArray(string json)
@@ -824,7 +826,7 @@ namespace Common.Editor.Field
             void SkipWhitespace() { while (i < json.Length && char.IsWhiteSpace(json[i])) i++; }
             string ParseString()
             {
-                if (i >= json.Length || json[i] != '"') throw new System.Exception("Expected string quote");
+                if (i >= json.Length || json[i] != '"') throw new Exception("Expected string quote");
                 i++;
                 var sb = new System.Text.StringBuilder();
                 while (i < json.Length)
@@ -849,23 +851,19 @@ namespace Common.Editor.Field
                 }
                 return sb.ToString();
             }
-            string ParseValue()
-            {
-                if (i >= json.Length) return null;
-                if (json[i] == '"') return ParseString();
-                int start = i;
-                while (i < json.Length && ",}]".IndexOf(json[i]) == -1) i++;
-                return json.Substring(start, i - start).Trim();
-            }
 
             SkipWhitespace();
-            if (i >= json.Length || json[i] != '[') throw new System.Exception("JSON must start with [");
+            if (i >= json.Length || json[i] != '[') throw new Exception("JSON must start with [");
             i++; // skip [
             while (true)
             {
                 SkipWhitespace();
-                if (i < json.Length && json[i] == ']') { i++; break; }
-                if (i >= json.Length || json[i] != '{') throw new System.Exception("Expected object {");
+                if (i < json.Length && json[i] == ']')
+                {
+                    i++; 
+                    break;
+                }
+                if (i >= json.Length || json[i] != '{') throw new Exception("Expected object {");
                 i++; // skip {
                 string keyVal = null;
                 string valueVal = null;
@@ -894,10 +892,28 @@ namespace Common.Editor.Field
                 }
                 list.Add((keyVal, valueVal));
                 SkipWhitespace();
-                if (i < json.Length && json[i] == ',') { i++; continue; }
-                if (i < json.Length && json[i] == ']') { i++; break; }
+                if (i < json.Length && json[i] == ',')
+                {
+                    i++; 
+                    continue;
+                }
+
+                if (i < json.Length && json[i] == ']')
+                {
+                    i++; 
+                    break;
+                }
             }
             return list;
+
+            string ParseValue()
+            {
+                if (i >= json.Length) return null;
+                if (json[i] == '"') return ParseString();
+                int start = i;
+                while (i < json.Length && ",}]".IndexOf(json[i]) == -1) i++;
+                return json.Substring(start, i - start).Trim();
+            }
         }
 
         private static void AssignPrimitive(SerializedProperty p, string raw)
@@ -908,14 +924,14 @@ namespace Common.Editor.Field
                 case SerializedPropertyType.Integer:
                     if (long.TryParse(raw, out var li)) p.longValue = li; break;
                 case SerializedPropertyType.Float:
-                    if (double.TryParse(raw, System.Globalization.NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) p.doubleValue = d; break;
+                    if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) p.doubleValue = d; break;
                 case SerializedPropertyType.Boolean:
                     if (raw == "true" || raw == "false") p.boolValue = raw == "true"; break;
                 case SerializedPropertyType.String:
                     p.stringValue = raw ?? string.Empty; break;
                 case SerializedPropertyType.Enum:
                     // Try match display name
-                    int idx = System.Array.IndexOf(p.enumDisplayNames, raw);
+                    int idx = Array.IndexOf(p.enumDisplayNames, raw);
                     if (idx >= 0) p.enumValueIndex = idx; break;
                 case SerializedPropertyType.ObjectReference:
                     // Cannot reliably restore object references from JSON without GUID; skip
@@ -926,46 +942,48 @@ namespace Common.Editor.Field
         private static void HandleRowSelection(Rect clickRect, int index, ViewState state)
         {
             var e = Event.current;
-            if (e.type == EventType.MouseDown && clickRect.Contains(e.mousePosition))
+            if (e.type != EventType.MouseDown || !clickRect.Contains(e.mousePosition)) return;
+            var ctrl = e.control || e.command;
+            var shift = e.shift;
+            if (ctrl)
             {
-                bool ctrl = e.control || e.command;
-                bool shift = e.shift;
-                if (ctrl)
-                {
-                    if (!state.Selected.Add(index)) state.Selected.Remove(index);
-                }
-                else if (shift)
-                {
-                    if (state.Selected.Count == 0)
-                        state.Selected.Add(index);
-                    else
-                    {
-                        int anchor = -1;
-                        int minDist = int.MaxValue;
-                        foreach (var sel in state.Selected)
-                        {
-                            int dist = Mathf.Abs(sel - index);
-                            if (dist < minDist) { minDist = dist; anchor = sel; }
-                        }
-                        if (anchor >= 0)
-                        {
-                            int a = Mathf.Min(anchor, index);
-                            int b = Mathf.Max(anchor, index);
-                            state.Selected.Clear();
-                            for (int iSel = a; iSel <= b; iSel++) state.Selected.Add(iSel);
-                        }
-                    }
-                }
+                if (!state.Selected.Add(index)) state.Selected.Remove(index);
+            }
+            else if (shift)
+            {
+                if (state.Selected.Count == 0)
+                    state.Selected.Add(index);
                 else
                 {
-                    state.Selected.Clear();
-                    state.Selected.Add(index);
+                    int anchor = -1;
+                    int minDist = int.MaxValue;
+                    foreach (var sel in state.Selected)
+                    {
+                        int dist = Mathf.Abs(sel - index);
+                        if (dist < minDist) { minDist = dist; anchor = sel; }
+                    }
+                    if (anchor >= 0)
+                    {
+                        int a = Mathf.Min(anchor, index);
+                        int b = Mathf.Max(anchor, index);
+                        state.Selected.Clear();
+                        for (int iSel = a; iSel <= b; iSel++) state.Selected.Add(iSel);
+                    }
                 }
-                e.Use();
             }
+            else
+            {
+                state.Selected.Clear();
+                state.Selected.Add(index);
+            }
+            e.Use();
         }
 
-        private static void HandleRowDrag(Rect rowRect, int index, ViewState state, SerializedProperty keysProp, SerializedProperty valuesProp)
+        private static void HandleRowDrag(Rect rowRect, 
+            int index, 
+            ViewState state, 
+            SerializedProperty keysProp, 
+            SerializedProperty valuesProp)
         {
             var e = Event.current;
             switch (e.type)

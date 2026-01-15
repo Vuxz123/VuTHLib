@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Common.SharedLib.Log;
 using Core.GameCycle.Screen;
 using UnityEditor;
@@ -33,13 +32,11 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             this.AddManipulator(new ContentDragger());
             this.AddManipulator(new SelectionDragger());
             this.AddManipulator(new RectangleSelector());
+            this.AddManipulator(new EdgeManipulator());
 
             var grid = new GridBackground();
             Insert(0, grid);
             grid.StretchToParentSize();
-
-            serializeGraphElements = SerializeGraphElementsImpl;
-            unserializeAndPaste = UnserializeAndPasteImpl;
 
             graphViewChanged = OnGraphViewChanged;
 
@@ -90,7 +87,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
                     edge.userData = transition;
                     edge.Add(new ScreenTransitionLabel(transition));
 
-                    BindEdgeCallbacks(edge);
+                    BindCallbackOnEdge(edge, OnEdgeMouseDown);
                     AddElement(edge);
                 }
 
@@ -488,18 +485,27 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             return compatible;
         }
 
-        private static Port CreatePort(Node node, Direction direction, Port.Capacity capacity)
+        private Port CreatePort(Node node, Direction direction, Port.Capacity capacity)
         {
             var port = node.InstantiatePort(Orientation.Horizontal, direction, capacity, typeof(bool));
             port.portColor = Color.white;
 
             // Enable interactive edge dragging.
-            port.AddManipulator(new EdgeConnector<Edge>(new EdgeConnectorListener()));
+            port.AddManipulator(new EdgeConnector<Edge>(new EdgeConnectorListener(onEdgeMouseDown: OnEdgeMouseDown, _graph)));
             return port;
         }
 
         private sealed class EdgeConnectorListener : IEdgeConnectorListener
         {
+            private readonly EventCallback<MouseDownEvent> _onEdgeMouseDown;
+            private readonly ScreenFlowGraph _graph;
+
+            public EdgeConnectorListener(EventCallback<MouseDownEvent> onEdgeMouseDown, ScreenFlowGraph graph)
+            {
+                _onEdgeMouseDown = onEdgeMouseDown;
+                _graph = graph;
+            }
+            
             public void OnDropOutsidePort(Edge edge, Vector2 position)
             {
                 // Ignore.
@@ -507,8 +513,53 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
             public void OnDrop(GraphView graphView, Edge edge)
             {
-                // Let GraphViewChanged handle edgesToCreate.
-                graphView.AddElement(edge);
+                if (edge.output?.node is not ScreenNodeView fromNode || edge.input?.node is not ScreenNodeView toNode)
+                {
+                    this.LogError("❌ Lỗi: Không xác định được Node đầu/cuối.");
+                    return;
+                }
+                
+                Undo.RecordObject(_graph, "Add Transition");
+                var so = new SerializedObject(_graph);
+                so.Update();
+
+                var transitionsProp = so.FindProperty("transitions");
+                int newIndex = transitionsProp.arraySize;
+                transitionsProp.arraySize++;
+
+                var added = transitionsProp.GetArrayElementAtIndex(newIndex);
+                added.FindPropertyRelative("fromNodeGuid").stringValue = fromNode.Guid;
+                added.FindPropertyRelative("toNodeGuid").stringValue = toNode.Guid;
+                added.FindPropertyRelative("eventName").stringValue = "";
+                // Lưu ý: Đảm bảo field "condition" trong class của bạn khớp tên
+                added.FindPropertyRelative("condition").objectReferenceValue = null;
+
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_graph); // Lưu ngay lập tức
+
+                // 3. Lấy Data vừa tạo ra để gắn vào Edge
+                // Phải lấy đúng phần tử vừa add
+                var createdTransition = _graph.Transitions[newIndex];
+
+                if (createdTransition == null)
+                {
+                    Debug.LogError("❌ Lỗi: Data vừa tạo bị null.");
+                    return;
+                }
+
+                // 4. Gắn Data (Quan trọng nhất)
+                edge.userData = createdTransition;
+
+                // 5. Setup UI cho Edge
+                // (Nếu ScreenTransitionLabel gây lỗi, hãy tạm comment dòng này để test)
+                edge.Add(new ScreenTransitionLabel(createdTransition));
+
+                // 6. Đăng ký Callback
+                
+                // Reset key để đảm bảo callback được đăng ký mới
+                edge.viewDataKey = string.Empty;
+                
+                BindCallbackOnEdge(edge, _onEdgeMouseDown);
             }
         }
 
@@ -516,45 +567,42 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
         {
             if (_isRebuildingView || _graph == null)
                 return change;
-
-            // 1. Xử lý xóa (Remove)
+            // --- 1. Xử lý Remove (Giữ nguyên logic fallback đã gửi ở trên) ---
             if (change.elementsToRemove != null)
             {
-                // Copy ra list mới để tránh lỗi modify collection khi đang loop
                 var toRemove = new List<GraphElement>(change.elementsToRemove);
                 foreach (var element in toRemove)
                 {
-                    if (element is Edge edge)
-                        RemoveTransition(edge);
-                    else if (element is ScreenNodeView node)
-                        RemoveNode(node.Guid);
+                    if (element is Edge edge) RemoveTransition(edge);
+                    else if (element is ScreenNodeView node) RemoveNode(node.Guid);
                 }
             }
 
-            // 2. Xử lý tạo (Create) - GỘP LOGIC VÀO ĐÂY
+            // --- 2. Xử lý Create ---
             if (change.edgesToCreate != null)
             {
+                var edgesToKeep = new List<Edge>();
+
                 foreach (var edge in change.edgesToCreate)
                 {
-                    // Logic tạo data và gán userData nằm trọn trong hàm này
-                    CreateTransition(edge);
+                    ClearSelection();
+                    AddToSelection(edge);
                 }
             }
 
-            // 3. Xử lý di chuyển (Move)
+            // --- 3. Xử lý Move ---
             if (change.movedElements != null)
             {
                 foreach (var moved in change.movedElements)
                 {
-                    if (moved is ScreenNodeView nodeView)
-                        PersistNodePosition(nodeView);
+                    if (moved is ScreenNodeView nodeView) PersistNodePosition(nodeView);
                 }
             }
 
             return change;
         }
 
-        private void BindEdgeCallbacks(Edge edge)
+        private static void BindCallbackOnEdge(Edge edge, EventCallback<MouseDownEvent> onEdgeMouseDown)
         {
             if (edge == null)
                 return;
@@ -564,8 +612,8 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
                 return;
 
             edge.viewDataKey = EdgeBoundViewDataKey;
-
-            edge.RegisterCallback<MouseDownEvent>(OnEdgeMouseDown);
+            edge.RegisterCallback(onEdgeMouseDown, TrickleDown.TrickleDown);
+            edge.AddManipulator(new EdgeManipulator());
         }
 
         private void OnEdgeMouseDown(MouseDownEvent evt)
@@ -606,43 +654,8 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             EditorUtility.SetDirty(_graph);
         }
 
-        private void CreateTransition(Edge edge)
-        {
-            if (!_graph) return;
-
-            // Check kỹ node nguồn/đích
-            var fromNode = edge.output?.node as ScreenNodeView;
-            var toNode = edge.input?.node as ScreenNodeView;
-
-            if (fromNode == null || toNode == null)
-            {
-                Debug.LogError("Không tìm thấy Node đầu hoặc cuối khi tạo Edge!");
-                return;
-            }
-
-            // --- Tạo Data ---
-            Undo.RecordObject(_graph, "Add Transition");
-            // (Giữ nguyên logic SerializedObject của bạn ở đây...)
-            // ...
-            // Giả sử logic tạo OK và lưu vào array
-
-            // Lấy data vừa tạo ra
-            // Lưu ý: Logic lấy phần tử cuối cùng (arraySize - 1) là an toàn nhất khi vừa add xong
-            var createdTransition = _graph.Transitions[_graph.Transitions.Count - 1];
-
-            // --- QUAN TRỌNG NHẤT: Gán Data vào UI ---
-            edge.userData = createdTransition;
-
-            // Setup UI
-            edge.Add(new ScreenTransitionLabel(createdTransition));
-
-            // Đăng ký callback chuột (nếu cần)
-            BindEdgeCallbacks(edge);
-
-            // Debug để kiểm tra ngay lúc tạo
-            Debug.Log($"Đã tạo Edge kèm Data: {fromNode.Guid} -> {toNode.Guid}");
-        }
-
+        #region Remove
+        
         private void RemoveTransition(Edge edge)
         {
             if (_isRebuildingView || !_graph) return;
@@ -756,6 +769,8 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             EditorApplication.delayCall += () => { PopulateView(_graph); };
         }
 
+        #endregion
+
         private void ValidateGraph()
         {
             if (_graph == null)
@@ -797,15 +812,6 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             note.capabilities &= ~Capabilities.Deletable;
             note.capabilities &= ~Capabilities.Selectable;
             return note;
-        }
-
-        private static string SerializeGraphElementsImpl(IEnumerable<GraphElement> elements)
-        {
-            return string.Empty;
-        }
-
-        private static void UnserializeAndPasteImpl(string operationName, string data)
-        {
         }
 
         public override void AddToSelection(ISelectable selectable)
