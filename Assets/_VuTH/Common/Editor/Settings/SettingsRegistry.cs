@@ -40,13 +40,6 @@ namespace Common.Editor.Settings
 
                 var tab = (ISettingsTab)Activator.CreateInstance(type);
 
-                // Optional: consistency check
-                if (tab.Id != attr.Id)
-                {
-                    Debug.LogWarning(
-                        $"[ScreenFlow] Tab id mismatch: attribute={attr.Id}, implementation={tab.Id}");
-                }
-
                 InternalTabs.Add(tab);
             }
 

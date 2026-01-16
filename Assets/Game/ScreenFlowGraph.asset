@@ -31,4 +31,4 @@ MonoBehaviour:
   - fromNodeGuid: a8f1baf506f31924395e9d0855f724ae
     toNodeGuid: b4a92a889a16e3549985b4dfc5eb4a7e
     eventName: Play
-    condition: {fileID: 0}
+    condition: {fileID: 11400000, guid: 6a6e53779182a784fa91267caa6e3a92, type: 2}

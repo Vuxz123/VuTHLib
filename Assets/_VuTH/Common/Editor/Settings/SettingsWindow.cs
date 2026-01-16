@@ -9,6 +9,8 @@ namespace Common.Editor.Settings
 {
     public class SettingsWindow : EditorWindow
     {
+        public static readonly Color BorderColor = new(0.15f, 0.15f, 0.15f);
+        
         private ListView _sidebar;
         private VisualElement _content;
 
@@ -34,8 +36,7 @@ namespace Common.Editor.Settings
                 style =
                 {
                     width = 180,
-                    borderRightWidth = 1,
-                    borderRightColor = new Color(0.15f, 0.15f, 0.15f) // Màu viền tối
+                    paddingTop = 3
                 }
             };
 
@@ -45,7 +46,13 @@ namespace Common.Editor.Settings
 
             _content = new VisualElement
             {
-                style = { flexGrow = 1 }
+                style =
+                {
+                    flexGrow = 1,
+                    paddingTop = 3,
+                    borderLeftWidth = 1,
+                    borderLeftColor = BorderColor
+                }
             };
 
             rootVisualElement.Add(_sidebar);
