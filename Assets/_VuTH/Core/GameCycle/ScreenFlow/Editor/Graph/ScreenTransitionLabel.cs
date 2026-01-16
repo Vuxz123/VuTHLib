@@ -7,8 +7,6 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 {
     internal sealed class ScreenTransitionLabel : VisualElement
     {
-        private readonly Label label;
-
         public ScreenTransitionLabel(ScreenFlowTransition transition)
         {
             // Make sure clicks always go to the edge.
@@ -18,21 +16,26 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             style.top = -18;
             style.left = 0;
 
-            label = new Label(BuildText(transition));
-            label.pickingMode = PickingMode.Ignore;
-            label.focusable = false;
+            var label = new Label(BuildText(transition))
+            {
+                pickingMode = PickingMode.Ignore,
+                focusable = false,
+                style =
+                {
+                    unityTextAlign = TextAnchor.MiddleCenter,
+                    paddingLeft = 6,
+                    paddingRight = 6,
+                    paddingTop = 2,
+                    paddingBottom = 2,
+                    backgroundColor = new Color(0, 0, 0, 0.4f),
+                    color = Color.white,
+                    borderBottomLeftRadius = 4,
+                    borderBottomRightRadius = 4,
+                    borderTopLeftRadius = 4,
+                    borderTopRightRadius = 4
+                }
+            };
 
-            label.style.unityTextAlign = TextAnchor.MiddleCenter;
-            label.style.paddingLeft = 6;
-            label.style.paddingRight = 6;
-            label.style.paddingTop = 2;
-            label.style.paddingBottom = 2;
-            label.style.backgroundColor = new Color(0, 0, 0, 0.4f);
-            label.style.color = Color.white;
-            label.style.borderBottomLeftRadius = 4;
-            label.style.borderBottomRightRadius = 4;
-            label.style.borderTopLeftRadius = 4;
-            label.style.borderTopRightRadius = 4;
             Add(label);
 
             // edge color hint is handled where edge is created; this is just text.

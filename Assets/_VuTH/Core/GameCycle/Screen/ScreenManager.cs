@@ -58,6 +58,8 @@ namespace Core.GameCycle.Screen
         // Addressables cache: AssetGUID -> SceneInstance
         private readonly Dictionary<string, SceneInstance> _cachedAddressableScenes = new();
 
+        public event Action<TransitionCompletedEventArgs> OnTransitionCompleted;
+
         #region IScreenManager
 
         public ScreenModel Current => GetEffectiveCurrent();
@@ -119,6 +121,11 @@ namespace Core.GameCycle.Screen
 
         public async UniTask Enter(ScreenModel target)
         {
+            await Enter(target, TransitionContext.Default);
+        }
+
+        public async UniTask Enter(ScreenModel target, TransitionContext context)
+        {
             this.Log($"Enter({target?.name}) called.");
             if (!target)
             {
@@ -165,15 +172,27 @@ namespace Core.GameCycle.Screen
             {
                 _isTransitioning = false;
             }
+
+            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(TransitionKind.Enter, from, target, context));
         }
 
         public UniTask Enter(ScreenIdentifier id)
         {
+            return Enter(id, TransitionContext.Default);
+        }
+
+        public UniTask Enter(ScreenIdentifier id, TransitionContext context)
+        {
             var target = screenContainer.GetScreenById(id);
-            return Enter(target);
+            return Enter(target, context);
         }
 
         public async UniTask Push(ScreenModel target)
+        {
+            await Push(target, TransitionContext.Default);
+        }
+
+        public async UniTask Push(ScreenModel target, TransitionContext context)
         {
             if (!target)
             {
@@ -217,9 +236,16 @@ namespace Core.GameCycle.Screen
             {
                 _isTransitioning = false;
             }
+
+            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(TransitionKind.Push, from, target, context));
         }
 
         public async UniTask Pop()
+        {
+            await Pop(TransitionContext.Default);
+        }
+
+        public async UniTask Pop(TransitionContext context)
         {
             if (_isTransitioning)
             {
@@ -272,9 +298,16 @@ namespace Core.GameCycle.Screen
             {
                 _isTransitioning = false;
             }
+
+            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(TransitionKind.Pop, curr, prev, context));
         }
 
         public async UniTask PushOverride(ScreenModel target)
+        {
+            await PushOverride(target, TransitionContext.Default);
+        }
+
+        public async UniTask PushOverride(ScreenModel target, TransitionContext context)
         {
             if (!target)
             {
@@ -314,9 +347,16 @@ namespace Core.GameCycle.Screen
             {
                 _isTransitioning = false;
             }
+
+            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(TransitionKind.PushOverride, from, target, context));
         }
 
         public async UniTask PopOverride()
+        {
+            await PopOverride(TransitionContext.Default);
+        }
+
+        public async UniTask PopOverride(TransitionContext context)
         {
             if (_isTransitioning)
             {
@@ -355,6 +395,8 @@ namespace Core.GameCycle.Screen
             {
                 _isTransitioning = false;
             }
+
+            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(TransitionKind.PopOverride, exitingOverride, to, context));
         }
 
         #endregion
@@ -810,4 +852,3 @@ namespace Core.GameCycle.Screen
         #endregion
     }
 }
-

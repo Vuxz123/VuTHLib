@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Common.SharedLib;
 using UnityEngine;
 
 namespace Core.GameCycle.ScreenFlow
@@ -9,8 +10,6 @@ namespace Core.GameCycle.ScreenFlow
     )]
     public class ScreenFlowGraph : ScriptableObject
     {
-        public const string FileExtension = ".sf";
-        
         [Header("Graph")]
         [SerializeField] private string startNodeGuid;
 
