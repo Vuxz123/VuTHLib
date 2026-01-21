@@ -37,14 +37,14 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
         private void PushToGraph()
         {
-            if (graph == null)
+            if (!graph)
                 return;
 
             Undo.RecordObject(graph, "Edit Transition");
             var so = new SerializedObject(graph);
             so.Update();
             var transitionsProp = so.FindProperty("transitions");
-            for (int i = 0; i < transitionsProp.arraySize; i++)
+            for (var i = 0; i < transitionsProp.arraySize; i++)
             {
                 var t = transitionsProp.GetArrayElementAtIndex(i);
                 var from = t.FindPropertyRelative("fromNodeGuid").stringValue;

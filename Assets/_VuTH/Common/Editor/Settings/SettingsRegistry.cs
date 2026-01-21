@@ -10,7 +10,6 @@ namespace Common.Editor.Settings
     public static class SettingsRegistry
     {
         private static readonly List<ISettingsTab> InternalTabs = new();
-        private static bool _initialized;
 
         static SettingsRegistry()
         {
@@ -44,7 +43,6 @@ namespace Common.Editor.Settings
             }
 
             InternalTabs.Sort((a, b) => a.Order.CompareTo(b.Order));
-            _initialized = true;
         }
     }
 }

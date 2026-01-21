@@ -175,8 +175,15 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             {
                 foreach (var element in change.elementsToRemove)
                 {
-                    if (element is Edge edge) RemoveTransition(edge);
-                    else if (element is ScreenNodeView node) RemoveNode(node.Guid);
+                    switch (element)
+                    {
+                        case Edge edge:
+                            RemoveTransition(edge);
+                            break;
+                        case ScreenNodeView node:
+                            RemoveNode(node.Guid);
+                            break;
+                    }
                 }
             }
 
@@ -223,7 +230,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
                 so.Update();
 
                 var transitionsProp = so.FindProperty("transitions");
-                int newIndex = transitionsProp.arraySize;
+                var newIndex = transitionsProp.arraySize;
                 transitionsProp.arraySize++;
 
                 var added = transitionsProp.GetArrayElementAtIndex(newIndex);
@@ -288,18 +295,16 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             so.Update();
             
             var transitionsProp = so.FindProperty("transitions");
-            bool found = false;
+            var found = false;
             
-            for (int i = 0; i < transitionsProp.arraySize; i++)
+            for (var i = 0; i < transitionsProp.arraySize; i++)
             {
                 var t = transitionsProp.GetArrayElementAtIndex(i);
-                if (t.FindPropertyRelative("fromNodeGuid").stringValue == fromGuid &&
-                    t.FindPropertyRelative("toNodeGuid").stringValue == toGuid)
-                {
-                    transitionsProp.DeleteArrayElementAtIndex(i);
-                    found = true;
-                    break;
-                }
+                if (t.FindPropertyRelative("fromNodeGuid").stringValue != fromGuid ||
+                    t.FindPropertyRelative("toNodeGuid").stringValue != toGuid) continue;
+                transitionsProp.DeleteArrayElementAtIndex(i);
+                found = true;
+                break;
             }
 
             if (found)
@@ -319,7 +324,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
             // Remove connected transitions
             var transitionsProp = so.FindProperty("transitions");
-            for (int i = transitionsProp.arraySize - 1; i >= 0; i--)
+            for (var i = transitionsProp.arraySize - 1; i >= 0; i--)
             {
                 var t = transitionsProp.GetArrayElementAtIndex(i);
                 var from = t.FindPropertyRelative("fromNodeGuid").stringValue;
@@ -332,14 +337,12 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
             // Remove node
             var nodesProp = so.FindProperty("nodes");
-            for (int i = 0; i < nodesProp.arraySize; i++)
+            for (var i = 0; i < nodesProp.arraySize; i++)
             {
                 var n = nodesProp.GetArrayElementAtIndex(i);
-                if (n.FindPropertyRelative("guid").stringValue == guid)
-                {
-                    nodesProp.DeleteArrayElementAtIndex(i);
-                    break;
-                }
+                if (n.FindPropertyRelative("guid").stringValue != guid) continue;
+                nodesProp.DeleteArrayElementAtIndex(i);
+                break;
             }
 
             // Clear start node if matches
@@ -368,11 +371,9 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
             for (var i = 0; i < nodesProp.arraySize; i++)
             {
                 var n = nodesProp.GetArrayElementAtIndex(i);
-                if (n.FindPropertyRelative("guid").stringValue == nodeView.Guid)
-                {
-                    n.FindPropertyRelative("editorPosition").vector2Value = pos;
-                    break;
-                }
+                if (n.FindPropertyRelative("guid").stringValue != nodeView.Guid) continue;
+                n.FindPropertyRelative("editorPosition").vector2Value = pos;
+                break;
             }
 
             so.ApplyModifiedProperties();

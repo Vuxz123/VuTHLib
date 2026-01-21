@@ -2,9 +2,11 @@
 using Common.SharedLib;
 using Common.SharedLib.Log;
 using Core.GameCycle.Screen;
+using Core.GameCycle.ScreenFlow;
 using Core.Generated;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace TScript
 {
@@ -14,10 +16,10 @@ namespace TScript
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.Space))
+            if (Keyboard.current[Key.I].wasPressedThisFrame)
             {
-                this.Log("Press Space Key");
-                ScreenManager.Instance.Enter(ScreenIds.Home);
+                this.Log("Press I key detected");
+                ScreenFlowManager.Instance.Trigger("BoostrapCompleted");
             }
         }
     }

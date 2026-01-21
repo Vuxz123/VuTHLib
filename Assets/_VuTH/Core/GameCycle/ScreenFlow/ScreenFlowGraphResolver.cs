@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Core.GameCycle.ScreenFlow.Condition;
+using ZLinq;
 
 namespace Core.GameCycle.ScreenFlow
 {
@@ -26,15 +27,15 @@ namespace Core.GameCycle.ScreenFlow
 
         public ScreenFlowNode GetStartNode()
         {
-            if (_graph == null) return null;
-            if (string.IsNullOrWhiteSpace(_graph.StartNodeGuid)) return null;
-            return _nodeByGuid.TryGetValue(_graph.StartNodeGuid, out var node) ? node : null;
+            if (!_graph) return null;
+            return string.IsNullOrWhiteSpace(_graph.StartNodeGuid) ? null : 
+                _nodeByGuid.GetValueOrDefault(_graph.StartNodeGuid);
         }
 
         public IReadOnlyList<ScreenFlowTransition> GetAvailableTransitions(ScreenFlowNode fromNode, string eventName)
         {
-            if (fromNode == null) return Array.Empty<ScreenFlowTransition>();
-            if (string.IsNullOrWhiteSpace(eventName)) return Array.Empty<ScreenFlowTransition>();
+            if (fromNode == null || string.IsNullOrWhiteSpace(eventName)) 
+                return Array.Empty<ScreenFlowTransition>();
 
             return _transitionsByKey.TryGetValue((fromNode.Guid, eventName), out var list)
                 ? list
@@ -51,24 +52,17 @@ namespace Core.GameCycle.ScreenFlow
             if (!_transitionsByKey.TryGetValue((currentNode.Guid, eventName), out var transitions) || transitions == null)
                 return false;
 
-            for (var i = 0; i < transitions.Count; i++)
+            foreach (var t in transitions.AsValueEnumerable()
+                         .Where(t => t != null)
+                         .Where(t => Evaluate(t.Condition)))
             {
-                var t = transitions[i];
-                if (t == null) continue;
-
-                if (!Evaluate(t.Condition))
-                    continue;
-
                 if (string.IsNullOrWhiteSpace(t.ToNodeGuid))
                     return false;
 
-                if (_nodeByGuid.TryGetValue(t.ToNodeGuid, out var toNode) && toNode != null)
-                {
-                    nextNode = toNode;
-                    return true;
-                }
+                if (!_nodeByGuid.TryGetValue(t.ToNodeGuid, out var toNode) || toNode == null) return false;
+                nextNode = toNode;
+                return true;
 
-                return false;
             }
 
             return false;
@@ -77,7 +71,7 @@ namespace Core.GameCycle.ScreenFlow
         private static bool Evaluate(TransitionCondition condition)
         {
             // Policy: null condition is ALWAYS TRUE.
-            if (condition == null) return true;
+            if (!condition) return true;
 
             try
             {
@@ -95,13 +89,12 @@ namespace Core.GameCycle.ScreenFlow
             _nodeByGuid.Clear();
             _transitionsByKey.Clear();
 
-            if (_graph == null) return;
+            if (!_graph) return;
 
             if (_graph.Nodes != null)
             {
-                for (var i = 0; i < _graph.Nodes.Count; i++)
+                foreach (var n in _graph.Nodes)
                 {
-                    var n = _graph.Nodes[i];
                     if (n == null) continue;
                     if (string.IsNullOrWhiteSpace(n.Guid)) continue;
 
@@ -111,9 +104,8 @@ namespace Core.GameCycle.ScreenFlow
 
             if (_graph.Transitions != null)
             {
-                for (var i = 0; i < _graph.Transitions.Count; i++)
+                foreach (var t in _graph.Transitions)
                 {
-                    var t = _graph.Transitions[i];
                     if (t == null) continue;
                     if (string.IsNullOrWhiteSpace(t.FromNodeGuid)) continue;
                     if (string.IsNullOrWhiteSpace(t.EventName)) continue;

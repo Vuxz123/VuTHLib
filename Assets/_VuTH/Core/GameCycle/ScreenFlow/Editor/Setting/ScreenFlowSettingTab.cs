@@ -1,7 +1,8 @@
 ﻿using Common.Editor.Settings;
 using Common.Editor.Settings.Util;
-using Core.GameCycle.ScreenFlow.Editor.Discovery;
+using Common.SharedLib.Log;
 using Core.GameCycle.ScreenFlow.Editor.Validator;
+using Core.GameCycle.ScreenFlow.Profile;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
@@ -16,27 +17,28 @@ namespace Core.GameCycle.ScreenFlow.Editor.Setting
         public string Title => "Screen Flow";
         public int Order => 20;
 
+        // 1. Đưa SerializedObject ra ngoài để nó sống cùng vòng đời của Tab
+        private SerializedObject _serializedProfile;
+
         public VisualElement CreateView()
         {
             var container = new VisualElement();
-            // ─────────────────────────────────────────────
-            // Title
-            // ─────────────────────────────────────────────
+            
+            // Khởi tạo SerializedObject MỘT LẦN DUY NHẤT
+            if (ScreenFlowProfileUtilities.TryGetProfile(out var p))
+            {
+                _serializedProfile = new SerializedObject(p);
+            }
+            else
+            {
+                this.Log("Can't find profile.");
+                container.Add(new Label("Error: Profile not found."));
+                return container;
+            }
+
             container.Add(new SettingTitle("Screen Flow Settings"));
-
-            // ─────────────────────────────────────────────
-            // Root Flow Section
-            // ─────────────────────────────────────────────
             container.Add(CreateRootFlowSection());
-
-            // ─────────────────────────────────────────────
-            // Validation Section
-            // ─────────────────────────────────────────────
             container.Add(CreateValidationSection());
-
-            // ─────────────────────────────────────────────
-            // Info Section
-            // ─────────────────────────────────────────────
             container.Add(CreateInfoSection());
 
             return container;
@@ -49,48 +51,51 @@ namespace Core.GameCycle.ScreenFlow.Editor.Setting
         {
             var section = new SettingSection("Root Flow");
 
-            var graph = ScreenFlowDiscovery.TryFindRootFlow(out var error);
-
-            if (!graph)
-            {
-                section.Add(new HelpBox(
-                    error ?? "No ScreenFlowGraph found.",
-                    HelpBoxMessageType.Error
-                ));
-                return section;
-            }
-
-            // Read-only ObjectField
+            // Sử dụng _serializedProfile đã tạo ở trên
+            var graphProp = _serializedProfile.FindProperty("graph");
+            
+            // ObjectField
             var graphField = new ObjectField("ScreenFlowGraph")
             {
-                value = graph,
                 objectType = typeof(ScreenFlowGraph),
                 allowSceneObjects = false
             };
-            graphField.SetEnabled(false);
+            
+            // Binding giờ sẽ hoạt động tốt vì _serializedProfile tồn tại vĩnh viễn
+            graphField.BindProperty(graphProp);
 
             section.Add(graphField);
 
             // Action buttons
             var buttonRow = new VisualElement
             {
-                style =
-                {
-                    flexDirection = FlexDirection.Row,
-                    marginTop = 4
-                }
+                style = { flexDirection = FlexDirection.Row, marginTop = 4 }
             };
-
+            
+            // 2. Sửa logic nút bấm:
+            // KHÔNG lưu giá trị ra biến tạm thời.
+            // Truy cập trực tiếp vào property bên trong sự kiện click để lấy giá trị MỚI NHẤT.
+            
             var pingBtn = new Button(() =>
             {
-                EditorGUIUtility.PingObject(graph);
-                Selection.activeObject = graph;
+                // Lấy giá trị hiện tại real-time
+                var currentGraph = graphProp.objectReferenceValue as ScreenFlowGraph;
+                if (!currentGraph) return;
+                EditorGUIUtility.PingObject(currentGraph);
+                Selection.activeObject = currentGraph;
             })
             {
                 text = "Ping Asset"
             };
 
-            var openBtn = new Button(() => { ScreenFlowGraphEditorWindow.Open(graph); })
+            var openBtn = new Button(() => 
+            { 
+                var currentGraph = graphProp.objectReferenceValue as ScreenFlowGraph;
+                if (currentGraph)
+                {
+                    ScreenFlowGraphEditorWindow.Open(currentGraph); 
+                }
+            })
             {
                 text = "Open Graph"
             };
@@ -99,7 +104,6 @@ namespace Core.GameCycle.ScreenFlow.Editor.Setting
             buttonRow.Add(openBtn);
 
             section.Add(buttonRow);
-
             return section;
         }
 
@@ -110,32 +114,29 @@ namespace Core.GameCycle.ScreenFlow.Editor.Setting
         {
             var section = new SettingSection("Validation");
 
-            var graph = ScreenFlowDiscovery.TryFindRootFlow(out _);
-            if (graph == null)
-                return section;
+            if (_serializedProfile == null) return section;
+
+            // Cập nhật giá trị mới nhất trước khi validate
+            _serializedProfile.Update();
+            
+            var graph = _serializedProfile.FindProperty("graph").objectReferenceValue as ScreenFlowGraph;
+            
+            if (!graph) return section;
 
             var report = ScreenFlowValidator.Validate(graph);
 
             if (report.Count == 0)
             {
-                section.Add(new HelpBox(
-                    "Graph is valid.",
-                    HelpBoxMessageType.Info
-                ));
+                section.Add(new HelpBox("Graph is valid.", HelpBoxMessageType.Info));
                 return section;
             }
 
-            var errors = report.AsValueEnumerable()
-                .Where(v => v.Severity == ScreenFlowValidationSeverity.Error);
-            var warnings = report.AsValueEnumerable()
-                .Where(v => v.Severity == ScreenFlowValidationSeverity.Warning);
-
-            foreach (var error in errors)
+            foreach (var error in report.AsValueEnumerable().Where(v => v.Severity == ScreenFlowValidationSeverity.Error))
             {
                 section.Add(new HelpBox(error.Message, HelpBoxMessageType.Error));
             }
 
-            foreach (var warning in warnings)
+            foreach (var warning in report.AsValueEnumerable().Where(v => v.Severity == ScreenFlowValidationSeverity.Warning))
             {
                 section.Add(new HelpBox(warning.Message, HelpBoxMessageType.Warning));
             }
@@ -143,17 +144,13 @@ namespace Core.GameCycle.ScreenFlow.Editor.Setting
             return section;
         }
 
-        // =========================================================
-        // Info
-        // =========================================================
-        private VisualElement CreateInfoSection()
+        //Info Section giữ nguyên
+        private static VisualElement CreateInfoSection()
         {
             var section = new SettingSection("Info");
-
             section.Add(new Label("• Single root flow enforced"));
             section.Add(new Label("• Runtime flow is immutable"));
             section.Add(new Label("• Flow cannot be swapped or reloaded"));
-
             return section;
         }
     }

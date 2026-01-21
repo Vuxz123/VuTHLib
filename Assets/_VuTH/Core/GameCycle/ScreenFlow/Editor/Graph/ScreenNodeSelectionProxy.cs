@@ -31,7 +31,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
         private void PushToGraph()
         {
-            if (graph == null || string.IsNullOrEmpty(nodeGuid))
+            if (!graph || string.IsNullOrEmpty(nodeGuid))
                 return;
 
             Undo.RecordObject(graph, "Edit Screen Node");
@@ -56,7 +56,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
         public void PingScreen()
         {
-            if (screen == null)
+            if (!screen)
                 return;
             EditorGUIUtility.PingObject(screen);
             Selection.activeObject = screen;
@@ -64,7 +64,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
         public void SetAsStartNode()
         {
-            if (graph == null || string.IsNullOrEmpty(nodeGuid))
+            if (!graph || string.IsNullOrEmpty(nodeGuid))
                 return;
 
             Undo.RecordObject(graph, "Set Start Node");

@@ -16,6 +16,7 @@ namespace Core.GameCycle.ScreenFlow
         private IScreenManager _navigator;
 
         private string _pendingEvent;
+        private bool _started;
         private bool _disposed;
 
         public ScreenFlowActor(
@@ -59,6 +60,41 @@ namespace Core.GameCycle.ScreenFlow
                 _navigator.OnTransitionCompleted += HandleTransitionCompleted;
             }
             return true;
+        }
+
+        public void StartFlow()
+        {
+            if (_disposed) return;
+            
+            if (!LazyInitScreenManager())
+            {
+                this.LogWarning("Lazy setup screen manager call when it not even been initialized.");
+                return;
+            }
+
+            var screenFlowNode = _resolver.GetStartNode();
+            if (screenFlowNode == null)
+            {
+                this.LogWarning("ScreenFlowActor: No start/current node. Ignored trigger.");
+                return;
+            }
+
+            if (_started)
+            {
+                this.LogWarning("ScreenFlowActor: Screen is already started.");
+                return;
+            }
+            
+            _started = true;
+
+            var screenModel = screenFlowNode.Screen;
+            if (!screenModel)
+            {
+                this.LogWarning("ScreenFlowActor: Screen node is not screen.");
+                return;
+            }
+            
+            _navigator.Enter(screenModel, _transitionContext);
         }
 
         public void Trigger(string eventName)

@@ -70,7 +70,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
 
             var pingBtn = new Button(() =>
             {
-                if (conditionField.value == null)
+                if (!conditionField.value)
                     return;
                 EditorGUIUtility.PingObject(conditionField.value);
             })

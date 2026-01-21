@@ -1,6 +1,8 @@
 using System;
 using Common.SharedLib;
+using Common.SharedLib.Log;
 using Core.GameCycle.Screen;
+using Core.GameCycle.ScreenFlow.Profile;
 using UnityEngine;
 
 namespace Core.GameCycle.ScreenFlow
@@ -11,7 +13,7 @@ namespace Core.GameCycle.ScreenFlow
     public sealed class ScreenFlowManager : VBoostrapManager<ScreenFlowManager, IScreenFlowManager> , IScreenFlowManager
     {
         [Header("Screen Flow")]
-        [SerializeField] private ScreenFlowGraph graph;
+        [SerializeField, ReadOnlyField] private ScreenFlowGraph graph;
         
         [Header("Settings")]
         [SerializeField] private int historyCapacity = 32;
@@ -22,6 +24,7 @@ namespace Core.GameCycle.ScreenFlow
         
         protected override void InitializeBootstrap()
         {
+            SetupGraph();
             _state = new ScreenFlowStateContainer(historyCapacity);
             _resolver = new ScreenFlowGraphResolver(graph);
 
@@ -39,6 +42,24 @@ namespace Core.GameCycle.ScreenFlow
             _actor.Dispose();
         }
 
+        private void SetupGraph()
+        {
+            this.Log("Setting up ScreenFlow graph from ScreenFlowProfile asset.");
+            if (ScreenFlowProfileUtilities.TryGetProfile(out var profile))
+            {
+                graph = profile.Graph;
+                if (!graph)
+                {
+                    this.LogError("ScreenFlowProfile asset does not contain a valid ScreenFlowGraph.");
+                }
+            }
+            else
+            {
+                this.LogError("Could not find ScreenFlowProfile asset. Creating a new ScreenFlowProfile asset.");
+                throw new Exception("Could not find ScreenFlowProfile asset.");
+            }
+        }
+
         public ScreenModel GetStartScreen()
         {
             return _resolver.GetStartNode()?.Screen;
@@ -54,5 +75,11 @@ namespace Core.GameCycle.ScreenFlow
         public string LastEvent => _state.LastEvent;
 
         public ScreenFlowStateContainer State => _state;
+
+        private void Start()
+        {
+            // Go into start screen
+            _actor.StartFlow();
+        }
     }
 }

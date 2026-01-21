@@ -24,7 +24,9 @@ namespace Core.GameCycle.ScreenFlow
         public ScreenFlowStateContainer(int historyCapacity = 32)
         {
             _historyCapacity = historyCapacity <= 0 ? 0 : historyCapacity;
-            _history = _historyCapacity > 0 ? new List<ScreenFlowNode>(_historyCapacity) : new List<ScreenFlowNode>(0);
+            _history = _historyCapacity > 0 ? 
+                new List<ScreenFlowNode>(_historyCapacity) : 
+                new List<ScreenFlowNode>(0);
         }
 
         internal void Reset(ScreenFlowNode startNode)

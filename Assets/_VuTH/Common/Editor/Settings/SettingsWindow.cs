@@ -18,7 +18,7 @@ namespace Common.Editor.Settings
         public static void Open()
         {
             var wnd = GetWindow<SettingsWindow>();
-            wnd.titleContent = new GUIContent("Screen Flow");
+            wnd.titleContent = new GUIContent("Settings");
             wnd.minSize = new Vector2(600, 400);
             wnd.Show();
         }

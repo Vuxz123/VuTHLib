@@ -93,8 +93,6 @@ namespace Core.GameCycle.Screen
             {
                 _current = screenContainer.bootstrapScreen;
             }
-            
-            Enter(screenContainer.bootstrapScreen).Forget();
         }
 
         protected override void DeinitializeBootstrap()

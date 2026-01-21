@@ -1,5 +1,4 @@
 ﻿using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Core.GameCycle.ScreenFlow.Condition.Logical
 {

@@ -44,7 +44,7 @@ namespace Core.GameCycle.ScreenFlow.Editor.Graph
         private static string BuildText(ScreenFlowTransition t)
         {
             var eventName = string.IsNullOrWhiteSpace(t.EventName) ? "<event>" : t.EventName;
-            if (t.Condition == null)
+            if (!t.Condition)
                 return eventName;
 
             return eventName + "\n[" + t.Condition.name + "]";

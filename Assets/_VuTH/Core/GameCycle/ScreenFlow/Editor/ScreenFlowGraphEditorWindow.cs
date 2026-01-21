@@ -73,7 +73,7 @@ namespace Core.GameCycle.ScreenFlow.Editor
 
             _inspectorRoot.Add(new Label("Select a node/transition to edit."));
 
-            if (_graph != null)
+            if (_graph)
                 _graphView.PopulateView(_graph);
         }
 
@@ -90,24 +90,20 @@ namespace Core.GameCycle.ScreenFlow.Editor
         {
             _graphView?.Dispose();
 
-            if (_activeSelectionEditor != null)
-            {
-                DestroyImmediate(_activeSelectionEditor);
-                _activeSelectionEditor = null;
-            }
+            if (!_activeSelectionEditor) return;
+            DestroyImmediate(_activeSelectionEditor);
+            _activeSelectionEditor = null;
         }
 
         private void SetGraph(ScreenFlowGraph newGraph)
         {
             _graph = newGraph;
-            if (_graphView != null)
-            {
-                _graphView.PopulateView(_graph);
-                ShowSelectionInspector(null);
-            }
+            if (_graphView == null) return;
+            _graphView.PopulateView(_graph);
+            ShowSelectionInspector(null);
         }
 
-        internal void ShowSelectionInspector(UnityEngine.Object selection)
+        internal void ShowSelectionInspector(Object selection)
         {
             if (_inspectorRoot == null)
                 return;
@@ -116,20 +112,20 @@ namespace Core.GameCycle.ScreenFlow.Editor
             while (_inspectorRoot.childCount > 1)
                 _inspectorRoot.RemoveAt(1);
 
-            if (_activeSelectionEditor != null)
+            if (_activeSelectionEditor)
             {
                 DestroyImmediate(_activeSelectionEditor);
                 _activeSelectionEditor = null;
             }
 
-            if (selection == null)
+            if (!selection)
             {
                 _inspectorRoot.Add(new Label("Select a node/transition to edit."));
                 return;
             }
 
             _activeSelectionEditor = UnityEditor.Editor.CreateEditor(selection);
-            if (_activeSelectionEditor == null)
+            if (!_activeSelectionEditor)
             {
                 _inspectorRoot.Add(new Label($"No inspector for {selection.GetType().Name}"));
                 return;

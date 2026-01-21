@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8217345462942645777}
   - component: {fileID: 3043641460635569598}
+  - component: {fileID: 5967727654648043641}
   m_Layer: 0
   m_Name: BoostrapManager
   m_TagString: Untagged
@@ -45,7 +46,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cfe4f6a5a0f54699b1916cf09de47d39, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  enableSystem: 0
+  enableSystem: 1
   customLifecycleManagement: 0
   screenContainer:
     screens:
@@ -59,6 +60,22 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 4ef3ba5aafae66747822f663f465ea62, type: 2}
   loadingBarSpeed: 0.5
   loadingController: {fileID: 3928825266759067204}
+--- !u!114 &5967727654648043641
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1641515319002441657}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1967faa1bcc34ac78cd47edeb73b7b46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VuTH.ScreenFlow::Core.GameCycle.ScreenFlow.ScreenFlowManager
+  enableSystem: 1
+  customLifecycleManagement: 0
+  graph: {fileID: 0}
+  historyCapacity: 32
 --- !u!1 &2489577786947745154
 GameObject:
   m_ObjectHideFlags: 0
@@ -506,6 +523,7 @@ Canvas:
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
   m_VertexColorAlwaysGammaSpace: 0
+  m_UseReflectionProbes: 0
   m_AdditionalShaderChannelsFlag: 0
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
