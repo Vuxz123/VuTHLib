@@ -1,0 +1,37 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 046227102bd5435193b64ed61121b42c, type: 3}
+  m_Name: ScreenFlowGraph
+  m_EditorClassIdentifier: 
+  startNodeGuid: d9ea2a86d2fd57f4fb5ed89a619b0501
+  nodes:
+  - guid: d9ea2a86d2fd57f4fb5ed89a619b0501
+    screen: {fileID: 11400000, guid: 96e301abb6e202c4d9db593e2390ab0c, type: 2}
+    editorPosition: {x: 419, y: 83}
+  - guid: b4a92a889a16e3549985b4dfc5eb4a7e
+    screen: {fileID: 11400000, guid: c182e7f0329784d48bf323a117bdd81d, type: 2}
+    editorPosition: {x: 1214, y: 83}
+  - guid: a8f1baf506f31924395e9d0855f724ae
+    screen: {fileID: 11400000, guid: 7cb7659b83ba6cb4e928543a9ad8c421, type: 2}
+    editorPosition: {x: 828, y: 83}
+  - guid: 826976a04986da24eaeaaad82e7cf1d1
+    screen: {fileID: 11400000, guid: c182e7f0329784d48bf323a117bdd81d, type: 2}
+    editorPosition: {x: 828, y: 273}
+  transitions:
+  - fromNodeGuid: d9ea2a86d2fd57f4fb5ed89a619b0501
+    toNodeGuid: a8f1baf506f31924395e9d0855f724ae
+    eventName: A
+    condition: {fileID: 11400000, guid: 6a6e53779182a784fa91267caa6e3a92, type: 2}
+  - fromNodeGuid: a8f1baf506f31924395e9d0855f724ae
+    toNodeGuid: b4a92a889a16e3549985b4dfc5eb4a7e
+    eventName: B
+    condition: {fileID: 11400000, guid: 6a6e53779182a784fa91267caa6e3a92, type: 2}

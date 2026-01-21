@@ -13,7 +13,7 @@ namespace Core.GameCycle.Screen
         public bool unloadOnClose;
     }
 
-    [CreateAssetMenu(fileName = "New Screen Model", menuName = "VuTH Core/Game Cycle/Screen Model")]
+    [CreateAssetMenu(fileName = "New Screen Model", menuName = "Screen/Screen Model")]
     public class ScreenModel : ScriptableObject, IScreenDefinition
     {
         [Header("Identifier")]

@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using Common.SharedLib.Init;
 using Cysharp.Threading.Tasks;
+using UnityEngine;
 
 namespace Core.GameCycle.Screen.Loading.Tasks
 {
+    [CreateAssetMenu(menuName = "Screen/Screen Loading Tasks/VInitializable Task", fileName = "VInitializableTask")]
     public class VInitializableTask : ScreenLoadingTask
     {
         private Queue<VInitializeInvokeSite> _siteQueue = new();

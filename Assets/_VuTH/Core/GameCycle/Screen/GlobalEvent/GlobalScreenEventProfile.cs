@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Core.GameCycle.Screen.GlobalEvent
 {
-    [CreateAssetMenu(fileName = "ScreenEventProfile", menuName = "VuTH Core/GameCycle/Screen/Screen Event Profile")]
+    [CreateAssetMenu(fileName = "ScreenEventProfile", menuName = "Screen/Screen Event Profile")]
     public class GlobalScreenEventProfile : ScriptableObject, IGlobalScreenEventRegistration
     {
         // [QUAN TRỌNG] SerializeReference cho phép lưu các class con implement interface

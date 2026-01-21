@@ -1,9 +1,9 @@
 ﻿using System;
 using UnityEngine;
 
-namespace _Game.Scripts.VuTH.Common.Editor.Tools
+namespace Common.Editor.Tools
 {
-    [CreateAssetMenu(fileName = "PreBuildProfile", menuName = "VuTH/Tools/PreBuildProfile", order = 1)]
+    [CreateAssetMenu(fileName = "PreBuildProfile", menuName = "Profiles/PreBuildProfile", order = 1)]
     public class PreBuildProfile : ScriptableObject
     {
         [SerializeReference] private IPreBuildTask[] preBuildTasks;

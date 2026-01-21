@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Core.GameCycle.Screen.Loading.Tasks
 {
-    [CreateAssetMenu(menuName = "VuTH Core/GameCycle/Screen Loading Tasks/Fake Delay Task", fileName = "FakeDelayTask")]
+    [CreateAssetMenu(menuName = "Screen/Screen Loading Tasks/Fake Delay Task", fileName = "FakeDelayTask")]
     public class FakeDelayTask : ScreenLoadingTask
     {
         [Min(0f)] public float seconds = 2f;

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
-namespace _Game.Scripts.VuTH.Common.Editor.Tools.Podfile
+namespace Common.Editor.Tools.Podfile
 {
     public abstract class PodfileTask : IPreBuildTask
     {

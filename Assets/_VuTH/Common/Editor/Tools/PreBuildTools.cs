@@ -1,5 +1,4 @@
-﻿using _Game.Scripts.VuTH.Common.Editor.Tools;
-using Common.SharedLib.Log;
+﻿using Common.SharedLib.Log;
 using UnityEditor;
 using UnityEngine;
 

@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Common.SharedLib.Init
 {
-    [CreateAssetMenu(fileName = "ManagerProfile", menuName = "Common/ManagerProfile")]
+    [CreateAssetMenu(fileName = "VInitializeProfile", menuName = "Profiles/VInitializeProfile", order = 1)]
     public class VInitializeProfile : ScriptableObject
     {
         [SerializeField] private bool isEnabled = true;
