@@ -60,7 +60,7 @@ namespace Common.Editor.Settings
 
             _sidebar.SetSelection(0);
         }
-
+        
         private void OnTabSelected(IEnumerable<object> selection)
         {
             _content.Clear();

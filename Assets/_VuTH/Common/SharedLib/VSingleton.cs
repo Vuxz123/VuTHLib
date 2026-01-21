@@ -1,4 +1,10 @@
-﻿using UnityEngine;
+﻿using Common.SharedLib.Log;
+using UnityEngine;
+
+#if VCONTAINER
+using Common.SharedLib.DI;
+using VContainer;
+#endif
 
 namespace Common.SharedLib
 {
@@ -7,7 +13,11 @@ namespace Common.SharedLib
     /// </summary>
     /// <typeparam name="T"> class kế thừa Singleton </typeparam>
     /// <typeparam name="TI"> interface mà Singleton sẽ triển khai </typeparam>
-    public abstract class VSingleton<T, TI> : MonoBehaviour where T : MonoBehaviour, TI
+    public abstract class VSingleton<T, TI> : MonoBehaviour
+#if VCONTAINER
+        , IBoostrapVContainerConfigurator
+#endif
+        where T : MonoBehaviour, TI
     {
         private static T _instance;
         
@@ -38,5 +48,13 @@ namespace Common.SharedLib
                 _instance = null;
             }
         }
+
+#if VCONTAINER
+        public virtual void ConfigureRootScope(IContainerBuilder builder)
+        {
+            this.Log($"Inject {typeof(T).Name} into root scope");
+            builder.RegisterInstance((T)(MonoBehaviour)this).As<TI>().AsSelf().Build();
+        }
+#endif
     }
 }

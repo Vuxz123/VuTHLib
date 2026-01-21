@@ -14,6 +14,12 @@ using UnityEngine.ResourceManagement.ResourceProviders;
 using UnityEngine.SceneManagement;
 using ZLinq;
 
+#if VCONTAINER
+using Common.SharedLib.DI;
+using VContainer;
+using VContainer.Unity;
+#endif
+
 namespace Core.GameCycle.Screen
 {
     public class ScreenManager : VBoostrapManager<ScreenManager, IScreenManager>, IScreenManager
@@ -59,6 +65,10 @@ namespace Core.GameCycle.Screen
         private readonly Dictionary<string, SceneInstance> _cachedAddressableScenes = new();
 
         public event Action<TransitionCompletedEventArgs> OnTransitionCompleted;
+        
+#if VCONTAINER
+        private LifetimeScope _coreLifetimeScope;
+#endif
 
         #region IScreenManager
 
@@ -76,6 +86,11 @@ namespace Core.GameCycle.Screen
 
         protected override void InitializeBootstrap()
         {
+#if VCONTAINER
+            // Tìm LifetimeScope chứa ScreenManager (thường là Root của Scene Core)
+            _coreLifetimeScope = LifetimeScope.Find<RootScopeContainer>();
+#endif
+            
             if (screenContainer == null || screenContainer.screens == null || screenContainer.screens.Length == 0)
             {
                 this.LogError("ScreenManager: No valid ScreenModels found!");
@@ -655,17 +670,26 @@ namespace Core.GameCycle.Screen
                 _cachedAddressableScenes.Remove(key);
             }
 
-            var handle = Addressables.LoadSceneAsync(sceneRef, LoadSceneMode.Additive, activateOnLoad: true);
-            await handle.Task;
-
-            if (handle.Status != AsyncOperationStatus.Succeeded)
+#if VCONTAINER
+            // Đưa container của Core vào hàng đợi. 
+            // Khi Scene mới load và LifetimeScope của nó Awake, nó sẽ tự động lấy cái này làm Parent.
+            using (LifetimeScope.EnqueueParent(_coreLifetimeScope))
             {
-                this.LogError($"Failed to load addressable scene: {sceneRef.RuntimeKey}");
-                return;
-            }
+#endif
+                var handle = Addressables.LoadSceneAsync(sceneRef, LoadSceneMode.Additive, activateOnLoad: true);
+                await handle.Task;
 
-            _cachedAddressableScenes[key] = handle.Result;
-            SetSceneRootActive(handle.Result.Scene, true);
+                if (handle.Status != AsyncOperationStatus.Succeeded)
+                {
+                    this.LogError($"Failed to load addressable scene: {sceneRef.RuntimeKey}");
+                    return;
+                }
+
+                _cachedAddressableScenes[key] = handle.Result;
+                SetSceneRootActive(handle.Result.Scene, true);
+#if VCONTAINER
+            }
+#endif
         }
 
         private async UniTask UnloadSceneByPolicyInternal(
