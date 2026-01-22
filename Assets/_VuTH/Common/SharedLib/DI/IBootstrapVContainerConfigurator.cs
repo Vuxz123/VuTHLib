@@ -2,7 +2,7 @@
 
 namespace Common.DI
 {
-    public interface IBoostrapVContainerConfigurator
+    public interface IBootstrapVContainerConfigurator
     {
         public void ConfigureRootScope(IContainerBuilder builder);
     }

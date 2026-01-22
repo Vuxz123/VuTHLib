@@ -1,5 +1,7 @@
-﻿using VContainer;
+﻿using UnityEngine;
+using VContainer;
 using VContainer.Unity;
+using ZLinq;
 
 namespace Common.DI
 {
@@ -7,7 +9,9 @@ namespace Common.DI
     {
         protected override void Configure(IContainerBuilder builder)
         {
-            var boostrap = GetComponentsInChildren<IBoostrapVContainerConfigurator>();
+            var boostrap = 
+                FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
+                .AsValueEnumerable().OfType<IBootstrapVContainerConfigurator>();
             foreach (var b in boostrap)
             {
                 b.ConfigureRootScope(builder);

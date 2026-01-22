@@ -18,8 +18,6 @@ namespace TScript
         {
             _screenFlowManager = screenFlowManager;
             _cameraManager = cameraManager;
-            
-            Debug.Log("Injected successfully!");
         }
         
         public void Configure(IContainerBuilder builder)

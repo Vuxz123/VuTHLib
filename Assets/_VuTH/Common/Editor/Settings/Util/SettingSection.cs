@@ -6,7 +6,7 @@ namespace Common.Editor.Settings.Util
     {
         public SettingSection(string title)
         {
-            Add(new Label(title));
+            //Add(new Label(title));
         }
     }
 }

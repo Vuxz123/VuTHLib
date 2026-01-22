@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 8217345462942645777}
   - component: {fileID: 3043641460635569598}
   - component: {fileID: 5967727654648043641}
+  - component: {fileID: 151377421642493597}
   m_Layer: 0
   m_Name: BoostrapManager
   m_TagString: Untagged
@@ -76,6 +77,19 @@ MonoBehaviour:
   customLifecycleManagement: 0
   graph: {fileID: 0}
   historyCapacity: 32
+--- !u!114 &151377421642493597
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1641515319002441657}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf8f63aaab8a44ff9821aa7f17a3166c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Core.Boostrap.BoostrapManagerCentral
+  boostrapProfile: {fileID: 0}
 --- !u!1 &2489577786947745154
 GameObject:
   m_ObjectHideFlags: 0
@@ -527,7 +541,7 @@ Canvas:
   m_AdditionalShaderChannelsFlag: 0
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 9999
   m_TargetDisplay: 0
 --- !u!114 &9062346221760270565
 MonoBehaviour:

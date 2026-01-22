@@ -17,9 +17,11 @@ MonoBehaviour:
     m_AssetGUID: 2cd1f87b12006f04990ca9b074bd2e7e
     m_SubObjectName: 
     m_SubObjectType: 
+    m_SubObjectGUID: 
     m_EditorAssetChanged: 0
   additiveScene: []
   softCache: 0
-  showLoadingScreen: 0
+  showLoadingScreen: 1
   backgroundMusic: {fileID: 0}
-  preloadingTasks: []
+  preloadingTasks:
+  - {fileID: 11400000, guid: cde6a0e6454de8e4ab1473e15fda6960, type: 2}

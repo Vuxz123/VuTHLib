@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1b3d352304a4f4e98a8285a82476596, type: 3}
+  m_Name: WindowManagerCentralProfile
+  m_EditorClassIdentifier: Assembly-CSharp::Core.Window.Profile.WindowProfile
+  screenBaseSortingOrder: 0
+  popupBaseSortingOrder: 1000
+  systemBaseSortingOrder: 2001
+  sortingOrderStep: 10
+  defaultTransitionDuration: 0.3
+  useTransitionsInEditor: 0
+  blockInputDuringTransitions: 0
+  minBlockDuration: 0.1
+  maxCachedWindows: 10
+  windowCacheTimeout: 60
+  enableDebugLogs: 1
+  showUIStackInHierarchy: 1

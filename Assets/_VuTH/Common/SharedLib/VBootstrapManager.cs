@@ -2,8 +2,8 @@
 
 namespace Common
 {
-    public abstract class VBoostrapManager<T, TI> : VManager<T, TI> 
-        where T : VBoostrapManager<T, TI>, TI, new() 
+    public abstract class VBootstrapManager<T, TI> : VManager<T, TI> 
+        where T : VBootstrapManager<T, TI>, TI, new() 
         where TI : ICommonManager
     {
         public override bool IsEnabledSystem

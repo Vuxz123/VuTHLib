@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Core.GameCycle.Camera
 {
-    public class CameraManager : VBoostrapManager<CameraManager, ICameraManager>, ICameraManager
+    public class CameraManager : VBootstrapManager<CameraManager, ICameraManager>, ICameraManager
     {
         [Header("Camera Settings")]
         [Tooltip("Optional. If not assigned, the manager will use Camera.main.")]

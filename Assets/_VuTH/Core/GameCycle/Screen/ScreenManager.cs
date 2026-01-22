@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using Common;
 using Common.Log;
 using Core.GameCycle.Screen.GlobalEvent;
@@ -22,7 +21,7 @@ using VContainer.Unity;
 
 namespace Core.GameCycle.Screen
 {
-    public class ScreenManager : VBoostrapManager<ScreenManager, IScreenManager>, IScreenManager
+    public class ScreenManager : VBootstrapManager<ScreenManager, IScreenManager>, IScreenManager
     {
         [Header("Screen Settings")]
         [SerializeField] private ScreenModelContainer screenContainer;
@@ -167,7 +166,7 @@ namespace Core.GameCycle.Screen
 
                 // IMPORTANT: if there was a base current screen but it wasn't in stack (e.g. initial bootstrap baseline),
                 // we must close it too. Otherwise Enter() will keep old main scene loaded (additive) forever.
-                if (from != null && from != target)
+                if (from && from != target)
                 {
                     await UnloadScreenInternal(from, nextToShow: null);
                 }

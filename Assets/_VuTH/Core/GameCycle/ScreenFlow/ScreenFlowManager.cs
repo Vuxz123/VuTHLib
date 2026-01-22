@@ -10,7 +10,7 @@ namespace Core.GameCycle.ScreenFlow
     /// <summary>
     /// Public facade: wraps StateContainer + Actor. External callers should only depend on IScreenFlowManager.
     /// </summary>
-    public sealed class ScreenFlowManager : VBoostrapManager<ScreenFlowManager, IScreenFlowManager> , IScreenFlowManager
+    public sealed class ScreenFlowManager : VBootstrapManager<ScreenFlowManager, IScreenFlowManager> , IScreenFlowManager
     {
         [Header("Screen Flow")]
         [SerializeField, ReadOnlyField] private ScreenFlowGraph graph;

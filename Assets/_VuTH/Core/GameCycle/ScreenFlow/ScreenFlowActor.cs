@@ -28,11 +28,6 @@ namespace Core.GameCycle.ScreenFlow
             _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
             _transitionContext = transitionContext;
 
-            if (!LazyInitScreenManager())
-            {
-                this.LogWarning("Lazy setup screen manager call when it not even been initialized.");
-            }
-
             // Initialize state from start node if needed.
             if (_state.CurrentNode == null)
             {

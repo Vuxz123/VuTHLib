@@ -12,7 +12,7 @@ namespace Common
     /// <typeparam name="TI"> interface mà Singleton sẽ triển khai </typeparam>
     public abstract class VSingleton<T, TI> : MonoBehaviour
 #if VCONTAINER
-        , IBoostrapVContainerConfigurator
+        , IBootstrapVContainerConfigurator
 #endif
         where T : MonoBehaviour, TI
     {
