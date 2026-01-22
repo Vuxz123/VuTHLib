@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Common.Editor.UI
+namespace Common.Editor.UI.DragableGrid
 {
     public struct ImGuiDropResult<T> where T : Object
     {

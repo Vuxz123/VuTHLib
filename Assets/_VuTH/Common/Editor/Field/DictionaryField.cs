@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using Common.Editor.Helpers;
-using Common.SharedLib;
 using UnityEditor;
 using UnityEngine;
 

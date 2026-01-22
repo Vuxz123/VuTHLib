@@ -1,4 +1,4 @@
-﻿using Common.SharedLib;
+﻿using Common;
 using Core.GameCycle.Screen;
 
 namespace Core.GameCycle.ScreenFlow

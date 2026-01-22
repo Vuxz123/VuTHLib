@@ -1,7 +1,7 @@
 ﻿using VContainer;
 using VContainer.Unity;
 
-namespace Common.SharedLib.DI
+namespace Common.DI
 {
     public class RootScopeContainer : LifetimeScope
     {

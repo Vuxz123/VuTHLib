@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using Common.SharedLib;
-using Common.SharedLib.Log;
+using Common;
+using Common.Log;
 
 namespace Core.GameCycle.Screen
 {

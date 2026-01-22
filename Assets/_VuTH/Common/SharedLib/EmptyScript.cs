@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Common.SharedLib
+namespace Common
 {
     public class EmptyScript : MonoBehaviour
     {

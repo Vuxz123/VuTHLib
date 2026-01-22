@@ -1,5 +1,5 @@
 ﻿using System;
-using Common.SharedLib.Log;
+using Common.Log;
 using Core.GameCycle.Screen.Loading;
 using UnityEngine;
 using UnityEngine.AddressableAssets;

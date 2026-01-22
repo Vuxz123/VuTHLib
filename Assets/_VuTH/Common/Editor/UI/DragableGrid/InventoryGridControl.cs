@@ -1,7 +1,7 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
-namespace Common.Editor.UI
+namespace Common.Editor.UI.DragableGrid
 {
     /// <summary>
     /// Dedicated control for rendering an inventory grid with optional scrolling and scroll state management.

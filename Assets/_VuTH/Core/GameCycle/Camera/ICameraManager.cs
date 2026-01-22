@@ -1,5 +1,5 @@
 ﻿using System;
-using Common.SharedLib;
+using Common;
 using Cysharp.Threading.Tasks;
 
 namespace Core.GameCycle.Camera

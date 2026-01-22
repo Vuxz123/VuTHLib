@@ -2,7 +2,7 @@
 using System.Collections.ObjectModel;
 using UnityEngine;
 
-namespace Common.SharedLib.Init
+namespace Common.Init
 {
     [CreateAssetMenu(fileName = "VInitializeProfile", menuName = "Profiles/VInitializeProfile", order = 1)]
     public class VInitializeProfile : ScriptableObject

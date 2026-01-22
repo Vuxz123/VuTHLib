@@ -1,11 +1,11 @@
 ﻿#if UNITY_EDITOR
-using Common.SharedLib.Log;
+using Common.Log;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.AddressableAssets;
 using UnityEngine.SceneManagement;
 
-namespace Common.SharedLib.Scene
+namespace Common.Scene
 {
     public static class EditorSceneUtil
     {

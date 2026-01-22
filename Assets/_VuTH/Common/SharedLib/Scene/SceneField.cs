@@ -1,7 +1,7 @@
 ﻿using System;
 using UnityEngine;
 
-namespace Common.SharedLib.Scene
+namespace Common.Scene
 {
     [Serializable]
     public struct SceneField

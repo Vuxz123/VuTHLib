@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Common.Editor.Settings;
 using Common.Editor.Settings.Util;
-using Common.SharedLib.Log;
+using Common.Log;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;

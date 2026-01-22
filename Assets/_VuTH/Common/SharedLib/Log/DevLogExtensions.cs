@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using UnityEngine;
 
-namespace Common.SharedLib.Log
+namespace Common.Log
 {
     /// <summary>
     /// Provides extension methods for logging that include an origin-based prefix and color support.

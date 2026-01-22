@@ -1,8 +1,7 @@
 ﻿using System;
 using Common.Editor.ScenePostprocessor;
-using Common.SharedLib;
-using Common.SharedLib.Init;
-using Common.SharedLib.Log;
+using Common.Init;
+using Common.Log;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;

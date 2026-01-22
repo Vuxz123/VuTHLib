@@ -1,6 +1,4 @@
-﻿using Common.SharedLib.Scene;
-
-namespace Core.GameCycle.Screen
+﻿namespace Core.GameCycle.Screen
 {
     public interface IScreenDefinition
     {

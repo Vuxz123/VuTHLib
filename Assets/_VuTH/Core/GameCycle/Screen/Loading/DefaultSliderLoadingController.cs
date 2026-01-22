@@ -1,4 +1,4 @@
-﻿using Common.SharedLib.Log;
+﻿using Common.Log;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;

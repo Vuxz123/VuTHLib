@@ -1,12 +1,9 @@
-﻿using Common.SharedLib.Log;
+﻿using Common.DI;
+using Common.Log;
 using UnityEngine;
-
-#if VCONTAINER
-using Common.SharedLib.DI;
 using VContainer;
-#endif
 
-namespace Common.SharedLib
+namespace Common
 {
     /// <summary>
     /// Singleton base class cho MonoBehaviour với interface

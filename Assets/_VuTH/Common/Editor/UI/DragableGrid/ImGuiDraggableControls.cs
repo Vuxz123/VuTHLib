@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.UI
+namespace Common.Editor.UI.DragableGrid
 {
     public static class ImGuiDraggableControls
     {

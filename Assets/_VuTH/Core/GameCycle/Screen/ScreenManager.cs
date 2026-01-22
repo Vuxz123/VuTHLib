@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using Common.SharedLib;
-using Common.SharedLib.Log;
+using System.Linq;
+using Common;
+using Common.Log;
 using Core.GameCycle.Screen.GlobalEvent;
 using Core.GameCycle.Screen.Loading;
 using Core.GameCycle.Screen.LocalEvents;
@@ -15,8 +16,7 @@ using UnityEngine.SceneManagement;
 using ZLinq;
 
 #if VCONTAINER
-using Common.SharedLib.DI;
-using VContainer;
+using Common.DI;
 using VContainer.Unity;
 #endif
 
@@ -571,12 +571,13 @@ namespace Core.GameCycle.Screen
             {
                 var context = new LoadingContext(screen, mainScene, additiveScenes.ToArray());
 
+                var instancedPreloadTasks = screen.preloadingTasks
+                    .AsValueEnumerable().Select(Instantiate).Where(taskAsset => taskAsset).ToList();
+
                 // totalUnits = sum of each task's AggregateTask(context), fallback to 1/unit per task.
                 var totalUnits = 0;
-                foreach (var taskAsset in screen.preloadingTasks)
+                foreach (var taskAsset in instancedPreloadTasks.AsValueEnumerable())
                 {
-                    if (!taskAsset) continue;
-
                     try
                     {
                         totalUnits += Mathf.Max(0, taskAsset.AggregateTask(context));
@@ -593,15 +594,12 @@ namespace Core.GameCycle.Screen
                 var handler = new LoadingHandler(progress, totalUnits, 0.5f);
 
                 // Run sequentially (safer for shared services)
-                foreach (var taskAsset in screen.preloadingTasks)
+                foreach (var taskAsset in instancedPreloadTasks.AsValueEnumerable())
                 {
-                    if (!taskAsset) continue;
-
-                    var running = Instantiate(taskAsset);
                     try
                     {
-                        await running.Execute(context, handler);
-                        running.Log("Execute completed successfully.");
+                        await taskAsset.Execute(context, handler);
+                        taskAsset.Log("Execute completed successfully.");
                     }
                     catch (Exception e)
                     {
@@ -671,6 +669,10 @@ namespace Core.GameCycle.Screen
             }
 
 #if VCONTAINER
+            if (_coreLifetimeScope == null)
+            {
+                this.LogError("ScreenManager: Core LifetimeScope is null. Addressable scene loading with VContainer may fail to inject dependencies.");
+            }
             // Đưa container của Core vào hàng đợi. 
             // Khi Scene mới load và LifetimeScope của nó Awake, nó sẽ tự động lấy cái này làm Parent.
             using (LifetimeScope.EnqueueParent(_coreLifetimeScope))

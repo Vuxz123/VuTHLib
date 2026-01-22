@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Common.SharedLib
+namespace Common
 {
     /// <summary>
     /// A Unity-serializable dictionary. Unity serializes the parallel key/value lists; at runtime we rebuild the Dictionary.

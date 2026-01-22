@@ -1,6 +1,6 @@
 ﻿using Common.Editor.Settings;
 using Common.Editor.Settings.Util;
-using Common.SharedLib.Log;
+using Common.Log;
 using Core.GameCycle.ScreenFlow.Editor.Validator;
 using Core.GameCycle.ScreenFlow.Profile;
 using UnityEditor;

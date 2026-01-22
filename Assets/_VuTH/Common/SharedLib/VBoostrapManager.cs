@@ -1,6 +1,6 @@
-﻿using Common.SharedLib.Log;
+﻿using Common.Log;
 
-namespace Common.SharedLib
+namespace Common
 {
     public abstract class VBoostrapManager<T, TI> : VManager<T, TI> 
         where T : VBoostrapManager<T, TI>, TI, new() 

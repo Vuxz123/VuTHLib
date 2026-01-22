@@ -1,5 +1,4 @@
-﻿using Common.SharedLib;
-using UnityEditor;
+﻿using UnityEditor;
 using UnityEngine;
 
 namespace Common.Editor.UI.ReadOnly

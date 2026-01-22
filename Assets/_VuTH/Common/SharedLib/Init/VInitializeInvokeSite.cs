@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Reflection;
-using Common.SharedLib.Log;
+using Common.Log;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Common.SharedLib.Init
+namespace Common.Init
 {
     /// <summary>
     /// Delegate for handling initialization completion of IVInitializable objects.

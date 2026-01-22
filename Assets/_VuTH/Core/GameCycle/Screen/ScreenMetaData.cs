@@ -1,5 +1,5 @@
 ﻿using System;
-using Common.SharedLib.Log;
+using Common.Log;
 using Core.GameCycle.Screen.LocalEvents;
 using UnityEngine;
 

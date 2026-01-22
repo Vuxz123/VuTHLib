@@ -1,6 +1,6 @@
 ﻿using VContainer;
 
-namespace Common.SharedLib.DI
+namespace Common.DI
 {
     public interface IBoostrapVContainerConfigurator
     {

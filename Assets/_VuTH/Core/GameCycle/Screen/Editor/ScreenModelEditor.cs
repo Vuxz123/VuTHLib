@@ -1,4 +1,4 @@
-﻿using Common.SharedLib.Scene;
+﻿using Common.Scene;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;

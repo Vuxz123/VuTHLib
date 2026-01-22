@@ -1,10 +1,6 @@
-﻿using System;
-using Common.SharedLib;
-using Common.SharedLib.Log;
-using Core.GameCycle.Screen;
+﻿using Common;
+using Common.Log;
 using Core.GameCycle.ScreenFlow;
-using Core.Generated;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.InputSystem;
 

@@ -1,8 +1,8 @@
-﻿using UnityEditor;
+﻿using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
-using System.Collections.Generic;
 
-namespace Common.Editor.UI
+namespace Common.Editor.UI.PreviewObject
 {
     /// <summary>
     /// Helper for drawing an object preview (icon + label) in custom inspectors.

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Common.Editor.UI
+namespace Common.Editor.UI.DragableGrid
 {
     public sealed class ImGuiDragPayload
     {

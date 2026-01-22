@@ -1,4 +1,4 @@
-﻿namespace Common.SharedLib
+﻿namespace Common
 {
     public static class ConfigUtils
     {

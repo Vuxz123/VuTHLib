@@ -1,7 +1,7 @@
-﻿using Common.SharedLib;
-using Core.GameCycle.Screen.LocalEvents;
+﻿using Core.GameCycle.Screen.LocalEvents;
 using Cysharp.Threading.Tasks;
 using System;
+using Common;
 
 namespace Core.GameCycle.Screen
 {

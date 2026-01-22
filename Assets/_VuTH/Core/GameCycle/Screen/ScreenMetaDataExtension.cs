@@ -1,4 +1,4 @@
-﻿using Common.SharedLib.Log;
+﻿using Common.Log;
 using UnityEngine;
 
 namespace Core.GameCycle.Screen

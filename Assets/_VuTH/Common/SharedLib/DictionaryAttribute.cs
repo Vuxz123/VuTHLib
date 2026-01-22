@@ -2,7 +2,7 @@
 
 using UnityEngine;
 
-namespace Common.SharedLib
+namespace Common
 {
     /// <summary>
     /// Optional attribute: put [Dictionary] on a SerializableDictionary field to force the custom drawer

@@ -1,6 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 
-namespace Common.SharedLib.Init
+namespace Common.Init
 {
     public interface IVInitializable
     {

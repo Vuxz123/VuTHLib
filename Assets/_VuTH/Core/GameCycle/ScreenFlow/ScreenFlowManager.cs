@@ -1,6 +1,6 @@
 using System;
-using Common.SharedLib;
-using Common.SharedLib.Log;
+using Common;
+using Common.Log;
 using Core.GameCycle.Screen;
 using Core.GameCycle.ScreenFlow.Profile;
 using UnityEngine;

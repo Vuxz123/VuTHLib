@@ -1,7 +1,7 @@
-﻿using Common.SharedLib;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using Common.SharedLib.Log;
+using Common;
+using Common.Log;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
