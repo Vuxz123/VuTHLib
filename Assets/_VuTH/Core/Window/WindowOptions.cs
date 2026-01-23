@@ -28,7 +28,7 @@ namespace Core.Window
         /// </summary>
         public UITransitionSettings TransitionOutSettings { get; set; }
 
-        public bool CloseOnBackPress { get; set; } = true;
-        public bool BlockInput { get; set; } = true;
+        public bool? CloseOnBackPress { get; set; }
+        public bool? BlockInput { get; set; }
     }
 }

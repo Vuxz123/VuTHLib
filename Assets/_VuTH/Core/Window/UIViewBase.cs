@@ -92,10 +92,24 @@ namespace Core.Window
         {
             CloseSource?.TrySetResult(null);
         }
+
+        /// <summary>
+        /// Request this view to close. This is the reliable way for WindowManager to close a window.
+        /// </summary>
+        public bool TryRequestClose(object result = null)
+        {
+            if (CloseSource == null)
+                return false;
+
+            return CloseSource.TrySetResult(result);
+        }
         
         public virtual void OnBackPressed()
         {
             Close(); // Default: close with null result
         }
+        
+        public virtual void OnViewShown() { }
+        public virtual void OnViewHidden() { }
     }
 }

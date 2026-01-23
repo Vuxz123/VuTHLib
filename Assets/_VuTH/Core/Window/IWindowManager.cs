@@ -10,12 +10,16 @@ namespace Core.Window
     public interface IWindowManager : ICommonManager
     {
         /// <summary>
-        /// Open a window and wait for result
+        /// Open a window and wait for result. <br/>
+        /// Note: a non-default result is returned only when the window is closed with a payload <br/>
+        /// (e.g., view calls TryRequestClose(result)/Close(result) or manager calls Close/CloseTop(result)).
         /// </summary>
         UniTask<TResult> Open<TWindow, TResult>(object data = null) where TWindow : UIViewBase;
         
         /// <summary>
-        /// Open a window with options and wait for result
+        /// Open a window with options and wait for result. <br/>
+        /// Note: a non-default result is returned only when the window is closed with a payload <br/>
+        /// (e.g., view calls TryRequestClose(result)/Close(result) or manager calls Close/CloseTop(result)).
         /// </summary>
         UniTask<TResult> Open<TWindow, TResult>(WindowOptions options) where TWindow : UIViewBase;
         
@@ -30,14 +34,24 @@ namespace Core.Window
         UniTask Close(UIViewBase popup);
         
         /// <summary>
+        /// Close a specific window and provide a result payload for Open&lt;TWindow, TResult&gt;.
+        /// </summary>
+        UniTask Close(UIViewBase popup, object result);
+
+        /// <summary>
         /// Close the topmost window
         /// </summary>
         UniTask CloseTop();
         
         /// <summary>
+        /// Close the topmost window and provide a result payload for Open&lt;TWindow, TResult&gt;.
+        /// </summary>
+        UniTask CloseTop(object result);
+        
+        /// <summary>
         /// Close all windows
         /// </summary>
-        UniTask CloseAll(bool immediate = false);
+        UniTask CloseAll(bool immediate = false, bool forceCleanup = false);
         
         /// <summary>
         /// Get the topmost window
@@ -64,6 +78,17 @@ namespace Core.Window
         /// </summary>
         TWindow GetWindow<TWindow>() where TWindow : UIViewBase;
         
+        /// <summary>
+        /// Release the cached Addressables prefab handle for a specific window type (if loaded).
+        /// </summary>
+        void ReleasePrefab<TWindow>() where TWindow : UIViewBase;
+
+        /// <summary>
+        /// Release all cached Addressables prefab handles.
+        /// Useful for long sessions or when you want to unload UI bundles.
+        /// </summary>
+        void ClearPrefabCache();
+
         event Action<UIViewBase> OnWindowOpened;
         event Action<UIViewBase> OnWindowClosed;
     }

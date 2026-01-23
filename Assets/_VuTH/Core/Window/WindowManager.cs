@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using Common;
+using Common.Log;
 using Core.Pool;
 using Core.Window.Blocker;
 using Core.Window.Profile;
@@ -9,6 +10,7 @@ using Core.Window.Transition;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.InputSystem;
 using ZLinq;
 #if VCONTAINER
@@ -37,16 +39,80 @@ namespace Core.Window
         private IUITransitionFactory _transitionFactory;
         private readonly IUITransitionRunner _transitionRunner = new UITransitionRunner();
 
-        // Cache Addressables prefab assets (NOT instances). Instances are handled by PoolManager.
-        private readonly Dictionary<Type, GameObject> _prefabCache = new();
+        // Cache Addressables prefab handles so we can release them properly.
+        private readonly Dictionary<Type, AsyncOperationHandle<GameObject>> _prefabHandleCache = new();
+
 
         private readonly Stack<UIViewBase> _windowStack = new();
+        // Maintain insertion order list so we can remove arbitrary windows without allocating temp stacks.
+        // Index 0 = bottom, last = top.
+        private readonly List<UIViewBase> _windowList = new();
         private readonly Dictionary<UIViewBase, WindowOptions> _windowOptionsMap = new();
 
-        private CancellationTokenSource _closeAllCts;
+        private readonly SemaphoreSlim _opGate = new SemaphoreSlim(1, 1);
 
-        public UIViewBase TopWindow => _windowStack.Count > 0 ? _windowStack.Peek() : null;
-        public int WindowCount => _windowStack.Count;
+        private async UniTask<T> RunSerialized<T>(Func<UniTask<T>> op)
+        {
+            await _opGate.WaitAsync();
+            try
+            {
+                return await op();
+            }
+            finally
+            {
+                _opGate.Release();
+            }
+        }
+
+        private async UniTask RunSerialized(Func<UniTask> op)
+        {
+            await _opGate.WaitAsync();
+            try
+            {
+                await op();
+            }
+            finally
+            {
+                _opGate.Release();
+            }
+        }
+
+        private enum CloseAllMode
+        {
+            None,
+            Graceful,
+            Immediate
+        }
+
+        private enum CloseReason
+        {
+            Normal,
+            CloseAll,
+            Force
+        }
+
+        private readonly struct CloseToken
+        {
+            public readonly CloseReason Reason;
+            public readonly object Payload;
+
+            public CloseToken(CloseReason reason, object payload = null)
+            {
+                Reason = reason;
+                Payload = payload;
+            }
+        }
+
+        private CloseAllMode _closeAllMode = CloseAllMode.None;
+
+        // Track the actual close source being awaited for each window so CloseAll can complete it deterministically.
+        private readonly Dictionary<UIViewBase, UniTaskCompletionSource<CloseToken>> _closeSourceMap = new();
+
+        // Track windows that were force-cleaned (despawned externally) so OpenInternal can early-exit.
+        private readonly HashSet<UIViewBase> _forceCleaned = new();
+
+        public UIViewBase TopWindow => _windowList.Count > 0 ? _windowList[^1] : null;
+        public int WindowCount => _windowList.Count;
         public bool IsTransitioning { get; private set; }
 
         public event Action<UIViewBase> OnWindowOpened;
@@ -75,25 +141,94 @@ namespace Core.Window
             Pool ??= PoolManager.Instance;
 
             if (Pool == null)
-                Debug.LogError("[WindowManager] PoolManager is not available. Window instantiation will fail.");
+                this.LogError("PoolManager is not available. Window instantiation will fail.");
 
             if (_inputBlocker == null)
-                Debug.LogWarning("[WindowManager] No IUIInputBlocker assigned. Input blocking will be disabled.");
+                this.LogWarning("No IUIInputBlocker assigned. Input blocking will be disabled.");
 
             if (_transitionFactory == null)
-                Debug.LogWarning("[WindowManager] No IUITransitionFactory assigned. Transitions will be disabled.");
+                this.LogWarning("No IUITransitionFactory assigned. Transitions will be disabled.");
+
+            if (backAction != null && backAction.action != null)
+            {
+                backAction.action.Enable();
+                backAction.action.performed += OnBackActionPerformed;
+            }
         }
 
         protected override void DeinitializeBootstrap()
         {
-            _closeAllCts?.Cancel();
-            _closeAllCts?.Dispose();
-            _closeAllCts = null;
+            if (backAction != null && backAction.action != null)
+            {
+                backAction.action.performed -= OnBackActionPerformed;
+                backAction.action.Disable();
+            }
 
             _windowOptionsMap.Clear();
             _windowStack.Clear();
+            _windowList.Clear();
 
-            // Keep prefab cache by default.
+            ClearPrefabCache();
+        }
+
+        public void ReleasePrefab<TWindow>() where TWindow : UIViewBase
+        {
+            if (_windowStack.Count > 0)
+            {
+                this.LogWarning($"ReleasePrefab<{typeof(TWindow).Name}> called while windows are open. " +
+                                 "This only releases the prefab asset handle (instances remain alive), but re-open may reload.");
+            }
+
+            var type = typeof(TWindow);
+            if (_prefabHandleCache.TryGetValue(type, out var handle) && handle.IsValid())
+            {
+                // If still loading, don't release mid-flight.
+                // Caller can retry release after load completes.
+                if (handle.IsDone)
+                {
+                    Addressables.Release(handle);
+                    _prefabHandleCache.Remove(type);
+                }
+                else
+                {
+                    this.LogWarning($"ReleasePrefab<{typeof(TWindow).Name}> skipped because the Addressables handle is still loading.");
+                }
+            }
+            else
+            {
+                _prefabHandleCache.Remove(type);
+            }
+        }
+
+        public void ClearPrefabCache()
+        {
+            if (_windowStack.Count > 0)
+            {
+                this.LogWarning($"ClearPrefabCache called while {_windowStack.Count} window(s) are open. " +
+                                 "This only releases prefab asset handles; open instances remain alive.");
+            }
+
+            foreach (var kv in _prefabHandleCache
+                         .AsValueEnumerable().Where(kv => kv.Value.IsValid() && kv.Value.IsDone))
+            {
+                Addressables.Release(kv.Value);
+            }
+
+            // Keep any handles that are still loading; they can be cleared later.
+            foreach (var kv in _prefabHandleCache
+                         .AsValueEnumerable()
+                         .Where(kv => kv.Value.IsValid() && !kv.Value.IsDone))
+            {
+                this.LogWarning($"Skipped releasing prefab handle for {kv.Key.Name} because it is still loading.");
+            }
+
+            var keysToRemove = _prefabHandleCache
+                .AsValueEnumerable()
+                .Where(kv => !kv.Value.IsValid() || kv.Value.IsDone)
+                .Select(kv => kv.Key);
+
+            foreach (var key in keysToRemove)
+                _prefabHandleCache.Remove(key);
         }
 
         private void EnsureProfile()
@@ -105,7 +240,7 @@ namespace Core.Window
             }
             else
             {
-                Debug.LogError("[WindowManager] No WindowProfile assigned and none found in resources.");
+                this.LogError("No WindowProfile assigned and none found in resources.");
             }
         }
 
@@ -125,12 +260,7 @@ namespace Core.Window
 
         public async UniTask<TResult> Open<TWindow, TResult>(WindowOptions options) where TWindow : UIViewBase
         {
-            if (IsTransitioning)
-            {
-                Debug.LogWarning($"[WindowManager] Cannot open {typeof(TWindow).Name} while transitioning");
-                return default;
-            }
-
+            // Don't block on IsTransitioning; operations are serialized.
             var prefab = await GetOrLoadPrefab<TWindow>();
             if (!prefab)
                 return default;
@@ -145,25 +275,68 @@ namespace Core.Window
         private async UniTask<GameObject> GetOrLoadPrefab<TWindow>() where TWindow : UIViewBase
         {
             var type = typeof(TWindow);
-            if (_prefabCache.TryGetValue(type, out var cached) && cached)
-                return cached;
 
-            var prefab = await Addressables.LoadAssetAsync<GameObject>(type.Name).ToUniTask();
-            if (!prefab)
+            if (_prefabHandleCache.TryGetValue(type, out var cachedHandle) && cachedHandle.IsValid())
             {
-                Debug.LogError($"[WindowManager] Addressables prefab not found for key '{type.Name}'");
+                // If handle hasn't completed yet, await completion.
+                try
+                {
+                    if (!cachedHandle.IsDone)
+                        await cachedHandle.Task;
+                }
+                catch (Exception e)
+                {
+                    this.LogError($"Addressables load faulted for key '{type.Name}': {e}");
+                    Addressables.Release(cachedHandle);
+                    _prefabHandleCache.Remove(type);
+                    return null;
+                }
+
+                if (!cachedHandle.Result)
+                {
+                    this.LogError($"Addressables prefab not found for key '{type.Name}'");
+                    Addressables.Release(cachedHandle);
+                    _prefabHandleCache.Remove(type);
+                    return null;
+                }
+
+                return cachedHandle.Result;
+            }
+
+            var handle = Addressables.LoadAssetAsync<GameObject>(type.Name);
+            _prefabHandleCache[type] = handle;
+
+            try
+            {
+                await handle.Task;
+            }
+            catch (Exception e)
+            {
+                this.LogError($"Addressables load faulted for key '{type.Name}': {e}");
+                if (handle.IsValid())
+                    Addressables.Release(handle);
+                _prefabHandleCache.Remove(type);
                 return null;
             }
 
-            _prefabCache[type] = prefab;
-            return prefab;
+            if (!handle.Result)
+            {
+                this.LogError($"Addressables prefab not found for key '{type.Name}'");
+                // Avoid keeping a failed/empty handle.
+                if (handle.IsValid())
+                    Addressables.Release(handle);
+                _prefabHandleCache.Remove(type);
+                return null;
+            }
+
+            return handle.Result;
         }
 
         private TWindow SpawnWindow<TWindow>(GameObject prefab) where TWindow : UIViewBase
         {
             if (Pool == null)
             {
-                Debug.LogError("[WindowManager] Cannot spawn window because PoolManager is null.");
+                this.LogError("Cannot spawn window because PoolManager is null.");
                 return null;
             }
 
@@ -176,7 +349,7 @@ namespace Core.Window
             var window = instance.GetComponent<TWindow>();
             if (!window)
             {
-                Debug.LogError($"[WindowManager] Spawned prefab '{prefab.name}' does not have component {typeof(TWindow).Name}");
+                this.LogError($"Spawned prefab '{prefab.name}' does not have component {typeof(TWindow).Name}");
                 Pool.Despawn(instance);
                 return null;
             }
@@ -185,26 +358,32 @@ namespace Core.Window
             return window;
         }
 
+        private sealed class OpenHandle
+        {
+            public UIViewBase Window { get; set; }
+            public WindowOptions Options { get; set; }
+            public UniTaskCompletionSource<CloseToken> CloseSource { get; set; }
+        }
+
         private async UniTask<TResult> OpenInternal<TResult>(UIViewBase window, WindowOptions options)
         {
-            options ??= new WindowOptions();
-            ApplyDefaultsFromDefinition(window, options);
-
-            _windowOptionsMap[window] = options;
-
-            if (options.BlockInput && config.blockInputDuringTransitions)
-                _inputBlocker?.Block("WindowOpen");
-
-            IsTransitioning = true;
-
-            try
+            // Phase 1 (serialized): register + transition in
+            var handle = await RunSerialized(async () =>
             {
-                // Pool-spawned instances may be inactive depending on PoolManager settings.
-                // Ensure active before running transitions / awaiting close.
+                options ??= new WindowOptions();
+                ApplyDefaultsFromDefinition(window, options);
+
+                _windowOptionsMap[window] = options;
+
+                // NOTE: pair Block/Unblock keys must match.
+                if (options.BlockInput.GetValueOrDefault(true) && config.blockInputDuringTransitions)
+                    _inputBlocker?.Block("WindowTransition");
+
+                IsTransitioning = true;
+
                 if (!window.gameObject.activeSelf)
                     window.gameObject.SetActive(true);
 
-                // Start hidden & non-interactable; transitions will bring it in.
                 if (window.CanvasGroup != null)
                 {
                     window.CanvasGroup.alpha = 0f;
@@ -212,15 +391,44 @@ namespace Core.Window
                     window.CanvasGroup.blocksRaycasts = false;
                 }
 
+                // IMPORTANT: sorting order should reflect stack index AFTER push.
+                _windowStack.Push(window);
+                _windowList.Add(window);
+
                 window.Canvas.overrideSorting = true;
-                window.Canvas.sortingOrder = GetSortingOrder(options.WindowType);
+                window.Canvas.sortingOrder = GetSortingOrder(options.WindowType, _windowList.Count);
 
                 window.Setup(options.Data);
 
-                var closeSource = new UniTaskCompletionSource<object>();
-                window.SetCloseSource(closeSource);
+                var closeSource = new UniTaskCompletionSource<CloseToken>();
+                _closeSourceMap[window] = closeSource;
 
-                _windowStack.Push(window);
+                // Bridge legacy UIViewBase.CloseSource (object) to the manager-owned CloseToken source.
+                // This keeps backward compatibility for views that call Close()/ForceClose()/TryRequestClose()
+                // and ensures OpenInternal actually observes the close.
+                var viewCloseSource = new UniTaskCompletionSource<object>();
+
+                // IMPORTANT: don't allow cancellation/exception on the view close task to become unobserved.
+                // If the view completes exceptionally, treat it as a force close.
+                UniTask.Void(async () =>
+                {
+                    try
+                    {
+                        var result = await viewCloseSource.Task;
+                        closeSource.TrySetResult(new CloseToken(CloseReason.Normal, result));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        closeSource.TrySetResult(new CloseToken(CloseReason.Force));
+                    }
+                    catch (Exception)
+                    {
+                        closeSource.TrySetResult(new CloseToken(CloseReason.Force));
+                    }
+                });
+
+                window.SetCloseSource(viewCloseSource);
+
                 window.transform.SetAsLastSibling();
 
                 var transitionIn = options.TransitionInSettings != null
@@ -231,33 +439,85 @@ namespace Core.Window
 
                 IsTransitioning = false;
                 OnWindowOpened?.Invoke(window);
+                window.OnViewShown();
 
-                var result = await closeSource.Task;
+                return new OpenHandle { Window = window, Options = options, CloseSource = closeSource };
+            });
+
+            // Phase 2 (no lock): wait for close token
+            CloseToken token;
+            try
+            {
+                token = await handle.CloseSource.Task;
+            }
+            catch
+            {
+                // Treat unknown failure as force close with no payload.
+                token = new CloseToken(CloseReason.Force);
+            }
+
+            // Early-exit: if CloseAll(forceCleanup) already despawned this window, don't run out/cleanup twice.
+            if (_forceCleaned.Remove(handle.Window))
+            {
+                _closeSourceMap.Remove(handle.Window);
+                _windowOptionsMap.Remove(handle.Window);
+                return default;
+            }
+
+            // Phase 3 (serialized): transition out + cleanup
+            await RunSerialized(async () =>
+            {
+                _closeSourceMap.Remove(handle.Window);
+
+                var closeAllModeAtClose = _closeAllMode;
 
                 IsTransitioning = true;
 
-                var transitionOut = options.TransitionOutSettings != null
-                    ? _transitionFactory?.Create(options.TransitionOutSettings)
-                    : _transitionFactory?.Create(options.TransitionPreset);
+                var skipOutTransition = closeAllModeAtClose == CloseAllMode.Immediate || token.Reason == CloseReason.Force;
 
-                await _transitionRunner.RunOut(window, transitionOut);
+                var transitionOut = skipOutTransition
+                    ? null
+                    : (handle.Options.TransitionOutSettings != null
+                        ? _transitionFactory?.Create(handle.Options.TransitionOutSettings)
+                        : _transitionFactory?.Create(handle.Options.TransitionPreset));
 
-                if (_windowStack.Count > 0 && _windowStack.Peek() == window)
-                    _windowStack.Pop();
+                await _transitionRunner.RunOut(handle.Window, transitionOut);
 
-                _windowOptionsMap.Remove(window);
-                OnWindowClosed?.Invoke(window);
+                // Robust remove: remove the exact window from stack (not only if it's the top).
+                // Keep list/stack consistent.
+                _windowList.Remove(handle.Window);
 
-                Pool?.Despawn(window.gameObject);
+                // Rebuild stack from list (bottom->top). This avoids per-close temporary Stack allocations.
+                _windowStack.Clear();
+                foreach (var t in _windowList)
+                    _windowStack.Push(t);
 
-                return (TResult)result;
-            }
-            finally
-            {
+                _windowOptionsMap.Remove(handle.Window);
+                OnWindowClosed?.Invoke(handle.Window);
+                handle.Window.OnViewHidden();
+
+                Pool?.Despawn(handle.Window.gameObject);
+
+                // Reset CloseAll mode when there are no windows left.
+                if (closeAllModeAtClose != CloseAllMode.None && _windowList.Count == 0)
+                    _closeAllMode = CloseAllMode.None;
+
                 IsTransitioning = false;
-                if (options.BlockInput && config.blockInputDuringTransitions)
-                    _inputBlocker?.Unblock("WindowOpen");
-            }
+
+                if (handle.Options.BlockInput.GetValueOrDefault(true) && config.blockInputDuringTransitions)
+                    _inputBlocker?.Unblock("WindowTransition");
+            });
+
+            // Only return payload for Normal closes. CloseAll/Force returns default.
+            if (token.Reason != CloseReason.Normal)
+                return default;
+
+            if (token.Payload == null)
+                return default;
+
+            if (token.Payload is TResult r) return r;
+            this.LogError($"Close payload type mismatch. Expected {typeof(TResult).Name}, got {token.Payload.GetType().Name}");
+            return default;
         }
 
         private static void ApplyDefaultsFromDefinition(UIViewBase window, WindowOptions options)
@@ -281,11 +541,9 @@ namespace Core.Window
                 options.TransitionPreset = def.TransitionPreset;
             }
 
-            if (options.CloseOnBackPress)
-                options.CloseOnBackPress = def.CloseOnBackPress;
-
-            if (options.BlockInput)
-                options.BlockInput = def.BlockInput;
+            // Nullable bools: only default from definition when caller didn't specify.
+            options.CloseOnBackPress ??= def.CloseOnBackPress;
+            options.BlockInput ??= def.BlockInput;
         }
 
         #endregion
@@ -294,70 +552,105 @@ namespace Core.Window
 
         public UniTask Close(UIViewBase window)
         {
-            if (!_windowStack.Contains(window))
-            {
-                Debug.LogWarning($"[WindowManager] Window {window.name} not in stack");
-                return UniTask.CompletedTask;
-            }
-
-            // Close window (will trigger completion source)
-            window.OnBackPressed();
-            return UniTask.CompletedTask;
+            return Close(window, null);
         }
 
-        public async UniTask CloseAll(bool immediate = false)
+        public UniTask Close(UIViewBase window, object result)
         {
-            // Cancel any previous CloseAll operation
-            _closeAllCts?.Cancel();
-            _closeAllCts?.Dispose();
-            _closeAllCts = new CancellationTokenSource();
-
-            var ct = _closeAllCts.Token;
-
-            if (config.blockInputDuringTransitions && !immediate)
-                _inputBlocker?.Block("WindowCloseAll");
-
-            try
+            // Serialize to keep ordering vs open/close phases deterministic.
+            return RunSerialized(() =>
             {
-                // First, complete all pending close sources to prevent waiting
-                foreach (var window in _windowStack)
+                if (window == null)
+                    return UniTask.CompletedTask;
+
+                if (!_windowList.Contains(window))
                 {
-                    window.SetCloseSource(null);
+                    this.LogWarning($"Window {window.name} not in stack");
+                    return UniTask.CompletedTask;
                 }
 
-                while (_windowStack.Count > 0)
+                // Deterministic: complete close token if managed.
+                if (_closeSourceMap.TryGetValue(window, out var src))
                 {
-                    ct.ThrowIfCancellationRequested();
-
-                    var window = _windowStack.Pop();
-                    _windowOptionsMap.Remove(window);
-
-                    var transition = immediate ? null : _transitionFactory?.Create("Scale");
-                    await _transitionRunner.RunOut(window, transition);
-
-                    OnWindowClosed?.Invoke(window);
-
-                    Pool?.Despawn(window.gameObject);
+                    src.TrySetResult(new CloseToken(CloseReason.Normal, result));
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                // CloseAll was cancelled (likely by another CloseAll call)
-            }
-            finally
-            {
-                if (config.blockInputDuringTransitions && !immediate)
-                    _inputBlocker?.Unblock("WindowCloseAll");
-            }
+                else
+                {
+                    // Fallback for non-managed views.
+                    if (!window.TryRequestClose(result))
+                        window.OnBackPressed();
+                }
+
+                return UniTask.CompletedTask;
+            });
         }
 
         public UniTask CloseTop()
         {
-            if (_windowStack.Count == 0)
-                return UniTask.CompletedTask;
+            return CloseTop(null);
+        }
 
-            var top = _windowStack.Peek();
-            return Close(top);
+        public UniTask CloseTop(object result)
+        {
+            return RunSerialized(() =>
+            {
+                if (_windowList.Count == 0)
+                    return UniTask.CompletedTask;
+
+                var top = _windowList[^1];
+
+                if (_closeSourceMap.TryGetValue(top, out var src))
+                    src.TrySetResult(new CloseToken(CloseReason.Normal, result));
+                else if (!top.TryRequestClose(result))
+                    top.OnBackPressed();
+
+                return UniTask.CompletedTask;
+            });
+        }
+
+        public async UniTask CloseAll(bool immediate = false, bool forceCleanup = false)
+        {
+            await RunSerialized(() =>
+            {
+                _closeAllMode = immediate ? CloseAllMode.Immediate : CloseAllMode.Graceful;
+
+                var windows = _windowList.ToArray();
+
+                // Graceful: signal all managed close sources; windows will clean themselves up through OpenInternal phase 3.
+                foreach (var w in windows)
+                {
+                    if (w == null) continue;
+                    if (_closeSourceMap.TryGetValue(w, out var src))
+                        src.TrySetResult(new CloseToken(CloseReason.CloseAll));
+                }
+
+                if (!forceCleanup)
+                    return UniTask.CompletedTask;
+
+                // Immediate force cleanup: despawn everything from snapshot, then clear stack/list once.
+                foreach (var w in windows)
+                {
+                    if (w == null) continue;
+
+                    _forceCleaned.Add(w);
+                    _windowOptionsMap.Remove(w);
+                    _closeSourceMap.Remove(w);
+
+                    OnWindowClosed?.Invoke(w);
+                    w.OnViewHidden();
+
+                    Pool?.Despawn(w.gameObject);
+                }
+
+                _windowList.Clear();
+                _windowStack.Clear();
+
+                _closeAllMode = CloseAllMode.None;
+
+                return UniTask.CompletedTask;
+            });
+
+            await UniTask.Yield();
         }
 
         #endregion
@@ -366,19 +659,19 @@ namespace Core.Window
 
         public bool HasWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windowStack.AsValueEnumerable().OfType<TWindow>().Any();
+            return _windowList.AsValueEnumerable().OfType<TWindow>().Any();
         }
 
         public TWindow GetWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windowStack.AsValueEnumerable().OfType<TWindow>().FirstOrDefault();
+            return _windowList.AsValueEnumerable().OfType<TWindow>().FirstOrDefault();
         }
 
         #endregion
 
         #region Helper Methods
 
-        private int GetSortingOrder(WindowType windowType)
+        private int GetSortingOrder(WindowType windowType, int stackCountAfterPush)
         {
             var baseOrder = windowType switch
             {
@@ -388,31 +681,72 @@ namespace Core.Window
                 _ => config.popupBaseSortingOrder
             };
 
-            return baseOrder + (_windowStack.Count * config.sortingOrderStep);
+            var index = Mathf.Max(0, stackCountAfterPush - 1);
+            return baseOrder + (index * config.sortingOrderStep);
         }
 
         #endregion
 
         #region Input Handling
 
+        [Header("Input")]
+        [Tooltip("Optional. If set, this InputAction will be used as the Back button (recommended for mobile).")]
+        [SerializeField] private InputActionReference backAction;
+
+        private bool _backPressedThisFrame;
+
+        private void OnBackActionPerformed(InputAction.CallbackContext ctx)
+        {
+            // Mark and consume in Update (keeps all logic serialized + main-thread).
+            _backPressedThisFrame = true;
+        }
+
         private void Update()
         {
-            // Android back button / Escape key
-            if (Keyboard.current == null) return;
-            if (!Keyboard.current[Key.Escape].wasPressedThisFrame) return;
-            if (IsTransitioning) return;
-            if (_windowStack.Count <= 0) return;
+            // Prefer new Input System action (works for Android/iOS gamepad/back button mappings).
+            var backPressed = false;
+            if (_backPressedThisFrame)
+            {
+                backPressed = true;
+                _backPressedThisFrame = false;
+            }
+            else
+            {
+                // Desktop fallback.
+                if (Keyboard.current != null && Keyboard.current[Key.Escape].wasPressedThisFrame)
+                    backPressed = true;
+            }
 
-            var topWindow = _windowStack.Peek();
+            if (!backPressed) return;
 
-            // Check if window allows back press
-            if (_windowOptionsMap.TryGetValue(topWindow, out var options) && !options.CloseOnBackPress)
-                return;
+            // Enqueue back-press close so it doesn't race with open/close phases.
+            // IMPORTANT: this is fire-and-forget; attach a handler so exceptions aren't unobserved.
+            RunSerialized(() =>
+            {
+                if (_windowStack.Count <= 0) return UniTask.CompletedTask;
+                var topWindow = _windowStack.Peek();
 
-            topWindow.OnBackPressed();
+                if (_windowOptionsMap.TryGetValue(topWindow, out var options) && !options.CloseOnBackPress.GetValueOrDefault(true))
+                    return UniTask.CompletedTask;
+
+                // Deterministic for managed windows: complete manager-owned close token.
+                if (_closeSourceMap.TryGetValue(topWindow, out var src))
+                {
+                    src.TrySetResult(new CloseToken(CloseReason.Normal));
+                }
+                else
+                {
+                    // Fallback for non-managed views.
+                    if (!topWindow.TryRequestClose())
+                        topWindow.OnBackPressed();
+                }
+
+                return UniTask.CompletedTask;
+            }).Forget(ex => this.LogError($"RunSerialized(back-press close) faulted: {ex}"));
         }
 
         #endregion
     }
 }
+
 
