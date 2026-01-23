@@ -247,6 +247,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7584377857461555746}
   - component: {fileID: 1699329071501566425}
+  - component: {fileID: 788283287352883102}
   m_Layer: 0
   m_Name: WindowManager
   m_TagString: Untagged
@@ -288,4 +289,17 @@ MonoBehaviour:
   config: {fileID: 0}
   windowRoot: {fileID: 435987281406215698}
   inputBlockerComponent: {fileID: 988934321345493941}
-  transitionFactoryComponent: {fileID: 6626990195954688409}
+  transitionFactoryComponent: {fileID: 788283287352883102}
+--- !u!114 &788283287352883102
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8490066156632946973}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc43492b5a174ff4b0e467944a9b6fce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Core.Window.Transition.UITransitionFactory
+  useDefaultWorkers: 1

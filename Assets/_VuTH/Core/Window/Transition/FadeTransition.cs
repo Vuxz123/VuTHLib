@@ -1,5 +1,5 @@
 using Cysharp.Threading.Tasks;
-using UnityEngine;
+using PrimeTween;
 
 namespace Core.Window.Transition
 {
@@ -9,45 +9,74 @@ namespace Core.Window.Transition
     public class FadeTransition : IUITransition
     {
         public float Duration { get; }
-        
+
+        public FadeTransition() : this(0.3f) { }
+
         public FadeTransition(float duration = 0.3f)
         {
             Duration = duration;
         }
-        
+
         public async UniTask In(IUIView view)
         {
+            var blocker = (view as object) as ITransitionInputBlocker;
+            blocker?.SetInputBlocked(true);
+
+            var dimmer = (view as object) as IBackgroundDimmer;
+
             var cg = view.CanvasGroup;
             cg.alpha = 0f;
-            
-            float elapsed = 0f;
-            while (elapsed < Duration)
+
+            // Drive dimmer with a parallel tween.
+            Tween dimTween = default;
+            if (dimmer != null)
             {
-                elapsed += Time.deltaTime;
-                cg.alpha = Mathf.Lerp(0f, 1f, elapsed / Duration);
-                await UniTask.Yield();
+                dimTween = Tween.Custom(0f, 1f, Duration,
+                    onValueChange: v => dimmer.SetDim(v));
             }
-            
+
+            var alphaTween = Tween.Alpha(cg, 0f, 1f, Duration);
+            await alphaTween;
+
+            if (dimTween.isAlive)
+                await dimTween;
+
             cg.alpha = 1f;
+            dimmer?.SetDim(1f);
             cg.interactable = true;
             cg.blocksRaycasts = true;
+
+            blocker?.SetInputBlocked(false);
         }
-        
+
         public async UniTask Out(IUIView view)
         {
+            var blocker = (view as object) as ITransitionInputBlocker;
+            blocker?.SetInputBlocked(true);
+
+            var dimmer = (view as object) as IBackgroundDimmer;
+
             var cg = view.CanvasGroup;
             cg.interactable = false;
-            
-            float elapsed = 0f;
-            while (elapsed < Duration)
+
+            Tween dimTween = default;
+            if (dimmer != null)
             {
-                elapsed += Time.deltaTime;
-                cg.alpha = Mathf.Lerp(1f, 0f, elapsed / Duration);
-                await UniTask.Yield();
+                dimTween = Tween.Custom(1f, 0f, Duration,
+                    onValueChange: v => dimmer.SetDim(v));
             }
-            
+
+            var alphaTween = Tween.Alpha(cg, 1f, 0f, Duration);
+            await alphaTween;
+
+            if (dimTween.isAlive)
+                await dimTween;
+
             cg.alpha = 0f;
+            dimmer?.SetDim(0f);
             cg.blocksRaycasts = false;
+
+            blocker?.SetInputBlocked(false);
         }
     }
 }

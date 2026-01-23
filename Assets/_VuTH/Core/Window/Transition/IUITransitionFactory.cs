@@ -5,6 +5,14 @@ namespace Core.Window.Transition
     /// </summary>
     public interface IUITransitionFactory
     {
+        /// <summary>
+        /// Data-driven creation (preferred).
+        /// </summary>
+        IUITransition Create(UITransitionSettings settings);
+
+        /// <summary>
+        /// Legacy preset-based creation.
+        /// </summary>
         IUITransition Create(string presetName);
     }
 }

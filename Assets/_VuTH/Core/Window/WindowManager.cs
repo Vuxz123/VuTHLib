@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using Common;
 using Core.Pool;
@@ -19,10 +18,9 @@ using VContainer.Unity;
 
 namespace Core.Window
 {
-    
     public class WindowManager : VBootstrapManager<WindowManager, IWindowManager>, IWindowManager
     {
-        [Header("Config")] 
+        [Header("Config")]
         [SerializeField, ReadOnlyField] private WindowProfile config;
         [SerializeField] private Transform windowRoot;
 
@@ -31,19 +29,20 @@ namespace Core.Window
 #else
         public IPoolManager Pool;
 #endif
-   
+
         [SerializeField] private Component inputBlockerComponent;
         [SerializeField] private Component transitionFactoryComponent;
 
         private IUIInputBlocker _inputBlocker;
         private IUITransitionFactory _transitionFactory;
+        private readonly IUITransitionRunner _transitionRunner = new UITransitionRunner();
 
         // Cache Addressables prefab assets (NOT instances). Instances are handled by PoolManager.
         private readonly Dictionary<Type, GameObject> _prefabCache = new();
 
         private readonly Stack<UIViewBase> _windowStack = new();
         private readonly Dictionary<UIViewBase, WindowOptions> _windowOptionsMap = new();
-        
+
         private CancellationTokenSource _closeAllCts;
 
         public UIViewBase TopWindow => _windowStack.Count > 0 ? _windowStack.Peek() : null;
@@ -72,7 +71,7 @@ namespace Core.Window
 
             if (transitionFactoryComponent)
                 _transitionFactory = transitionFactoryComponent.GetComponent<IUITransitionFactory>();
-            
+
             Pool ??= PoolManager.Instance;
 
             if (Pool == null)
@@ -200,6 +199,19 @@ namespace Core.Window
 
             try
             {
+                // Pool-spawned instances may be inactive depending on PoolManager settings.
+                // Ensure active before running transitions / awaiting close.
+                if (!window.gameObject.activeSelf)
+                    window.gameObject.SetActive(true);
+
+                // Start hidden & non-interactable; transitions will bring it in.
+                if (window.CanvasGroup != null)
+                {
+                    window.CanvasGroup.alpha = 0f;
+                    window.CanvasGroup.interactable = false;
+                    window.CanvasGroup.blocksRaycasts = false;
+                }
+
                 window.Canvas.overrideSorting = true;
                 window.Canvas.sortingOrder = GetSortingOrder(options.WindowType);
 
@@ -211,8 +223,11 @@ namespace Core.Window
                 _windowStack.Push(window);
                 window.transform.SetAsLastSibling();
 
-                var transition = _transitionFactory?.Create(options.TransitionPreset);
-                await window.Show(transition);
+                var transitionIn = options.TransitionInSettings != null
+                    ? _transitionFactory?.Create(options.TransitionInSettings)
+                    : _transitionFactory?.Create(options.TransitionPreset);
+
+                await _transitionRunner.RunIn(window, transitionIn);
 
                 IsTransitioning = false;
                 OnWindowOpened?.Invoke(window);
@@ -220,7 +235,12 @@ namespace Core.Window
                 var result = await closeSource.Task;
 
                 IsTransitioning = true;
-                await window.Hide(transition);
+
+                var transitionOut = options.TransitionOutSettings != null
+                    ? _transitionFactory?.Create(options.TransitionOutSettings)
+                    : _transitionFactory?.Create(options.TransitionPreset);
+
+                await _transitionRunner.RunOut(window, transitionOut);
 
                 if (_windowStack.Count > 0 && _windowStack.Peek() == window)
                     _windowStack.Pop();
@@ -228,7 +248,6 @@ namespace Core.Window
                 _windowOptionsMap.Remove(window);
                 OnWindowClosed?.Invoke(window);
 
-                // Return instance to pool
                 Pool?.Despawn(window.gameObject);
 
                 return (TResult)result;
@@ -251,8 +270,16 @@ namespace Core.Window
             if (options.WindowType == WindowType.Popup)
                 options.WindowType = def.WindowType;
 
-            if (string.IsNullOrEmpty(options.TransitionPreset) || options.TransitionPreset == "Scale")
+            // Data-driven settings (preferred)
+            options.TransitionInSettings ??= def.TransitionInSettings;
+            options.TransitionOutSettings ??= def.TransitionOutSettings;
+
+            // Legacy preset fallback (single preset for both directions)
+            if ((options.TransitionInSettings == null && options.TransitionOutSettings == null)
+                && (string.IsNullOrEmpty(options.TransitionPreset) || options.TransitionPreset == "Scale"))
+            {
                 options.TransitionPreset = def.TransitionPreset;
+            }
 
             if (options.CloseOnBackPress)
                 options.CloseOnBackPress = def.CloseOnBackPress;
@@ -306,7 +333,7 @@ namespace Core.Window
                     _windowOptionsMap.Remove(window);
 
                     var transition = immediate ? null : _transitionFactory?.Create("Scale");
-                    await window.Hide(transition);
+                    await _transitionRunner.RunOut(window, transition);
 
                     OnWindowClosed?.Invoke(window);
 
@@ -336,7 +363,7 @@ namespace Core.Window
         #endregion
 
         #region Query Methods
-        
+
         public bool HasWindow<TWindow>() where TWindow : UIViewBase
         {
             return _windowStack.AsValueEnumerable().OfType<TWindow>().Any();
@@ -377,7 +404,7 @@ namespace Core.Window
             if (_windowStack.Count <= 0) return;
 
             var topWindow = _windowStack.Peek();
-            
+
             // Check if window allows back press
             if (_windowOptionsMap.TryGetValue(topWindow, out var options) && !options.CloseOnBackPress)
                 return;

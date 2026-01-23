@@ -1,4 +1,5 @@
 ﻿using Cysharp.Threading.Tasks;
+using PrimeTween;
 using UnityEngine;
 
 namespace Core.Window.Transition
@@ -9,68 +10,72 @@ namespace Core.Window.Transition
     public class SlideTransition : IUITransition
     {
         public enum Direction { Left, Right, Top, Bottom }
-        
+
         public float Duration { get; }
         private readonly Direction _direction;
         private readonly float _distance;
-        
+
+        public SlideTransition() : this(Direction.Right) { }
+
         public SlideTransition(Direction direction, float duration = 0.3f, float distance = 1000f)
         {
             _direction = direction;
             Duration = duration;
             _distance = distance;
         }
-        
+
         public async UniTask In(IUIView view)
         {
-            var rt = view.GameObject.GetComponent<RectTransform>();
+            var rt = TransitionUtils.GetTransitionRoot(view);
             var cg = view.CanvasGroup;
-            
-            Vector2 startPos = GetOffscreenPosition(rt);
-            Vector2 endPos = rt.anchoredPosition;
-            
+
+            if (rt == null)
+            {
+                // Fallback: no rect transform to animate
+                cg.alpha = 1f;
+                cg.interactable = true;
+                cg.blocksRaycasts = true;
+                return;
+            }
+
+            var startPos = GetOffscreenPosition(rt);
+            var endPos = rt.anchoredPosition;
+
             rt.anchoredPosition = startPos;
             cg.alpha = 1f;
-            
-            float elapsed = 0f;
-            while (elapsed < Duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = elapsed / Duration;
-                
-                rt.anchoredPosition = Vector2.Lerp(startPos, endPos, t);
-                await UniTask.Yield();
-            }
-            
+
+            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.OutCubic);
+            await t;
+
             rt.anchoredPosition = endPos;
             cg.interactable = true;
             cg.blocksRaycasts = true;
         }
-        
+
         public async UniTask Out(IUIView view)
         {
-            var rt = view.GameObject.GetComponent<RectTransform>();
+            var rt = TransitionUtils.GetTransitionRoot(view);
             var cg = view.CanvasGroup;
             cg.interactable = false;
-            
-            Vector2 startPos = rt.anchoredPosition;
-            Vector2 endPos = GetOffscreenPosition(rt);
-            
-            float elapsed = 0f;
-            while (elapsed < Duration)
+
+            if (rt == null)
             {
-                elapsed += Time.deltaTime;
-                float t = elapsed / Duration;
-                
-                rt.anchoredPosition = Vector2.Lerp(startPos, endPos, t);
-                await UniTask.Yield();
+                cg.alpha = 0f;
+                cg.blocksRaycasts = false;
+                return;
             }
-            
+
+            var startPos = rt.anchoredPosition;
+            var endPos = GetOffscreenPosition(rt);
+
+            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.InCubic);
+            await t;
+
             rt.anchoredPosition = endPos;
             cg.alpha = 0f;
             cg.blocksRaycasts = false;
         }
-        
+
         private Vector2 GetOffscreenPosition(RectTransform rt)
         {
             return _direction switch

@@ -13,12 +13,15 @@ MonoBehaviour:
   m_Name: Default Local Group
   m_EditorClassIdentifier: 
   m_GroupName: Default Local Group
-  m_Data:
-    m_SerializedData: []
   m_GUID: 1b34e7b0da4775646a98b8138eb177bf
   m_SerializeEntries:
   - m_GUID: 2cd1f87b12006f04990ca9b074bd2e7e
     m_Address: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Boostrap.unity
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
+  - m_GUID: 8469393b7ceeb534ea8436c298eeb25c
+    m_Address: TestPopup
     m_ReadOnly: 0
     m_SerializedLabels: []
     FlaggedDuringContentUpdateRestriction: 0

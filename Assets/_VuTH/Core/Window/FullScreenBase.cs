@@ -1,4 +1,7 @@
-﻿namespace Core.Window
+﻿using Core.Window.Transition;
+using UnityEngine;
+
+namespace Core.Window
 {
     /// <summary>
     /// Full screen popup - blocks interaction with content below.
@@ -17,6 +20,18 @@
         /// </summary>
         public virtual string TransitionPreset => "Scale";
 
+        [Header("Transition Settings (Optional)")]
+        [SerializeReference]
+        [TransitionSettingsReference]
+        private UITransitionSettings transitionIn;
+
+        [SerializeReference]
+        [TransitionSettingsReference]
+        private UITransitionSettings transitionOut;
+
+        public UITransitionSettings TransitionInSettings => transitionIn;
+        public UITransitionSettings TransitionOutSettings => transitionOut;
+
         /// <summary>
         /// Fullscreen popup thường block input trong transition.
         /// </summary>
@@ -27,7 +42,7 @@
         /// Default: true for full screen popups.
         /// </summary>
         public virtual bool BlocksInteraction => true;
-        
+         
         /// <summary>
         /// Whether this popup can be closed by back button.
         /// Override to customize behavior.
@@ -38,7 +53,7 @@
         /// Mapping cho WindowManager.
         /// </summary>
         public bool CloseOnBackPress => AllowBackClose;
-        
+         
         public override void OnBackPressed()
         {
             if (AllowBackClose)

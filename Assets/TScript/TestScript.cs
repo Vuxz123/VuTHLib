@@ -1,6 +1,7 @@
 ﻿using Common;
 using Common.Log;
 using Core.GameCycle.ScreenFlow;
+using Core.Window;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -16,6 +17,11 @@ namespace TScript
             {
                 this.Log("Press I key detected");
                 ScreenFlowManager.Instance.Trigger("BoostrapCompleted");
+            }
+            if (Keyboard.current[Key.O].wasPressedThisFrame)
+            {
+                this.Log("Press O key detected");
+                WindowManager.Instance.Open<TestPopup>();
             }
         }
     }
