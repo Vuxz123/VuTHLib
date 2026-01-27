@@ -1,12 +1,12 @@
-﻿using Common.Editor.Settings;
-using Common.Editor.Settings.Util;
-using Common.Log;
-using Core.Window.Profile;
+﻿using _VuTH.Common.Editor.Settings;
+using _VuTH.Common.Editor.Settings.Util;
+using _VuTH.Common.Log;
+using _VuTH.Core.Window.Profile;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 
-namespace Core.Window.Editor
+namespace _VuTH.Core.Window.Editor
 {
     [SettingsTab]
     public class WindowSettingTab : ISettingsTab

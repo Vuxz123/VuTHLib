@@ -1,9 +1,9 @@
 ﻿using System.Collections.Generic;
-using Common.Init;
+using _VuTH.Common.Init;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Loading.Tasks
+namespace _VuTH.Core.GameCycle.Screen.Loading.Tasks
 {
     [CreateAssetMenu(menuName = "Screen/Screen Loading Tasks/VInitializable Task", fileName = "VInitializableTask")]
     public class VInitializableTask : ScreenLoadingTask

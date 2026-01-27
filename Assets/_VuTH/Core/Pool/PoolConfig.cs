@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Core.Pool
+namespace _VuTH.Core.Pool
 {
     /// <summary>
     /// Overflow behavior khi pool đầy

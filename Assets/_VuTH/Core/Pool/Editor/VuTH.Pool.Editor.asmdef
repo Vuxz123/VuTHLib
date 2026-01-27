@@ -1,0 +1,19 @@
+{
+    "name": "VuTH.Pool.Editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:56515c4ab5aac6a489d3c6456965d421",
+        "VuTH.Common"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

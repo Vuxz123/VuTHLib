@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 using ZLinq;
 
-namespace Core.GameCycle.ScreenFlow.Condition.Logical
+namespace _VuTH.Core.GameCycle.ScreenFlow.Condition.Logical
 {
     [CreateAssetMenu(menuName = "Screen/Screen Flow/Condition/Or")]
     public class OrCondition : TransitionCondition

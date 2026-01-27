@@ -2,7 +2,7 @@ using Cysharp.Threading.Tasks;
 using JetBrains.Annotations;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Loading
+namespace _VuTH.Core.GameCycle.Screen.Loading
 {
     /// <summary>
     /// Defines a piece of async logic to be executed during screen transition loading.

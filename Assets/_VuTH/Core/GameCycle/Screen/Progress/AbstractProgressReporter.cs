@@ -1,7 +1,7 @@
 ﻿using System;
 using Cysharp.Threading.Tasks;
 
-namespace Core.GameCycle.Screen.Progress
+namespace _VuTH.Core.GameCycle.Screen.Progress
 {
     public abstract class AbstractProgressReporter : IProgress<float>
     {

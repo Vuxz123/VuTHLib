@@ -2,7 +2,7 @@
 
 using UnityEngine;
 
-namespace Common
+namespace _VuTH.Common
 {
     /// <summary>
     /// Optional attribute: put [Dictionary] on a SerializableDictionary field to force the custom drawer

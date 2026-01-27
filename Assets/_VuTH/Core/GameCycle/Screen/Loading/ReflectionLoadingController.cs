@@ -1,7 +1,7 @@
 ﻿using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Loading
+namespace _VuTH.Core.GameCycle.Screen.Loading
 {
     internal sealed class ReflectionLoadingController : ILoadingController
     {

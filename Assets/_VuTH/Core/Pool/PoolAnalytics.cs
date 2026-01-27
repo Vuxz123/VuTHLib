@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Core.Pool
+namespace _VuTH.Core.Pool
 {
     /// <summary>
     /// Analytics & Profiling cho Pool system

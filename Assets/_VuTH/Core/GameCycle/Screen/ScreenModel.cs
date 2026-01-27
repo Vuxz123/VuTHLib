@@ -1,10 +1,10 @@
 ﻿using System;
-using Common.Log;
-using Core.GameCycle.Screen.Loading;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.Loading;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     [Serializable]
     public struct AdditiveSceneAddressableData

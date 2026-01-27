@@ -1,8 +1,9 @@
 // filepath: c:\Users\DPC00176\VuTH Lib\Assets\_VuTH\Common\Editor\Field\DictionaryDrawerAttribute.cs
+
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.Field
+namespace _VuTH.Common.Editor.Field
 {
     /// <summary>
     /// Optional attribute: put [Dictionary] on a SerializableDictionary field to force the custom drawer

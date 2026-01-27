@@ -1,10 +1,10 @@
-﻿using Common;
-using Common.Log;
-using Core.GameCycle.Screen.GlobalEvent;
+﻿using _VuTH.Common;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.GlobalEvent;
 using UnityEngine;
 using UnityEngine.Events;
 
-namespace Core.GameCycle.Screen.LocalEvents
+namespace _VuTH.Core.GameCycle.Screen.LocalEvents
 {
     public class CurrentScreenEventListener : MonoBehaviour
     {

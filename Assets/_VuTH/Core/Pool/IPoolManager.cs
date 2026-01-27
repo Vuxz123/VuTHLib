@@ -1,8 +1,7 @@
-using System.Collections.Generic;
-using Common;
+using _VuTH.Common;
 using UnityEngine;
 
-namespace Core.Pool
+namespace _VuTH.Core.Pool
 {
     /// <summary>
     /// =======================================================================

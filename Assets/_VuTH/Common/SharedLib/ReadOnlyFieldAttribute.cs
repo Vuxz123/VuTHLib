@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Common
+namespace _VuTH.Common
 {
     public class ReadOnlyFieldAttribute : PropertyAttribute
     {

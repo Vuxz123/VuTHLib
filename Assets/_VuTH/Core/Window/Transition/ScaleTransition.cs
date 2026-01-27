@@ -2,7 +2,7 @@ using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Scale transition (popup style)

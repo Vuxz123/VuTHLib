@@ -1,6 +1,6 @@
 using System;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Provides a friendly display name for UITransitionSettings types in the Inspector dropdown.

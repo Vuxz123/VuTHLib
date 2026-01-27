@@ -1,7 +1,7 @@
 ﻿#if VCONTAINER
-using Common.DI;
-using Core.GameCycle.Camera;
-using Core.GameCycle.ScreenFlow;
+using _VuTH.Common.DI;
+using _VuTH.Core.Camera;
+using _VuTH.Core.GameCycle.ScreenFlow;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;

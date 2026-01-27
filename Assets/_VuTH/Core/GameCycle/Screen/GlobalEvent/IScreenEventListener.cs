@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Core.GameCycle.Screen.GlobalEvent
+namespace _VuTH.Core.GameCycle.Screen.GlobalEvent
 {
     public interface IScreenEventListener
     {

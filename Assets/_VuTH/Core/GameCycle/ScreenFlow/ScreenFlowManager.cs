@@ -1,11 +1,11 @@
 using System;
-using Common;
-using Common.Log;
-using Core.GameCycle.Screen;
-using Core.GameCycle.ScreenFlow.Profile;
+using _VuTH.Common;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.ScreenFlow.Profile;
 using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     /// <summary>
     /// Public facade: wraps StateContainer + Actor. External callers should only depend on IScreenFlowManager.

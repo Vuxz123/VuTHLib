@@ -1,6 +1,6 @@
 ﻿using Cysharp.Threading.Tasks;
 
-namespace Core.GameCycle.Screen.Loading
+namespace _VuTH.Core.GameCycle.Screen.Loading
 {
     internal sealed class NullLoadingController : ILoadingController
     {

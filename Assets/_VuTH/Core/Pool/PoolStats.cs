@@ -1,6 +1,6 @@
 using System;
 
-namespace Core.Pool
+namespace _VuTH.Core.Pool
 {
     /// <summary>
     /// Statistics cho pool monitoring & debugging

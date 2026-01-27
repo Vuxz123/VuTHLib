@@ -1,11 +1,9 @@
 ﻿using System.IO;
-using Common.Log;
-using Core.GameCycle.ScreenFlow;
-using Core.GameCycle.ScreenFlow.Profile;
+using _VuTH.Common.Log;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.Bootstrap.Profile
+namespace _VuTH.Core.Booststrap.Profile
 {
     public static class BootstrapProfileUtilities
     {

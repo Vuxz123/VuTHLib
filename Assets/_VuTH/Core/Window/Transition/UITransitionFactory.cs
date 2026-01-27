@@ -1,9 +1,9 @@
 using System.Collections.Generic;
+using _VuTH.Core.Window.Transition.Workers;
 using UnityEngine;
-using Core.Window.Transition.Workers;
 using ZLinq;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Worker-based transition factory.

@@ -1,6 +1,6 @@
-﻿using Common.Log;
+﻿using _VuTH.Common.Log;
 
-namespace Common
+namespace _VuTH.Common
 {
     public abstract class VBootstrapManager<T, TI> : VManager<T, TI> 
         where T : VBootstrapManager<T, TI>, TI, new() 

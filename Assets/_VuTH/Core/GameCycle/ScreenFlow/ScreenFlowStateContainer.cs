@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
-using Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     public class ScreenFlowStateContainer
     {

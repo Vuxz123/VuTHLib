@@ -1,4 +1,4 @@
-namespace Core.Window.Blocker
+namespace _VuTH.Core.Window.Blocker
 {
     /// <summary>
     /// Input blocking during transitions

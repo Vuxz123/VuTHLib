@@ -1,4 +1,4 @@
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Optional capability: allows a view to control a dimmed background while transitioning.

@@ -1,7 +1,7 @@
-﻿using Core.GameCycle.Screen.Loading;
+﻿using _VuTH.Core.GameCycle.Screen.Loading;
 using Cysharp.Threading.Tasks;
 
-namespace Core.GameCycle.Screen.Progress
+namespace _VuTH.Core.GameCycle.Screen.Progress
 {
     public class NonLoadingProgressReporter : AbstractProgressReporter
     {

@@ -1,9 +1,8 @@
-﻿using Common.Editor.UI;
-using Common.Editor.UI.PreviewObject;
+﻿using _VuTH.Common.Editor.UI.PreviewObject;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor
+namespace _VuTH.Common.Editor
 {
     public class PreviewDemoWindow : EditorWindow
     {

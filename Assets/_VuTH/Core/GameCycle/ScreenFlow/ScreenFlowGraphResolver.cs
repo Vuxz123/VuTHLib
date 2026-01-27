@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Core.GameCycle.ScreenFlow.Condition;
+using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 using ZLinq;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     /// <summary>
     /// Pure resolver: reads ScreenFlowGraph and resolves next node for a given (current,event).

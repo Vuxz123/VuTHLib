@@ -1,9 +1,9 @@
 ﻿using System;
-using Common.Log;
-using Core.GameCycle.Screen.LocalEvents;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.LocalEvents;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     public class ScreenMetaData : MonoBehaviour, IScreenMetaData
     {

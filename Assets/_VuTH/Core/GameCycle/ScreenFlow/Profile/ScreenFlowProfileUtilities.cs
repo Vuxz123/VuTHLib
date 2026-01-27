@@ -1,9 +1,9 @@
 ﻿using System.IO;
-using Common.Log;
+using _VuTH.Common.Log;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow.Profile
+namespace _VuTH.Core.GameCycle.ScreenFlow.Profile
 {
     public static class ScreenFlowProfileUtilities
     {

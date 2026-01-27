@@ -1,8 +1,8 @@
 ﻿using System;
-using Common;
+using _VuTH.Common;
 using Cysharp.Threading.Tasks;
 
-namespace Core.Window
+namespace _VuTH.Core.Window
 {
     /// <summary>
     /// Window/Popup management - Stackable overlays within a Screen

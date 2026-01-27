@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Simple built-in transition factory based on preset name.

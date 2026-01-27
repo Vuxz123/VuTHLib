@@ -1,6 +1,6 @@
 using System;
 
-namespace Core.Window.Transition.Workers
+namespace _VuTH.Core.Window.Transition.Workers
 {
     /// <summary>
     /// Base for simple preset workers that handle a single preset (name match).

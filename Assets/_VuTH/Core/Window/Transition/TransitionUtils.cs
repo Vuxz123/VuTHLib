@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     internal static class TransitionUtils
     {

@@ -1,4 +1,4 @@
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     /// <summary>
     /// Extra metadata describing the origin/why of a transition.

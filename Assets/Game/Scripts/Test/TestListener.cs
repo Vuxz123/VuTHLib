@@ -1,6 +1,6 @@
 ﻿using System;
-using Common.Log;
-using Core.GameCycle.Screen.GlobalEvent;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.GlobalEvent;
 
 namespace Game.Scripts.Test
 {

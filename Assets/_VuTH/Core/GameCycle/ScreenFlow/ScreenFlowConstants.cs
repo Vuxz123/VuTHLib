@@ -1,4 +1,4 @@
-﻿namespace Core.GameCycle.ScreenFlow
+﻿namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     public static class ScreenFlowConstants
     {

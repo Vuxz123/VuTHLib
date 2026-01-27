@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow.Profile
+namespace _VuTH.Core.GameCycle.ScreenFlow.Profile
 {
     public class ScreenFlowProfile : ScriptableObject
     {

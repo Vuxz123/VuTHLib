@@ -1,4 +1,4 @@
-﻿namespace Core.Window
+﻿namespace _VuTH.Core.Window
 {
     /// <summary>
     /// Window type classification

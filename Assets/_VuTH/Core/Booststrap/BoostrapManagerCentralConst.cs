@@ -1,4 +1,4 @@
-﻿namespace Core.Bootstrap
+﻿namespace _VuTH.Core.Booststrap
 {
     public static class BootstrapManagerCentralConst
     {

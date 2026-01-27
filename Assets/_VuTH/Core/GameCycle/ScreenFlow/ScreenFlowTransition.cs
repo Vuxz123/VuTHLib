@@ -1,8 +1,8 @@
 ﻿using System;
-using Core.GameCycle.ScreenFlow.Condition;
+using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     [Serializable]
     public class ScreenFlowTransition

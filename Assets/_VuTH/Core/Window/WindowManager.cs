@@ -1,24 +1,25 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading;
-using Common;
-using Common.Log;
-using Core.Pool;
-using Core.Window.Blocker;
-using Core.Window.Profile;
-using Core.Window.Transition;
+using _VuTH.Common;
+using _VuTH.Common.Log;
+using _VuTH.Core.Pool;
+using _VuTH.Core.Window.Blocker;
+using _VuTH.Core.Window.Profile;
+using _VuTH.Core.Window.Transition;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.InputSystem;
+using UnityEngine.ResourceManagement.AsyncOperations;
 using ZLinq;
+
 #if VCONTAINER
 using VContainer;
 using VContainer.Unity;
 #endif
 
-namespace Core.Window
+namespace _VuTH.Core.Window
 {
     public class WindowManager : VBootstrapManager<WindowManager, IWindowManager>, IWindowManager
     {
@@ -515,9 +516,7 @@ namespace Core.Window
             if (token.Payload == null)
                 return default;
 
-            if (token.Payload is TResult r) return r;
-            this.LogError($"Close payload type mismatch. Expected {typeof(TResult).Name}, got {token.Payload.GetType().Name}");
-            return default;
+            return (TResult)token.Payload;
         }
 
         private static void ApplyDefaultsFromDefinition(UIViewBase window, WindowOptions options)

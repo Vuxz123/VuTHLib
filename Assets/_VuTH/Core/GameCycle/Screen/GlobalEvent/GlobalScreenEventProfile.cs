@@ -1,8 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.GlobalEvent
+namespace _VuTH.Core.GameCycle.Screen.GlobalEvent
 {
     [CreateAssetMenu(fileName = "ScreenEventProfile", menuName = "Screen/Screen Event Profile")]
     public class GlobalScreenEventProfile : ScriptableObject, IGlobalScreenEventRegistration

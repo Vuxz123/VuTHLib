@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using Common;
-using Common.Log;
+using _VuTH.Common;
+using _VuTH.Common.Log;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     [Serializable]
     public class ScreenModelContainer

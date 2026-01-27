@@ -2,7 +2,7 @@
 using System.Collections;
 using UnityEngine;
 
-namespace Common
+namespace _VuTH.Common
 {
     public static class MonoExtension
     {

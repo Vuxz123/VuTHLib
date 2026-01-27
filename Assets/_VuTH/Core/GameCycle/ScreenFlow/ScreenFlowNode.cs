@@ -1,8 +1,8 @@
 ﻿using System;
+using _VuTH.Core.GameCycle.Screen;
 using UnityEngine;
-using Core.GameCycle.Screen;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
 
     [Serializable]

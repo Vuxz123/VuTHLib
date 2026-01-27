@@ -1,4 +1,4 @@
-namespace Core.GameCycle.Screen.LocalEvents
+namespace _VuTH.Core.GameCycle.Screen.LocalEvents
 {
     public interface IScreenMetaData
     {

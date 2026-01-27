@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Common.Log;
-using Core.GameCycle.Screen;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEditor.UIElements;
@@ -10,7 +10,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using ZLinq;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     public class ScreenFlowGraphView : GraphView, IDisposable
     {

@@ -1,7 +1,7 @@
 ﻿using System;
 using UnityEngine;
 
-namespace Common.Editor.Tools
+namespace _VuTH.Common.Editor.Tools
 {
     [CreateAssetMenu(fileName = "PreBuildProfile", menuName = "Profiles/PreBuildProfile", order = 1)]
     public class PreBuildProfile : ScriptableObject

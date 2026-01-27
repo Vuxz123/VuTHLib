@@ -1,25 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
-using Common;
-using Common.Log;
-using Core.GameCycle.Screen.GlobalEvent;
-using Core.GameCycle.Screen.Loading;
-using Core.GameCycle.Screen.LocalEvents;
-using Core.GameCycle.Screen.Progress;
+using _VuTH.Common;
+using _VuTH.Common.DI;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.GlobalEvent;
+using _VuTH.Core.GameCycle.Screen.Loading;
+using _VuTH.Core.GameCycle.Screen.LocalEvents;
+using _VuTH.Core.GameCycle.Screen.Progress;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.ResourceManagement.ResourceProviders;
 using UnityEngine.SceneManagement;
+using VContainer.Unity;
 using ZLinq;
 
-#if VCONTAINER
-using Common.DI;
-using VContainer.Unity;
-#endif
-
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     public class ScreenManager : VBootstrapManager<ScreenManager, IScreenManager>, IScreenManager
     {

@@ -1,4 +1,4 @@
-﻿namespace Core.Pool
+﻿namespace _VuTH.Core.Pool
 {
     public interface IPoolable
     {

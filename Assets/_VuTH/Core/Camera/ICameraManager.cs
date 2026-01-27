@@ -1,8 +1,8 @@
 ﻿using System;
-using Common;
+using _VuTH.Common;
 using Cysharp.Threading.Tasks;
 
-namespace Core.GameCycle.Camera
+namespace _VuTH.Core.Camera
 {
     public interface ICameraManager : ICommonManager
     {

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     public interface IScreenFlowResolver
     {

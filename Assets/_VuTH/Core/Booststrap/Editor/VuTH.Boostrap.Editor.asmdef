@@ -1,0 +1,20 @@
+{
+    "name": "VuTH.Boostrap.Editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:4f005824157c0b343803caab574f0afb",
+        "GUID:dd36bf84407fff046b0bcd4bca4c1c92",
+        "GUID:a01001f6c47ada3438b8f3e0ea570d42"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

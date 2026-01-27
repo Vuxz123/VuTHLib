@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
-using UnityEditor.UIElements; // Cần thiết cho UI Toolkit
-using UnityEngine;
+using UnityEditor.UIElements;
 using UnityEngine.UIElements;
+// Cần thiết cho UI Toolkit
 
-namespace Core.Window.Transition.Editor
+namespace _VuTH.Core.Window.Transition.Editor
 {
     [CustomPropertyDrawer(typeof(TransitionSettingsReferenceAttribute))]
     public sealed class TransitionSettingsReferenceDrawer : PropertyDrawer

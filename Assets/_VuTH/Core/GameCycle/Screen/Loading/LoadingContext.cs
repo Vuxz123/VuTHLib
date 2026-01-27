@@ -1,6 +1,6 @@
 ﻿using UnityEngine.SceneManagement;
 
-namespace Core.GameCycle.Screen.Loading
+namespace _VuTH.Core.GameCycle.Screen.Loading
 {
     public readonly struct LoadingContext
     {

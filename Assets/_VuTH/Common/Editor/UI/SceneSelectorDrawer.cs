@@ -1,10 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.IO;
-using Common.Scene;
+using _VuTH.Common.Scene;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.UI
+namespace _VuTH.Common.Editor.UI
 {
     [CustomPropertyDrawer(typeof(SceneSelectorAttribute))]
     public class SceneSelectorDrawer : PropertyDrawer

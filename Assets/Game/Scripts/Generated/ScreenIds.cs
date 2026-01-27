@@ -6,7 +6,7 @@
 // </auto-generated>
 // ------------------------------------------------------------------------------
 
-using Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen;
 using UnityEngine;
 
 namespace Core.Generated

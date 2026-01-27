@@ -1,9 +1,9 @@
-﻿using Core.GameCycle.Screen.Loading;
+﻿using _VuTH.Core.GameCycle.Screen.Loading;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Progress
+namespace _VuTH.Core.GameCycle.Screen.Progress
 {
     public class ProgressReporter : AbstractProgressReporter
     {

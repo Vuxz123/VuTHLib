@@ -1,8 +1,8 @@
-﻿using Common.Log;
+﻿using _VuTH.Common.Log;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.Tools
+namespace _VuTH.Common.Editor.Tools
 {
     public static class PreBuildTools
     {

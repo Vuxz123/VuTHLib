@@ -1,11 +1,11 @@
-﻿using Common;
-using Common.DI;
-using Common.Log;
-using Core.Bootstrap.Profile;
+﻿using _VuTH.Common;
+using _VuTH.Common.DI;
+using _VuTH.Common.Log;
+using _VuTH.Core.Booststrap.Profile;
 using UnityEngine;
 using VContainer;
 
-namespace Core.Bootstrap
+namespace _VuTH.Core.Booststrap
 {
     public class BootstrapManagerCentral : MonoBehaviour
 #if VCONTAINER

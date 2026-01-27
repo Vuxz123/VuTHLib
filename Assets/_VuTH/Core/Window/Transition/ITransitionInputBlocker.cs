@@ -1,4 +1,4 @@
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Optional capability: view-level input blocking hook for transitions.

@@ -2,7 +2,7 @@
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-namespace Core.Editor.KeyBind
+namespace _VuTH.Core.Editor.KeyBind
 {
     public static class PlayKeyBind
     {

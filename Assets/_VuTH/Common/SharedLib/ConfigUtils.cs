@@ -1,4 +1,4 @@
-﻿namespace Common
+﻿namespace _VuTH.Common
 {
     public static class ConfigUtils
     {

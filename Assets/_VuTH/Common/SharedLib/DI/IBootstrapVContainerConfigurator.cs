@@ -1,6 +1,6 @@
 ﻿using VContainer;
 
-namespace Common.DI
+namespace _VuTH.Common.DI
 {
     public interface IBootstrapVContainerConfigurator
     {

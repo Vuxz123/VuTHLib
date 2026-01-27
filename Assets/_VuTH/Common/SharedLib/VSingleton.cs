@@ -1,9 +1,9 @@
-﻿using Common.DI;
-using Common.Log;
+﻿using _VuTH.Common.DI;
+using _VuTH.Common.Log;
 using UnityEngine;
 using VContainer;
 
-namespace Common
+namespace _VuTH.Common
 {
     /// <summary>
     /// Singleton base class cho MonoBehaviour với interface

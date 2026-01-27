@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Common.Editor.Settings.Util
+namespace _VuTH.Common.Editor.Settings.Util
 {
     public sealed class SettingTitle : Label
     {

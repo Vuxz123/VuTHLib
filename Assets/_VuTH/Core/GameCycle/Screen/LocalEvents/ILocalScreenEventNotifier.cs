@@ -1,6 +1,6 @@
-﻿using Core.GameCycle.Screen.GlobalEvent;
+﻿using _VuTH.Core.GameCycle.Screen.GlobalEvent;
 
-namespace Core.GameCycle.Screen.LocalEvents
+namespace _VuTH.Core.GameCycle.Screen.LocalEvents
 {
     public interface ILocalScreenEventNotifier
     {

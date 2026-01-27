@@ -1,7 +1,7 @@
 ﻿using System;
 using UnityEngine;
 
-namespace Core.GameCycle.Camera
+namespace _VuTH.Core.Camera
 {
     [Serializable]
     public class CameraProfile

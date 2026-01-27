@@ -1,9 +1,8 @@
-using System;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Loading.Tasks
+namespace _VuTH.Core.GameCycle.Screen.Loading.Tasks
 {
     [CreateAssetMenu(menuName = "Screen/Screen Loading Tasks/Fake Delay Task", fileName = "FakeDelayTask")]
     public class FakeDelayTask : ScreenLoadingTask

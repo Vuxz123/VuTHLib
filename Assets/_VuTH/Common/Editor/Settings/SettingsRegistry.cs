@@ -4,7 +4,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.Settings
+namespace _VuTH.Common.Editor.Settings
 {
     [InitializeOnLoad]
     public static class SettingsRegistry

@@ -1,7 +1,7 @@
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Fade transition

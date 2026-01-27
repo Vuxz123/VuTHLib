@@ -1,9 +1,9 @@
-using Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     [CustomEditor(typeof(ScreenNodeSelectionProxy))]
     internal sealed class ScreenNodeSelectionProxyEditor : UnityEditor.Editor

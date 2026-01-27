@@ -1,9 +1,9 @@
-﻿namespace Core.GameCycle.ScreenFlow.Editor.Validator
-{
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
+{
     public enum ScreenFlowValidationSeverity
     {
         Warning = 0,

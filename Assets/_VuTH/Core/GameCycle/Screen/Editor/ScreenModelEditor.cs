@@ -1,10 +1,10 @@
-﻿using Common.Scene;
+﻿using _VuTH.Common.Scene;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Core.GameCycle.Screen.Editor
+namespace _VuTH.Core.GameCycle.Screen.Editor
 {
     [CustomEditor(typeof(ScreenModel))]
     public class ScreenModelEditor : UnityEditor.Editor

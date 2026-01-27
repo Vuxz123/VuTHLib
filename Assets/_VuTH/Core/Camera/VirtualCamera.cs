@@ -1,8 +1,8 @@
-﻿using Common.Init;
+﻿using _VuTH.Common.Init;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
-namespace Core.GameCycle.Camera
+namespace _VuTH.Core.Camera
 {
     public enum VirtualCameraInitStrategy
     {

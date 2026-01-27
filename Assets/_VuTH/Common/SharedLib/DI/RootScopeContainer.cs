@@ -3,7 +3,7 @@ using VContainer;
 using VContainer.Unity;
 using ZLinq;
 
-namespace Common.DI
+namespace _VuTH.Common.DI
 {
     public class RootScopeContainer : LifetimeScope
     {

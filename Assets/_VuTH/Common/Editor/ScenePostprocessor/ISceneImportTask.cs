@@ -1,4 +1,4 @@
-﻿namespace Common.Editor.ScenePostprocessor
+﻿namespace _VuTH.Common.Editor.ScenePostprocessor
 {
     public interface ISceneImportTask
     {

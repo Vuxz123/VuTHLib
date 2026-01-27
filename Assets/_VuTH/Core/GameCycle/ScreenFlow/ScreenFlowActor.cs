@@ -1,8 +1,8 @@
 using System;
-using Common.Log;
-using Core.GameCycle.Screen;
+using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     /// <summary>
     /// Handles intents (Trigger) and side-effects (calling ScreenManager). Coalesces triggers while transitioning.

@@ -1,8 +1,8 @@
-using Core.GameCycle.ScreenFlow.Condition;
+using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     /// <summary>
     /// A small ScriptableObject wrapper so we can edit one transition via inspector

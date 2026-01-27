@@ -1,0 +1,19 @@
+{
+    "name": "VuTH.Pool",
+    "rootNamespace": "",
+    "references": [
+        "GUID:fed56a0b70e556f4f84067b7cfa0e3b0",
+        "GUID:f6bb6b81716199a4bb7628a9214089cc",
+        "GUID:b0214a6008ed146ff8f122a6a9c2f6cc",
+        "GUID:dd36bf84407fff046b0bcd4bca4c1c92"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

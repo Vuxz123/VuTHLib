@@ -1,7 +1,7 @@
-﻿using Common;
-using Core.GameCycle.Screen;
+﻿using _VuTH.Common;
+using _VuTH.Core.GameCycle.Screen;
 
-namespace Core.GameCycle.ScreenFlow
+namespace _VuTH.Core.GameCycle.ScreenFlow
 {
     /// <summary>
     /// ScreenFlowManager quyết định WHEN và WHERE chuyển Screen,

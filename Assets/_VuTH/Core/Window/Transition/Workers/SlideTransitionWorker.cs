@@ -1,4 +1,4 @@
-namespace Core.Window.Transition.Workers
+namespace _VuTH.Core.Window.Transition.Workers
 {
     public sealed class SlideTransitionWorker : ComplexPresetTransitionWorkerBase
     {

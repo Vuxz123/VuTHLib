@@ -1,9 +1,9 @@
 ﻿using System.IO;
-using Common.Log;
+using _VuTH.Common.Log;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.Window.Profile
+namespace _VuTH.Core.Window.Profile
 {
     public static class WindowProfileUtilities
     {

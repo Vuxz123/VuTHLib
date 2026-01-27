@@ -2,7 +2,7 @@
 using PrimeTween;
 using UnityEngine;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Slide transition (from side)

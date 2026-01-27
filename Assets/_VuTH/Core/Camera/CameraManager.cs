@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using Common;
-using Common.Log;
+using _VuTH.Common;
+using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 
-namespace Core.GameCycle.Camera
+namespace _VuTH.Core.Camera
 {
     public class CameraManager : VBootstrapManager<CameraManager, ICameraManager>, ICameraManager
     {

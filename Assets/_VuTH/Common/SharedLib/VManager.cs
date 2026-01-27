@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Common
+namespace _VuTH.Common
 {
     public abstract class VManager<T, TI> : VSingleton<T, TI>
         where T : VManager<T, TI>, TI, new() 

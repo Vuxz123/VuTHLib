@@ -1,4 +1,4 @@
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     /// <summary>
     /// Describes the navigation form (what happened), not the origin/why.

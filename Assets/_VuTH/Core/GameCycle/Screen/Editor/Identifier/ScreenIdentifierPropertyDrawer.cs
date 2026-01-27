@@ -1,9 +1,9 @@
-﻿using UnityEngine;
-using UnityEditor;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
+using UnityEditor;
+using UnityEngine;
 
-namespace Core.GameCycle.Screen.Editor.Identifier
+namespace _VuTH.Core.GameCycle.Screen.Editor.Identifier
 {
     [CustomPropertyDrawer(typeof(ScreenIdentifier))] 
     public class ScreenIdentifierPropertyDrawer : PropertyDrawer

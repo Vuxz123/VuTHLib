@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Optional capability: allows a view to specify which RectTransform should be animated during transitions.

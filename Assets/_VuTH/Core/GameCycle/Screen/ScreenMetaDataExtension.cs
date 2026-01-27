@@ -1,7 +1,7 @@
-﻿using Common.Log;
+﻿using _VuTH.Common.Log;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     public static class ScreenMetaDataExtension
     {

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 
-namespace Common.Editor.ScenePostprocessor
+namespace _VuTH.Common.Editor.ScenePostprocessor
 {
     public class ScenePostprocessor : AssetPostprocessor
     {

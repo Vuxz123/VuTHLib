@@ -1,9 +1,8 @@
-﻿using Common;
-using Common.Log;
+﻿using _VuTH.Common;
 using UnityEngine;
 using ZLinq;
 
-namespace Core.Bootstrap
+namespace _VuTH.Core.Booststrap.Profile
 {
     public class BootstrapProfile : ScriptableObject
     {

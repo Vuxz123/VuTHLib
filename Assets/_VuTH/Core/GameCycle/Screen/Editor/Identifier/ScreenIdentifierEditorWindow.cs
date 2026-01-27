@@ -6,7 +6,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Editor.Identifier
+namespace _VuTH.Core.GameCycle.Screen.Editor.Identifier
 {
     public class ScreenIdentifierEditorWindow : EditorWindow
     {

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-namespace Common.Log
+namespace _VuTH.Common.Log
 {
     public static class LogUtils
     {

@@ -1,4 +1,4 @@
-﻿namespace Core.Window
+﻿namespace _VuTH.Core.Window
 {
     public enum UILayer
     {

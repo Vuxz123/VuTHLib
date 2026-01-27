@@ -3,7 +3,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.Helpers // Hoặc namespace ...Editor.Helpers tùy cậu
+namespace _VuTH.Common.Editor.Helpers // Hoặc namespace ...Editor.Helpers tùy cậu
 {
     /// <summary>
     /// Chứa các GUIStyle tùy chỉnh, được khởi tạo tĩnh để

@@ -1,6 +1,6 @@
 ﻿using UnityEngine.UIElements;
 
-namespace Common.Editor.Settings.Util
+namespace _VuTH.Common.Editor.Settings.Util
 {
     public class SettingSection : VisualElement
     {

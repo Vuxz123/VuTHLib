@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
-using Common.Editor.Helpers;
+using _VuTH.Common.Editor.Helpers;
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.Field
+namespace _VuTH.Common.Editor.Field
 {
     /// <summary>
     /// Helper API to draw a SerializableDictionary property from custom inspectors.

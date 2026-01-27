@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Common.Editor.Settings
+namespace _VuTH.Common.Editor.Settings
 {
     public class SettingsWindow : EditorWindow
     {

@@ -1,8 +1,8 @@
-using Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     // Proxy object so we can edit a node (Screen reference, start flag) in the inspector
     // while still persisting data back into ScreenFlowGraph.

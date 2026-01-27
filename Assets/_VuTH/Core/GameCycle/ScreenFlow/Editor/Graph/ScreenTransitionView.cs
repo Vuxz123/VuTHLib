@@ -1,6 +1,6 @@
-﻿using Core.GameCycle.ScreenFlow.Condition;
+﻿using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     public class ScreenTransitionView
     {

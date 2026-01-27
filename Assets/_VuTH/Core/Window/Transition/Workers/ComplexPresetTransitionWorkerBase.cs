@@ -1,6 +1,6 @@
 using System;
 
-namespace Core.Window.Transition.Workers
+namespace _VuTH.Core.Window.Transition.Workers
 {
     /// <summary>
     /// Base for workers that can handle multiple presets or parse preset strings.

@@ -2,7 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Common.Editor.UI.PreviewObject
+namespace _VuTH.Common.Editor.UI.PreviewObject
 {
     /// <summary>
     /// Helper for drawing an object preview (icon + label) in custom inspectors.

@@ -1,9 +1,9 @@
-﻿using Core.GameCycle.Screen.LocalEvents;
+﻿using System;
+using _VuTH.Common;
+using _VuTH.Core.GameCycle.Screen.LocalEvents;
 using Cysharp.Threading.Tasks;
-using System;
-using Common;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     public interface IScreenManager : ICommonManager
     {

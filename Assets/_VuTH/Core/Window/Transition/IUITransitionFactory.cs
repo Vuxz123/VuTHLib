@@ -1,4 +1,4 @@
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Factory for creating transitions

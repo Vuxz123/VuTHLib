@@ -1,9 +1,9 @@
-﻿using Common.Log;
+﻿using _VuTH.Common.Log;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
 
-namespace Common.DI
+namespace _VuTH.Common.DI
 {
     public class SceneScopeContainer : LifetimeScope
     {

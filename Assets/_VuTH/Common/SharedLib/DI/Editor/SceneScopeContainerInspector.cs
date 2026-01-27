@@ -4,7 +4,7 @@ using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Common.DI.Editor
+namespace _VuTH.Common.DI.Editor
 {
     [CustomEditor(typeof(SceneScopeContainer))]
     public class SceneScopeContainerInspector : UnityEditor.Editor

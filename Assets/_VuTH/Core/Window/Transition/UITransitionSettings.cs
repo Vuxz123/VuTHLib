@@ -1,6 +1,6 @@
 using System;
 
-namespace Core.Window.Transition
+namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Polymorphic transition settings stored inline via SerializeReference.

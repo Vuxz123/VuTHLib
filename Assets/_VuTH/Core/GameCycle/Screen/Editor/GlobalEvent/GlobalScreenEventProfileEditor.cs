@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Linq;
-using Core.GameCycle.Screen.GlobalEvent;
+using _VuTH.Core.GameCycle.Screen.GlobalEvent;
 using UnityEditor;
 using UnityEngine;
 
-namespace Core.GameCycle.Screen.Editor.GlobalEvent
+namespace _VuTH.Core.GameCycle.Screen.Editor.GlobalEvent
 {
     [CustomEditor(typeof(GlobalScreenEventProfile))]
     public class GlobalScreenEventProfileEditor : UnityEditor.Editor

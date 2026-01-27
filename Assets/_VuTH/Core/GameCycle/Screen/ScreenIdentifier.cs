@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Core.GameCycle.Screen
+namespace _VuTH.Core.GameCycle.Screen
 {
     public class ScreenIdentifier : ScriptableObject
     {

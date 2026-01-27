@@ -1,7 +1,7 @@
-﻿﻿using System;
+﻿using System;
 using UnityEngine;
 
-namespace Core.Window
+namespace _VuTH.Core.Window
 {
     [Serializable]
     public class UIViewConfig

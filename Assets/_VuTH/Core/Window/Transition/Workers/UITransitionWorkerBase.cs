@@ -1,4 +1,4 @@
-namespace Core.Window.Transition.Workers
+namespace _VuTH.Core.Window.Transition.Workers
 {
     /// <summary>
     /// Worker contract for mapping a preset name to a transition instance.

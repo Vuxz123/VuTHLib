@@ -1,10 +1,10 @@
-﻿using Common.Log;
+﻿using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Core.GameCycle.Screen.Loading
+namespace _VuTH.Core.GameCycle.Screen.Loading
 {
     /// <summary>
     /// Simple loading UI driven by a Slider.

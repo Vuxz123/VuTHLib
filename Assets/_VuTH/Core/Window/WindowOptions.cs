@@ -1,6 +1,6 @@
-﻿using Core.Window.Transition;
+﻿using _VuTH.Core.Window.Transition;
 
-namespace Core.Window
+namespace _VuTH.Core.Window
 {
     /// <summary>
     /// Window open options

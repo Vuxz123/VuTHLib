@@ -1,12 +1,12 @@
-﻿using Common.Editor.Settings;
-using Common.Editor.Settings.Util;
-using Common.Log;
-using Core.Bootstrap.Profile;
+﻿using _VuTH.Common.Editor.Settings;
+using _VuTH.Common.Editor.Settings.Util;
+using _VuTH.Common.Log;
+using _VuTH.Core.Booststrap.Profile;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 
-namespace Core.Bootstrap.Editor
+namespace _VuTH.Core.Booststrap.Editor
 {
     [SettingsTab]
     public class BootstrapSettingTab : ISettingsTab

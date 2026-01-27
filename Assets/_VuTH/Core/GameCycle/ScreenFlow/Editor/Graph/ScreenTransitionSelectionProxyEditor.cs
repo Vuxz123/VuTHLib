@@ -1,9 +1,9 @@
-using Core.GameCycle.ScreenFlow.Condition;
+using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
 
-namespace Core.GameCycle.ScreenFlow.Editor.Graph
+namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 {
     [CustomEditor(typeof(ScreenTransitionSelectionProxy))]
     internal sealed class ScreenTransitionSelectionProxyEditor : UnityEditor.Editor

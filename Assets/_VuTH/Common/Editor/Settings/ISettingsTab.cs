@@ -1,6 +1,6 @@
 ﻿using UnityEngine.UIElements;
 
-namespace Common.Editor.Settings
+namespace _VuTH.Common.Editor.Settings
 {
     public interface ISettingsTab
     {

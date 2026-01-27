@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace Core.Window.Profile
+namespace _VuTH.Core.Window.Profile
 {
     public class WindowProfile : ScriptableObject
     {

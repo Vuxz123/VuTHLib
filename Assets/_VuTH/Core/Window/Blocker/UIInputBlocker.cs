@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
-namespace Core.Window.Blocker
+namespace _VuTH.Core.Window.Blocker
 {
     /// <summary>
     /// Global input blocker with reference counting
