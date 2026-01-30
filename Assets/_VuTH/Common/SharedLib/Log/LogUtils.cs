@@ -1,6 +1,9 @@
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Cysharp.Text;
 
 namespace _VuTH.Common.Log
 {
@@ -17,31 +20,32 @@ namespace _VuTH.Common.Log
                 return;
             }
 
-            string body = string.Join(", ",
-                dict.Select(kv => $"{kv.Key}:{kv.Value}")
-            );
-            Log($"[Dictionary Color Sum] → {{ {body} }}", color);
-        }
-        
-        /// <summary>
-        /// Chuyển UnityEngine.Color thành mã HEX (RRGGBB).
-        /// </summary>
-        public static string ToHex(Color? color = null)
-        {
-            color ??= Color.white;
-            return ColorUtility.ToHtmlStringRGB(color.Value);
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("[Dictionary Color Sum] → { ");
+                
+            bool first = true;
+            foreach (var kv in dict)
+            {
+                if (!first) sb.Append(", ");
+                sb.Append(kv.Key);
+                sb.Append(':');
+                sb.Append(kv.Value);
+                first = false;
+            }
+                
+            sb.Append(" }");
+            Log(sb.ToString(), color);
         }
 
         /// <summary>
-        /// Log bình thường với màu tuỳ chọn.
+        /// Log bình thường với màu tùy chọn.
         /// </summary>
         public static void Log(string message, Color? color = null)
         {
             // Handle multi-line messages
-            if (message.Contains('\n'))
+            if (message.IndexOf('\n') >= 0)
             {
                 var processed = ProcessMultiLine(message, color);
-
                 LogInternal(processed, color);
             }
             else
@@ -53,7 +57,14 @@ namespace _VuTH.Common.Log
         private static void LogInternal(string message, Color? color = null)
         {
             string hex = ToHex(color);
-            Debug.Log($"<color=#{hex}>{message}</color>");
+
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("<color=#");
+            sb.Append(hex);
+            sb.Append('>');
+            sb.Append(message);
+            sb.Append("</color>");
+            Debug.Log(sb.ToString());
         }
 
         public static void Log(string prefix, string message, Color? color = null)
@@ -62,7 +73,6 @@ namespace _VuTH.Common.Log
             if (message.Contains('\n'))
             { 
                 var processed = ProcessMultiLine(message, color);
-                
                 LogInternal(prefix, processed, color);
             }
             else
@@ -74,60 +84,123 @@ namespace _VuTH.Common.Log
         private static void LogInternal(string prefix, string message, Color? color = null)
         {
             string hex = ToHex(color);
-            Debug.Log($"<color=#{hex}>[{prefix}]{message}</color>");
+
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("<color=#");
+            sb.Append(hex);
+            sb.Append(">[");
+            sb.Append(prefix);
+            sb.Append(']');
+            sb.Append(message);
+            sb.Append("</color>");
+            Debug.Log(sb.ToString());
         }
         
         private static string ProcessMultiLine(string message, Color? color = null)
         {
             var hex = ToHex(color);
-            var lines = message.Split('\n');
-            var linesLength = lines.Length;
-            var processed = "";
-            for (var index = 0; index < linesLength; index++)
+            ReadOnlySpan<char> span = message.AsSpan();
+    
+            using (var sb = ZString.CreateStringBuilder())
             {
-                var line = lines[index];
-                if (index == 0)
+                int start = 0;
+                int lineIndex = 0;
+                int totalLines = CountLines(message);
+        
+                for (int i = 0; i < span.Length; i++)
                 {
-                    processed = line + "</color>\n";
+                    if (span[i] == '\n' || i == span.Length - 1)
+                    {
+                        var line = i == span.Length - 1 
+                            ? span.Slice(start) 
+                            : span.Slice(start, i - start);
+                
+                        if (lineIndex == 0)
+                        {
+                            sb.Append(line);
+                            sb.Append("</color>\n");
+                        }
+                        else if (lineIndex == totalLines - 1)
+                        {
+                            sb.Append("<color=#");
+                            sb.Append(hex);
+                            sb.Append('>');
+                            sb.Append(line);
+                        }
+                        else
+                        {
+                            sb.Append("<color=#");
+                            sb.Append(hex);
+                            sb.Append('>');
+                            sb.Append(line);
+                            sb.Append("</color>\n");
+                        }
+                
+                        start = i + 1;
+                        lineIndex++;
+                    }
                 }
-                else if (index == linesLength - 1)
-                {
-                    processed += $"<color=#{hex}>" + line;
-                }
-                else
-                {
-                    processed += $"<color=#{hex}>" + line + "</color>\n";
-                }
+        
+                return sb.ToString();
             }
+        }
 
-            return processed;
+        private static int CountLines(string message)
+        {
+            int count = 1;
+            foreach (char c in message)
+                if (c == '\n') count++;
+            return count;
         }
 
         /// <summary>
-        /// Log warning với màu tuỳ chọn.
+        /// Log warning với màu tùy chọn.
         /// </summary>
         public static void LogWarning(string message, Color? color = null)
         {
             string hex = ToHex(color);
-            Debug.LogWarning($"<color=#{hex}>{message}</color>");
+
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("<color=#");
+            sb.Append(hex);
+            sb.Append('>');
+            sb.Append(message);
+            sb.Append("</color>");
+            Debug.LogWarning(sb.ToString());
         }
 
         /// <summary>
-        /// Log error với màu tuỳ chọn.
+        /// Log error với màu tùy chọn.
         /// </summary>
         public static void LogError(string message, Color? color = null)
         {
             string hex = ToHex(color);
-            Debug.LogError($"<color=#{hex}>{message}</color>");
+
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("<color=#");
+            sb.Append(hex);
+            sb.Append('>');
+            sb.Append(message);
+            sb.Append("</color>");
+            Debug.LogError(sb.ToString());
         }
 
         /// <summary>
-        /// Log có tag (ví dụ "AI", "NETWORK") để dễ filter, kèm màu tuỳ chọn.
+        /// Log có tag (ví dụ "AI", "NETWORK") để dễ filter, kèm màu tùy chọn.
         /// </summary>
         public static void LogTag(string tag, string message, Color? color = null)
         {
             string hex = ToHex(color);
-            Debug.Log($"<color=#{hex}>[{tag}] {message}</color>");
+
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("<color=#");
+            sb.Append(hex);
+            sb.Append(">[");
+            sb.Append(tag);
+            sb.Append("] ");
+            sb.Append(message);
+            sb.Append("</color>");
+            Debug.Log(sb.ToString());
         }
         
         
@@ -151,7 +224,12 @@ namespace _VuTH.Common.Log
 
             for (int i = 0; i < items.Count; i++)
             {
-                Log($"[{i}] {items[i]}", color);
+                using var sb = ZString.CreateStringBuilder();
+                sb.Append('[');
+                sb.Append(i);
+                sb.Append("] ");
+                sb.Append(items[i]);
+                Log(sb.ToString(), color);
             }
         }
 
@@ -173,9 +251,39 @@ namespace _VuTH.Common.Log
                 return;
             }
 
-            string body = string.Join(", ", items);
-            Log($"List → [ {body} ]", color);
+            using var sb = ZString.CreateStringBuilder();
+            sb.Append("List → [ ");
+                
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(items[i]);
+            }
+                
+            sb.Append(" ]");
+            Log(sb.ToString(), color);
         }
 
+        #region Hex
+
+        private static readonly ConcurrentDictionary<Color, string> HexCache = new();
+        
+        /// <summary>
+        /// Chuyển UnityEngine.Color thành mã HEX (RRGGBB).
+        /// </summary>
+        public static string ToHex(Color? color = null)
+        {
+            color ??= Color.white;
+            var c = color.Value;
+    
+            if (HexCache.TryGetValue(c, out var cached))
+                return cached;
+    
+            var hex = ColorUtility.ToHtmlStringRGB(c);
+            HexCache[c] = hex;
+            return hex;
+        }
+
+        #endregion
     }
 }

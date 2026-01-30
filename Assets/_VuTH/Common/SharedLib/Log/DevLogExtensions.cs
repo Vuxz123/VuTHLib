@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using UnityEngine;
+using Cysharp.Text;
 
 namespace _VuTH.Common.Log
 {
@@ -30,7 +31,17 @@ namespace _VuTH.Common.Log
             };
 
             var hex = LogUtils.ToHex(baseColor);
-            cached = $"<color=#{hex}>[{originName}]</color> ";
+            
+            using (var sb = ZString.CreateStringBuilder())
+            {
+                sb.Append("<color=#");
+                sb.Append(hex);
+                sb.Append(">[");
+                sb.Append(originName);
+                sb.Append("]</color> ");
+                cached = sb.ToString();
+            }
+            
             PrefixCache[key] = cached;
             return cached;
         }
@@ -49,7 +60,14 @@ namespace _VuTH.Common.Log
                 t = origin?.GetType();
             }
 
-            return GetPrefix(t, kind) + msg;
+            var prefix = GetPrefix(t, kind);
+            
+            using (var sb = ZString.CreateStringBuilder())
+            {
+                sb.Append(prefix);
+                sb.Append(msg);
+                return sb.ToString();
+            }
         }
 
         /// <summary>
