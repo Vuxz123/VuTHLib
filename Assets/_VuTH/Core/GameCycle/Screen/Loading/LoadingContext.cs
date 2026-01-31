@@ -1,4 +1,5 @@
-﻿using UnityEngine.SceneManagement;
+﻿using _VuTH.Core.GameCycle.Screen.Core;
+using UnityEngine.SceneManagement;
 
 namespace _VuTH.Core.GameCycle.Screen.Loading
 {

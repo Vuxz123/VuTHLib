@@ -1,5 +1,6 @@
 ﻿using System;
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
 using UnityEngine;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow

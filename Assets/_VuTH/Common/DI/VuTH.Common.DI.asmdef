@@ -1,0 +1,18 @@
+{
+    "name": "VuTH.Common.DI",
+    "rootNamespace": "",
+    "references": [
+        "GUID:b0214a6008ed146ff8f122a6a9c2f6cc",
+        "GUID:dd36bf84407fff046b0bcd4bca4c1c92",
+        "GUID:9f7e37eac9e11744a9ed2c3164556456"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

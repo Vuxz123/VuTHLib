@@ -1,8 +1,0 @@
-﻿namespace _VuTH.Core.GameCycle.Screen
-{
-    public interface IScreenDefinition
-    {
-        // ReSharper disable once InconsistentNaming
-        public ScreenIdentifier ScreenID { get; }
-    }
-}

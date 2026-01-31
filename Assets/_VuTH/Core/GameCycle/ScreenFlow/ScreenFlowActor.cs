@@ -1,6 +1,8 @@
 using System;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
+using _VuTH.Core.GameCycle.Screen.Transition;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow
 {

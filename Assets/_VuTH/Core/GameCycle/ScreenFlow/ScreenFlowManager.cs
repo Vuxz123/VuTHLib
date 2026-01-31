@@ -2,6 +2,8 @@ using System;
 using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
+using _VuTH.Core.GameCycle.Screen.Transition;
 using _VuTH.Core.GameCycle.ScreenFlow.Profile;
 using UnityEngine;
 

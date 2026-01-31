@@ -1,4 +1,4 @@
-using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;

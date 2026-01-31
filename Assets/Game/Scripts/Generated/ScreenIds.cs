@@ -7,6 +7,7 @@
 // ------------------------------------------------------------------------------
 
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Identifier;
 using UnityEngine;
 
 namespace Core.Generated

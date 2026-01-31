@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Linq;
-using _VuTH.Core.GameCycle.Screen.GlobalEvent;
+using _VuTH.Core.GameCycle.Screen.Events.Global;
 using UnityEditor;
 using UnityEngine;
 

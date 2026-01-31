@@ -1,9 +1,11 @@
 ﻿using _VuTH.Common;
-using _VuTH.Common.DI;
 using _VuTH.Common.Log;
 using _VuTH.Core.Booststrap.Profile;
 using UnityEngine;
+#if VCONTAINER
 using VContainer;
+using _VuTH.Common.DI;
+#endif
 
 namespace _VuTH.Core.Booststrap
 {
