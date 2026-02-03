@@ -1,6 +1,6 @@
 ﻿using _VuTH.Common;
 using _VuTH.Common.Log;
-using _VuTH.Core.GameCycle.Screen.Core;
+using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Events.Global;
 using UnityEngine;
 using UnityEngine.Events;

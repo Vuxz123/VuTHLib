@@ -17,14 +17,15 @@ using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.ResourceManagement.ResourceProviders;
 using UnityEngine.SceneManagement;
-using VContainer;
+using VuTH.Common.MessagePipe;
 using ZLinq;
 #if VCONTAINER
+using VContainer;
 using VContainer.Unity;
 using _VuTH.Common.DI;
 #endif
 
-namespace _VuTH.Core.GameCycle.Screen.Core
+namespace _VuTH.Core.GameCycle.Screen.Core.A
 {
     public class ScreenManager : VBootstrapManager<ScreenManager, IScreenManager>, IScreenManager
     {
@@ -74,12 +75,16 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         private LifetimeScope _coreLifetimeScope;
 #endif
 
-        // MessagePipe publishers for screen lifecycle events
+        #region MessagePipe
+
+        // MessagePipe publishers for screen lifecycle events\
         private IPublisher<PreScreenEnterEvent> _preEnterPublisher;
         private IPublisher<PostScreenEnterEvent> _postEnterPublisher;
         private IPublisher<PreScreenExitEvent> _preExitPublisher;
         private IPublisher<PostScreenExitEvent> _postExitPublisher;
         private IPublisher<ScreenTransitionCompletedEvent> _transitionCompletedPublisher;
+
+        #endregion
 
         #region IScreenManager
 
@@ -118,7 +123,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             _coreLifetimeScope = LifetimeScope.Find<RootScopeContainer>();
 #endif
             
-            if (screenContainer == null || screenContainer.screens == null || screenContainer.screens.Length == 0)
+            if (screenContainer?.screens == null || screenContainer.screens.Length == 0)
             {
                 this.LogError("ScreenManager: No valid ScreenModels found!");
                 return;

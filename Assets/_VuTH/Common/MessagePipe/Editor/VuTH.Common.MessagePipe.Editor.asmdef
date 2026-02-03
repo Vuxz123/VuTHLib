@@ -1,10 +1,10 @@
 {
     "name": "VuTH.Common.MessagePipe.Editor",
-    "rootNamespace": "VuTH.Common.MessagePipe.Editor",
+    "rootNamespace": "",
     "references": [
         "VuTH.Common.MessagePipe",
-        "UnityEditor",
-        "UnityEngine"
+        "VuTH.Common.Editor",
+        "ZString"
     ],
     "includePlatforms": [
         "Editor"

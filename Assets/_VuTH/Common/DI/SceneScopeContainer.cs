@@ -30,7 +30,9 @@ namespace _VuTH.Common.DI
             base.Configure(builder);
             
             // Register scene-scoped MessagePipe events
+#if VCONTAINER
             MessagePipeHelper.RegisterSceneEvents(builder);
+#endif
             
             // Apply configurators
             foreach (var configurator in configurators)

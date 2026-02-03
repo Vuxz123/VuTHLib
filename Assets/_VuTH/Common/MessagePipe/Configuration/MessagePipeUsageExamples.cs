@@ -8,6 +8,11 @@ namespace VuTH.Common.MessagePipe
     /// <summary>
     /// Usage examples for MessagePipe event system.
     /// See also: https://github.com/Cysharp/MessagePipe
+    ///
+    /// IMPORTANT: After adding or modifying [MessagePipeEvent] attributes, you must
+    /// re-bake the event scope lookup by running: VuTH/MessagePipe/Bake Event Scope Lookup
+    /// This generates MessagePipeRegistrar.cs for optimized runtime registration.
+    /// Without re-baking, fallback lookup-based registration will be used.
     /// </summary>
     public static class MessagePipeUsageExamples
     {
@@ -49,14 +54,16 @@ namespace VuTH.Common.MessagePipe
         // ============================================
 
         // Define event type with [MessagePipeEvent] attribute
-        // [MessagePipeEvent(EventScope.Scene)]
+        // IMPORTANT: For Scene scope, you MUST specify the SceneName matching the Unity scene name.
+        // Events with mismatched or missing SceneName will be skipped at runtime with a warning.
+        // [MessagePipeEvent(EventScope.Scene, "MySceneName")]
         // public sealed class OnDialogClosedEvent
         // {
         //     public string DialogId;
         //     public bool Confirmed;
         // }
 
-        // Subscribe to scene-scoped event
+        // Subscribe to scene-scoped event (same as global)
         // public void SubscribeSceneExample(ISubscriber<OnDialogClosedEvent> subscriber)
         // {
         //     subscriber.Subscribe(OnDialogClosed);

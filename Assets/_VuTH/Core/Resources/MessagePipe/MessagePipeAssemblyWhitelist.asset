@@ -16,3 +16,6 @@ MonoBehaviour:
   - VuTH.Gameplay
   - VuTH.Core
   - VuTH.Common
+  - VuTH.Screen
+  - VuTH.ScreenFlow
+  - VuTH.Core.Persistant

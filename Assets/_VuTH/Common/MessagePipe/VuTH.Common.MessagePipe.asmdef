@@ -5,7 +5,8 @@
         "VuTH.Common.Log",
         "MessagePipe",
         "MessagePipe.VContainer",
-        "VContainer"
+        "VContainer",
+        "ZString"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

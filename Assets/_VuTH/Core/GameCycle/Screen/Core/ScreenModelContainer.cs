@@ -4,7 +4,7 @@ using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 
-namespace _VuTH.Core.GameCycle.Screen.Core
+namespace _VuTH.Core.GameCycle.Screen.Core.A
 {
     [Serializable]
     public class ScreenModelContainer

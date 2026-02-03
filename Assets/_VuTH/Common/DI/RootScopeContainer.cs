@@ -15,7 +15,9 @@ namespace _VuTH.Common.DI
         protected override void Configure(IContainerBuilder builder)
         {
             // Register global-scoped MessagePipe events first
+#if VCONTAINER
             MessagePipeHelper.RegisterGlobalEvents(builder);
+#endif
             
             // Bootstrap configurators
             var boostrap = 

@@ -1,0 +1,23 @@
+{
+    "name": "VuTH.Core.Persistant",
+    "rootNamespace": "",
+    "references": [
+        "VContainer",
+        "MessagePipe",
+        "VuTH.Common",
+        "VuTH.Common.MessagePipe",
+        "VuTH.Common.DI",
+        "UniTask",
+        "VuTH.Common.Log",
+        "ZLinq.Unity"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -5,7 +5,7 @@ using _VuTH.Core.GameCycle.Screen.Loading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 
-namespace _VuTH.Core.GameCycle.Screen.Core
+namespace _VuTH.Core.GameCycle.Screen.Core.A
 {
     [Serializable]
     public struct AdditiveSceneAddressableData

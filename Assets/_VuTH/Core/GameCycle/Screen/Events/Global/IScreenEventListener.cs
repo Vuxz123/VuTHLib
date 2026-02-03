@@ -1,5 +1,5 @@
 ﻿using System;
-using _VuTH.Core.GameCycle.Screen.Core;
+using _VuTH.Core.GameCycle.Screen.Core.A;
 
 namespace _VuTH.Core.GameCycle.Screen.Events.Global
 {

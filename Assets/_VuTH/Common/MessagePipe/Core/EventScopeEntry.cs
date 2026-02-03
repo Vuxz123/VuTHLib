@@ -15,5 +15,11 @@ namespace _VuTH.Common.MessagePipe.Core
 
         [Tooltip("Event scope (Global or Scene)")]
         public EventScope scope;
+
+        [Tooltip("Scene name for Scene-scoped events; empty for Global events")]
+        [SerializeField] public string sceneName;
+
+        [Tooltip("Whether to also register an AsyncBroker for this event type")]
+        [SerializeField] public bool registerAsyncBroker;
     }
 }

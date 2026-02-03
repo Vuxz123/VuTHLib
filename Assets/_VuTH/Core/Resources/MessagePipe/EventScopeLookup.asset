@@ -12,112 +12,52 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4408d8ae37aeeff489318a0398845fdc, type: 3}
   m_Name: EventScopeLookup
   m_EditorClassIdentifier: VuTH.Common.MessagePipe::_VuTH.Common.MessagePipe.Core.EventScopeLookup
-  version: 1
-  checksum: 520901c831edf6a37c4f46f26b2c7df5
-  bakedAt: 2026-01-31 12:26:12 UTC
+  version: 10
+  checksum: ae0508595c2f943cf57881f9b7a634ad
+  bakedAt: 2026-02-03 10:28:44 UTC
   entries:
-  - typeFullName: <PrivateImplementationDetails>+__StaticArrayInitTypeSize=628, VuTH.Common,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: <PrivateImplementationDetails>+__StaticArrayInitTypeSize=793, VuTH.Common,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: <PrivateImplementationDetails>, VuTH.Common, Version=0.0.0.0, Culture=neutral,
+  - typeFullName: TScript.TestEvent, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
       PublicKeyToken=null
-    scope: 0
-  - typeFullName: UnitySourceGeneratedAssemblyMonoScriptTypes_v1+MonoScriptData,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: UnitySourceGeneratedAssemblyMonoScriptTypes_v1, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.DictionaryAttribute, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.EmptyScript, VuTH.Common, Version=0.0.0.0, Culture=neutral,
+    scope: 1
+    sceneName: Gameplay
+    registerAsyncBroker: 0
+  - typeFullName: TScript.TestEvent2, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
       PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.EmptyScriptGeneratedInjector, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.OnInitializableInitialized, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.VInitializeInvokeSite+<InvokeInitialize>d__4,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.VInitializeInvokeSite, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.VInitializeInvokeSiteGeneratedInjector, VuTH.Common,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.VInitializeProfile, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Init.VInitializeProfileGeneratedInjector, VuTH.Common,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass10_0+<<RunFrames>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass10_0, VuTH.Common,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass2_0+<<RunAfter>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass2_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass3_0+<<RunNextFrame>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass3_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass4_0+<<RunAtEndOfFrame>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass4_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass5_0+<<RunEvery>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass5_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass6_0+<<RunWhen>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass6_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass7_0+<<RunWhile>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass7_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass8_0+<<RunUntil>g__Routine|0>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass8_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass9_0+<<RunWhenThenEveryFrame>g__Routine|1>d,
-      VuTH.Common, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.MonoExtension+<>c__DisplayClass9_0, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.ReadOnlyFieldAttribute, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
-    scope: 0
-  - typeFullName: _VuTH.Common.Scene.SceneField, VuTH.Common, Version=0.0.0.0, Culture=neutral,
+    scope: 1
+    sceneName: Gameplay2
+    registerAsyncBroker: 0
+  - typeFullName: TScript.TestEvent3, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
       PublicKeyToken=null
+    scope: 1
+    sceneName: Gameplay3
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.PostScreenEnterEvent,
+      VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
     scope: 0
-  - typeFullName: _VuTH.Common.Scene.SceneSelectorAttribute, VuTH.Common, Version=0.0.0.0,
-      Culture=neutral, PublicKeyToken=null
+    sceneName: 
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.PostScreenExitEvent,
+      VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
     scope: 0
+    sceneName: 
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenEnterEvent,
+      VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    scope: 0
+    sceneName: 
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenExitEvent,
+      VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    scope: 0
+    sceneName: 
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.ScreenTransitionCompletedEvent,
+      VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    scope: 0
+    sceneName: 
+    registerAsyncBroker: 0
+  - typeFullName: _VuTH.Core.Persistant.SaveSystem.Events.SaveEvent, VuTH.Core.Persistant,
+      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    scope: 0
+    sceneName: 
+    registerAsyncBroker: 0

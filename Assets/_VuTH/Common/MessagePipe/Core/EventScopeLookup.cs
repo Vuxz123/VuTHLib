@@ -62,6 +62,42 @@ namespace _VuTH.Common.MessagePipe.Core
         }
 
         /// <summary>
+        /// Get all entries with a specific scope and scene name.
+        /// For Scene scope, matches entries where sceneName matches (or both empty).
+        /// For Global scope, returns empty (Global events have no scene restriction).
+        /// </summary>
+        public IEnumerable<EventScopeEntry> GetEntriesByScopeAndScene(EventScope scope, string sceneName)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.scope != scope)
+                    continue;
+
+                if (scope == EventScope.Global)
+                    continue; // Global events are not scene-specific
+
+                // For Scene scope, match by sceneName (allow empty to mean "any" if needed, but currently we require explicit match)
+                if (string.Equals(entry.sceneName, sceneName, StringComparison.Ordinal))
+                    yield return entry;
+            }
+        }
+
+        /// <summary>
+        /// Get all entries with Scene scope that do NOT have a matching sceneName (used for warning).
+        /// </summary>
+        public IEnumerable<EventScopeEntry> GetSceneEntriesWithMismatchedScene(string activeSceneName)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.scope != EventScope.Scene)
+                    continue;
+
+                if (!string.Equals(entry.sceneName, activeSceneName, StringComparison.Ordinal))
+                    yield return entry;
+            }
+        }
+
+        /// <summary>
         /// Try to resolve Type from entry. Returns null if type not found.
         /// Uses AssemblyQualifiedName for O(1) lookup via Type.GetType().
         /// </summary>

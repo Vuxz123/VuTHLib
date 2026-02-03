@@ -24,5 +24,15 @@ namespace _VuTH.Common.MessagePipe.Configuration
         /// Absolute path for MessagePipeAssemblyWhitelist asset in the project.
         /// </summary>
         public const string AbsoluteWhitelistPath = "Assets/_VuTH/Core/Resources/MessagePipe/MessagePipeAssemblyWhitelist.asset";
+
+        /// <summary>
+        /// Path relative to Resources folder for MessagePipeOptionsConfig asset.
+        /// </summary>
+        public const string OptionsConfigPath = "MessagePipe/MessagePipeOptionsConfig";
+
+        /// <summary>
+        /// Absolute path for MessagePipeOptionsConfig asset in the project.
+        /// </summary>
+        public const string AbsoluteOptionsConfigPath = "Assets/_VuTH/Core/Resources/MessagePipe/MessagePipeOptionsConfig.asset";
     }
 }

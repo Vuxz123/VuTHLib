@@ -1,4 +1,5 @@
 using System;
+using JetBrains.Annotations;
 
 namespace _VuTH.Common.MessagePipe.Attributes
 {
@@ -8,7 +9,34 @@ namespace _VuTH.Common.MessagePipe.Attributes
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
     public class MessagePipeEventAttribute : Attribute
     {
-        public EventScope Scope { get; set; } = EventScope.Global;
+        /// <summary>
+        /// Gets the scope of the event (Global or Scene).
+        /// </summary>
+        public EventScope Scope { get; private set; }
+
+        /// <summary>
+        /// Gets the scene name for Scene-scoped events. Required when Scope is EventScope.Scene.
+        /// The event will only be registered in containers whose active scene name matches this value.
+        /// Ignored for Global-scoped events.
+        /// </summary>
+        [CanBeNull] public string SceneName { get; private set; }
+
+        /// <summary>
+        /// Gets whether to also register an AsyncBroker for this event type.
+        /// When true, both synchronous and asynchronous message brokers will be registered.
+        /// </summary>
+        public bool RegisterAsyncBroker { get; private set; }
+
+        public MessagePipeEventAttribute(
+            EventScope scope = EventScope.Global,
+            string sceneName = null,
+            bool registerAsyncBroker = false
+        )
+        {
+            Scope = scope;
+            SceneName = sceneName;
+            RegisterAsyncBroker = registerAsyncBroker;
+        }
     }
 
     /// <summary>

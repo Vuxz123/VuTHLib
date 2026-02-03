@@ -18,7 +18,7 @@ MonoBehaviour:
   sortingOrderStep: 10
   defaultTransitionDuration: 0.3
   useTransitionsInEditor: 0
-  blockInputDuringTransitions: 0
+  blockInputDuringTransitions: 1
   minBlockDuration: 0.1
   maxCachedWindows: 10
   windowCacheTimeout: 60

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using _VuTH.Core.GameCycle.Screen.Core;
+using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 using UnityEditor;
 using UnityEngine;
