@@ -12,4 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0ff92ba1ac4c3634b99f8cfe926ff133, type: 3}
   m_Name: MessagePipeOptionsConfig
   m_EditorClassIdentifier: VuTH.Common.MessagePipe::_VuTH.Common.MessagePipe.Configuration.MessagePipeOptionsConfig
-  enableCaptureStackTrace: 0
+  enableCaptureStackTrace: 1
+  preserveRegistrar: 1

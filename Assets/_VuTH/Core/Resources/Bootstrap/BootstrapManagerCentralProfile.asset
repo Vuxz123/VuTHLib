@@ -15,3 +15,4 @@ MonoBehaviour:
   boostrapPrefabs:
   - {fileID: 3997541804680334235, guid: 4db12e206dffd344fbc9bbadc2369995, type: 3}
   - {fileID: 8490066156632946973, guid: 4acf860a4b7591f43874f4b1229579f7, type: 3}
+  - {fileID: 6795685374754384388, guid: 1384d9384fd24744da9d37ec9a62ad26, type: 3}
