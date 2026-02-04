@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 namespace _VuTH.Core.Persistant.SaveSystem.Serialize
@@ -6,6 +7,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Serialize
     /// JSON-based serializer using System.Text.Json.
     /// Pluggable implementation of ISerializer.
     /// </summary>
+    [Serializable]
     public class JsonSerializer : ISerializer
     {
         private readonly JsonSerializerOptions _options;

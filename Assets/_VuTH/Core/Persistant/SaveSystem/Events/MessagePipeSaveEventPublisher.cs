@@ -65,16 +65,26 @@ namespace _VuTH.Core.Persistant.SaveSystem.Events
     /// </summary>
     public class MessagePipeSaveEventPublisher : ISaveEventPublisher
     {
-        private readonly IPublisher<SaveEvent> _eventPublisher;
+        private IPublisher<SaveEvent>? _eventPublisher;
 
-        public MessagePipeSaveEventPublisher(IPublisher<SaveEvent> eventPublisher)
+        public MessagePipeSaveEventPublisher() : this(null)
+        {
+        }
+
+        public MessagePipeSaveEventPublisher(IPublisher<SaveEvent>? eventPublisher)
         {
             _eventPublisher = eventPublisher;
+        }
+        
+        internal void SetEventPublisher(IPublisher<SaveEvent> eventPublisher)
+        {
+            // This method can be used to set the event publisher if not provided in constructor
+            _eventPublisher ??= eventPublisher;
         }
 
         public void OnSaveSuccess(string key, string dataType)
         {
-            _eventPublisher.Publish(new SaveEvent
+            _eventPublisher!.Publish(new SaveEvent
             {
                 Key = key,
                 DataType = dataType,
@@ -84,7 +94,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Events
 
         public void OnSaveFailed(string key, string dataType, string error)
         {
-            _eventPublisher.Publish(new SaveEvent
+            _eventPublisher!.Publish(new SaveEvent
             {
                 Key = key,
                 DataType = dataType,
@@ -95,7 +105,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Events
 
         public void OnLoadSuccess(string key, string dataType)
         {
-            _eventPublisher.Publish(new SaveEvent
+            _eventPublisher!.Publish(new SaveEvent
             {
                 Key = key,
                 DataType = dataType,
@@ -105,7 +115,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Events
 
         public void OnLoadFailed(string key, string dataType, string error)
         {
-            _eventPublisher.Publish(new SaveEvent
+            _eventPublisher!.Publish(new SaveEvent
             {
                 Key = key,
                 DataType = dataType,

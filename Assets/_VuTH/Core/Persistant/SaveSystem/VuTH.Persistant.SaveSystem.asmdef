@@ -1,5 +1,5 @@
 {
-    "name": "VuTH.Core.Persistant",
+    "name": "VuTH.Persistant.SaveSystem",
     "rootNamespace": "",
     "references": [
         "VContainer",
@@ -9,7 +9,8 @@
         "VuTH.Common.DI",
         "UniTask",
         "VuTH.Common.Log",
-        "ZLinq.Unity"
+        "ZLinq.Unity",
+        "Newtonsoft.Json"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -19,5 +20,9 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
-    "noEngineReferences": false
+    "noEngineReferences": false,
+    "internalVisibleTo": [
+        "VuTH.Persistant.SaveSystem.Tests",
+        "VuTH.Persistant.SaveSystem.Tests.Runtime"
+    ]
 }

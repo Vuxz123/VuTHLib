@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -12,6 +13,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
     /// Backend using JSON files in Application.persistentDataPath.
     /// Suitable for larger data or when file system access is needed.
     /// </summary>
+    [Serializable]
     public class JsonFileSaveBackend : ISaveBackend
     {
         private readonly string _basePath;

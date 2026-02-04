@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
@@ -9,6 +10,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
     /// Backend using Unity's PlayerPrefs.
     /// Suitable for simple local storage needs.
     /// </summary>
+    [Serializable]
     public class PlayerPrefsSaveBackend : ISaveBackend
     {
         public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken)

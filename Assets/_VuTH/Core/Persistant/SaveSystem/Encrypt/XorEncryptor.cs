@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 
 namespace _VuTH.Core.Persistant.SaveSystem.Encrypt
@@ -8,6 +9,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Encrypt
     /// For production, use AES or other strong encryption.
     /// Pluggable implementation of IEncryptor.
     /// </summary>
+    [Serializable]
     public class XorEncryptor : IEncryptor
     {
         private readonly byte[] _key;

@@ -92,20 +92,38 @@ namespace _VuTH.Core.Persistant.SaveSystem
         {
             builder.RegisterInstance<ISaveManager>(this);
         }
+        
+        [Inject]
+        public void Construct(IPublisher<SaveEvent> eventPublisher)
+        {
+            InitializeSaveService(eventPublisher);
+        }
 #endif
 
         protected override void InitializeBootstrap()
         {
             this.Log("Initializing Save Service...");
+#if VCONTAINER
+            this.Log("InitializeBootstrap: VCONTAINER defined. Waiting for DI Construct() to initialize save service.");
+#else
+            this.Log("InitializeBootstrap: VCONTAINER not defined. Will initialize save service directly.");
+#endif
 
             // Load profile from Resources
             _profile = Resources.Load<SaveServiceAdapterProfile>("SaveServiceAdapterProfile");
+            this.Log(_profile != null
+                ? "InitializeBootstrap: SaveServiceAdapterProfile found."
+                : "InitializeBootstrap: SaveServiceAdapterProfile not found.");
 
+#if !VCONTAINER
             InitializeSaveService(null);
+#endif
         }
 
         private void InitializeSaveService(IPublisher<SaveEvent>? eventPublisher)
         {
+            this.Log($"InitializeSaveService: called. eventPublisherNull={eventPublisher == null}");
+
             if (_profile != null)
             {
                 this.Log("SaveServiceAdapterProfile loaded successfully.");
@@ -117,15 +135,6 @@ namespace _VuTH.Core.Persistant.SaveSystem
                 InitializeWithDefaults(eventPublisher);
             }
 
-            // Create the internal save service
-            _saveService = new SaveService(
-                _backend!,
-                _serializer!,
-                _encryptor!,
-                _currentSchemaVersion,
-                _eventPublisher
-            );
-
             // Add migrators from profile if available
             if (_profile && _migrationChain != null)
             {
@@ -134,6 +143,16 @@ namespace _VuTH.Core.Persistant.SaveSystem
                     _migrationChain.AddMigrator(migrator);
                 }
             }
+
+            // Create the internal save service
+            _saveService = new SaveService(
+                _backend!,
+                _serializer!,
+                _encryptor!,
+                _currentSchemaVersion,
+                _migrationChain,
+                _eventPublisher
+            );
 
             this.Log("Save Service initialized successfully.");
         }

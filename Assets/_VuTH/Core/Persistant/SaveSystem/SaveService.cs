@@ -17,7 +17,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
     /// Load: Load -> Decrypt -> Deserialize -> Migrate -> Return.
     /// Supports backward compatibility with v1 (System.Text.Json) payloads.
     /// </summary>
-    internal class SaveService
+    public class SaveService
     {
         private readonly ISaveBackend _backend;
         private readonly ISerializer _serializer;
@@ -31,6 +31,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
             ISerializer serializer,
             IEncryptor encryptor,
             int currentSchemaVersion = 2,
+            SaveMigrationChain? migrationChain = null,
             ISaveEventPublisher? eventPublisher = null)
         {
             _backend = backend;
@@ -38,7 +39,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
             _encryptor = encryptor;
             _currentSchemaVersion = currentSchemaVersion;
             _eventPublisher = eventPublisher ?? new NullSaveEventPublisher();
-            _migrationChain = new SaveMigrationChain(_serializer);
+            _migrationChain = migrationChain ?? new SaveMigrationChain(_serializer);
         }
 
         public async UniTask SaveAsync<T>(string key, T data, CancellationToken cancellationToken = default)
