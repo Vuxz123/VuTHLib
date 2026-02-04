@@ -27,7 +27,6 @@ namespace VuTH.Common.MessagePipe
         private static bool _lookupLoaded;
 
         // Cached reflection to generated registrar (Core.Generated.MessagePipeRegistrar)
-        private static readonly Type RegistrarType;
         private static readonly MethodInfo RegisterGlobalMethod;
         private static readonly MethodInfo RegisterSceneMethod;
         private static bool _registrarChecked;
@@ -61,7 +60,7 @@ namespace VuTH.Common.MessagePipe
             var options = new MessagePipeOptions();
             
             // If no config found, return defaults
-            if (config == null)
+            if (!config)
             {
                 return options;
             }
@@ -79,10 +78,10 @@ namespace VuTH.Common.MessagePipe
                     enableCaptureStackTraceProperty.SetValue(options, config.enableCaptureStackTrace);
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 // Log warning but don't fail - options will use defaults
-                typeof(MessagePipeHelper).LogWarning($"[MessagePipe] Failed to apply MessagePipeOptions config: {ex.Message}");
+                typeof(MessagePipeHelper).LogWarning($"Failed to apply MessagePipeOptions config: {ex.Message}");
             }
             
             return options;
@@ -90,16 +89,17 @@ namespace VuTH.Common.MessagePipe
 
         static MessagePipeHelper()
         {
-            // Try to load the generated registrar via reflection
-            // This is done once at static initialization to avoid per-call overhead
-            RegistrarType = Type.GetType("Core.Generated.MessagePipeRegistrar, Assembly-CSharp", false, false);
+            var registrarType =
+                // Try to load the generated registrar via reflection
+                // This is done once at static initialization to avoid per-call overhead
+                Type.GetType("Core.Generated.MessagePipeRegistrar, Assembly-CSharp", false, false);
 
-            if (RegistrarType != null)
+            if (registrarType != null)
             {
 #if VCONTAINER
-                RegisterGlobalMethod = RegistrarType.GetMethod("RegisterGlobal", BindingFlags.Public | BindingFlags.Static,
+                RegisterGlobalMethod = registrarType.GetMethod("RegisterGlobal", BindingFlags.Public | BindingFlags.Static,
                     null, new[] { typeof(IContainerBuilder) }, null);
-                RegisterSceneMethod = RegistrarType.GetMethod("RegisterScene", BindingFlags.Public | BindingFlags.Static,
+                RegisterSceneMethod = registrarType.GetMethod("RegisterScene", BindingFlags.Public | BindingFlags.Static,
                     null, new[] { typeof(IContainerBuilder), typeof(string) }, null);
 #else
                 RegisterGlobalMethod = RegistrarType.GetMethod("RegisterGlobal", BindingFlags.Public | BindingFlags.Static,
@@ -149,10 +149,11 @@ namespace VuTH.Common.MessagePipe
             if (builder == null) throw new ArgumentNullException(nameof(builder));
 
             // Try to use generated registrar first (zero runtime reflection overhead)
+            var callsite = typeof(MessagePipeHelper);
             if (RegisterGlobalMethod != null)
             {
                 RegisterGlobalMethod.Invoke(null, new object[] { builder });
-                typeof(MessagePipeHelper).Log("[MessagePipe] Registered global events via generated MessagePipeRegistrar.");
+                callsite.Log("Registered global events via generated MessagePipeRegistrar.");
                 return;
             }
 
@@ -164,7 +165,7 @@ namespace VuTH.Common.MessagePipe
 
             if (!lookup)
             {
-                typeof(MessagePipeHelper).LogWarning("No EventScopeLookup found. Skipping global event registration.");
+                callsite.LogWarning("No EventScopeLookup found. Skipping global event registration.");
                 return;
             }
 
@@ -174,15 +175,15 @@ namespace VuTH.Common.MessagePipe
                 var type = EventScopeLookup.ResolveType(entry);
                 if (type == null)
                 {
-                    typeof(MessagePipeHelper).LogWarning($"Failed to resolve type: {entry.typeFullName}");
+                    callsite.LogWarning($"Failed to resolve type: {entry.typeFullName}");
                     continue;
                 }
 
                 RegisterMessageBroker(builder, type);
             }
 
-            typeof(MessagePipeHelper).LogWarning("[MessagePipe] Using fallback lookup-based registration. " +
-                "Consider running VuTH/MessagePipe/Bake Event Scope Lookup to generate MessagePipeRegistrar for optimized performance.");
+            callsite.LogWarning("Using fallback lookup-based registration. " +
+                             "Consider running VuTH/MessagePipe/Bake Event Scope Lookup to generate MessagePipeRegistrar for optimized performance.");
         }
 
         /// <summary>
@@ -203,7 +204,7 @@ namespace VuTH.Common.MessagePipe
             if (RegisterSceneMethod != null)
             {
                 RegisterSceneMethod.Invoke(null, new object[] { builder, activeSceneName });
-                typeof(MessagePipeHelper).Log($"[MessagePipe] Registered scene events for \"{activeSceneName}\" via generated MessagePipeRegistrar.");
+                typeof(MessagePipeHelper).Log($"Registered scene events for \"{activeSceneName}\" via generated MessagePipeRegistrar.");
                 return;
             }
 
@@ -219,14 +220,14 @@ namespace VuTH.Common.MessagePipe
             // Core services are already registered in RootScopeContainer and inherited via parent scope.
             // Only register scene-scoped event brokers here.
 
-            int registeredCount = 0;
+            var registeredCount = 0;
             foreach (var entry in lookup.GetEntriesByScope(EventScope.Scene))
             {
                 // Validate SceneName
                 if (string.IsNullOrEmpty(entry.sceneName))
                 {
                     typeof(MessagePipeHelper).LogWarning(
-                        $"[MessagePipe] Skipping scene-scoped event {entry.typeFullName}: SceneName is empty. " +
+                        $"Skipping scene-scoped event {entry.typeFullName}: SceneName is empty. " +
                         "Please specify a SceneName in the [MessagePipeEvent] attribute, e.g., [MessagePipeEvent(EventScope.Scene, \"MyScene\")].");
                     continue;
                 }
@@ -234,14 +235,14 @@ namespace VuTH.Common.MessagePipe
                 if (!string.Equals(entry.sceneName, activeSceneName, StringComparison.Ordinal))
                 {
                     typeof(MessagePipeHelper).LogWarning(
-                        $"[MessagePipe] Skipping scene-scoped event {entry.typeFullName}: SceneName \"{entry.sceneName}\" does not match active scene \"{activeSceneName}\".");
+                        $"Skipping scene-scoped event {entry.typeFullName}: SceneName \"{entry.sceneName}\" does not match active scene \"{activeSceneName}\".");
                     continue;
                 }
 
                 var type = EventScopeLookup.ResolveType(entry);
                 if (type == null)
                 {
-                    typeof(MessagePipeHelper).LogWarning($"[MessagePipe] Failed to resolve type: {entry.typeFullName}");
+                    typeof(MessagePipeHelper).LogWarning($"Failed to resolve type: {entry.typeFullName}");
                     continue;
                 }
 
@@ -249,8 +250,8 @@ namespace VuTH.Common.MessagePipe
                 registeredCount++;
             }
 
-            typeof(MessagePipeHelper).Log($"[MessagePipe] Registered {registeredCount} scene MessagePipe event(s) for scene \"{activeSceneName}\".");
-            typeof(MessagePipeHelper).LogWarning("[MessagePipe] Using fallback lookup-based registration. " +
+            typeof(MessagePipeHelper).Log($"Registered {registeredCount} scene MessagePipe event(s) for scene \"{activeSceneName}\".");
+            typeof(MessagePipeHelper).LogWarning("Using fallback lookup-based registration. " +
                 "Consider running VuTH/MessagePipe/Bake Event Scope Lookup to generate MessagePipeRegistrar for optimized performance.");
         }
 

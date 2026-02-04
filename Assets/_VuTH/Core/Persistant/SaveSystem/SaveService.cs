@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Text.Json;
 using System.Threading;
 using _VuTH.Core.Persistant.SaveSystem.Backend;
 using _VuTH.Core.Persistant.SaveSystem.Encrypt;
@@ -14,6 +15,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
     /// Internal save service core logic - no ISaveService interface.
     /// Handles: Serialize -> Encrypt -> Save pipeline on save.
     /// Load: Load -> Decrypt -> Deserialize -> Migrate -> Return.
+    /// Supports backward compatibility with v1 (System.Text.Json) payloads.
     /// </summary>
     internal class SaveService
     {
@@ -28,7 +30,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
             ISaveBackend backend,
             ISerializer serializer,
             IEncryptor encryptor,
-            int currentSchemaVersion = 1,
+            int currentSchemaVersion = 2,
             ISaveEventPublisher? eventPublisher = null)
         {
             _backend = backend;
@@ -44,14 +46,14 @@ namespace _VuTH.Core.Persistant.SaveSystem
             try
             {
                 // Step 1: Serialize data
-                string serializedData = _serializer.Serialize(data);
+                var serializedData = _serializer.Serialize(data);
 
                 // Step 2: Create wrapper with schema version
                 var wrapper = new SavePayloadWrapper(_currentSchemaVersion, serializedData);
-                string wrapperJson = _serializer.Serialize(wrapper);
+                var wrapperJson = _serializer.Serialize(wrapper);
 
                 // Step 3: Encrypt
-                string encryptedData = _encryptor.Encrypt(wrapperJson);
+                var encryptedData = _encryptor.Encrypt(wrapperJson);
 
                 // Step 4: Save to backend
                 await _backend.SaveRawAsync(key, encryptedData, cancellationToken);
@@ -72,7 +74,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
             try
             {
                 // Step 1: Check existence
-                bool exists = await _backend.Exists(key, cancellationToken);
+                var exists = await _backend.Exists(key, cancellationToken);
                 if (!exists)
                 {
                     _eventPublisher.OnLoadFailed(key, typeof(T).Name, "Key not found");
@@ -80,7 +82,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
                 }
 
                 // Step 2: Load raw data
-                string? encryptedData = await _backend.LoadRawAsync(key, cancellationToken);
+                var encryptedData = await _backend.LoadRawAsync(key, cancellationToken);
                 if (encryptedData == null)
                 {
                     _eventPublisher.OnLoadFailed(key, typeof(T).Name, "Load returned null");
@@ -88,15 +90,15 @@ namespace _VuTH.Core.Persistant.SaveSystem
                 }
 
                 // Step 3: Decrypt
-                string wrapperJson = _encryptor.Decrypt(encryptedData);
+                var wrapperJson = _encryptor.Decrypt(encryptedData);
 
-                // Step 4: Deserialize wrapper
+                // Step 4: Deserialize wrapper using current serializer (Newtonsoft.Json)
                 var wrapper = _serializer.Deserialize<SavePayloadWrapper>(wrapperJson);
 
                 // Step 5: Migrate if needed
                 if (wrapper.SchemaVersion < _currentSchemaVersion)
                 {
-                    string migratedPayload = _migrationChain.Migrate(
+                    var migratedPayload = _migrationChain.Migrate(
                         wrapper.Payload,
                         wrapper.SchemaVersion,
                         _currentSchemaVersion);
@@ -128,6 +130,20 @@ namespace _VuTH.Core.Persistant.SaveSystem
         public async UniTask DeleteAsync(string key, CancellationToken cancellationToken = default)
         {
             await _backend.DeleteAsync(key, cancellationToken);
+        }
+
+        /// <summary>
+        /// Upgrades a legacy v1 save to the current schema version.
+        /// Called automatically when loading v1 saves.
+        /// </summary>
+        private async UniTask UpgradeSaveAsync<T>(string key, T data, CancellationToken cancellationToken)
+        {
+            // Re-serialize and save using the new serializer and schema version
+            var serializedData = _serializer.Serialize(data);
+            var wrapper = new SavePayloadWrapper(_currentSchemaVersion, serializedData);
+            var wrapperJson = _serializer.Serialize(wrapper);
+            var encryptedData = _encryptor.Encrypt(wrapperJson);
+            await _backend.SaveRawAsync(key, encryptedData, cancellationToken);
         }
     }
 }

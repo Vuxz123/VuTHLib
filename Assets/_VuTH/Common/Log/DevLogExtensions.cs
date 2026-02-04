@@ -62,6 +62,11 @@ namespace _VuTH.Common.Log
             {
                 if (uo) t = uo.GetType();
             }
+
+            if (origin is Type type)
+            {
+                t = type;
+            }
             else
             {
                 t = origin?.GetType();

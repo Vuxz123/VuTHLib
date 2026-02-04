@@ -7,8 +7,11 @@ using _VuTH.Core.Persistant.SaveSystem.Backend;
 using _VuTH.Core.Persistant.SaveSystem.Encrypt;
 using _VuTH.Core.Persistant.SaveSystem.Events;
 using _VuTH.Core.Persistant.SaveSystem.Migrate;
+using _VuTH.Core.Persistant.SaveSystem.Profile;
 using _VuTH.Core.Persistant.SaveSystem.Serialize;
 using Cysharp.Threading.Tasks;
+using MessagePipe;
+using UnityEngine;
 
 #if VCONTAINER
 using VContainer;
@@ -18,18 +21,22 @@ namespace _VuTH.Core.Persistant.SaveSystem
 {
     /// <summary>
     /// SaveServiceManager - BootstrapManager that wraps SaveService core logic.
-    /// Implements ISaveService and provides lifecycle management.
-    /// Follows the project's VBootstrapManager pattern.
+    /// Implements ISaveManager and provides lifecycle management.
+    /// Loads adapters from SaveServiceAdapterProfile (Resources) if available.
+    /// Falls back to defaults if profile not found or adapters are null.
     /// </summary>
     public class SaveServiceManager : VBootstrapManager<SaveServiceManager, ISaveManager>, ISaveManager
     {
-        // Core components (injected via VContainer or created in InitializeBootstrap)
+        // Core components
         private ISaveBackend? _backend;
         private ISerializer? _serializer;
         private IEncryptor? _encryptor;
         private ISaveEventPublisher? _eventPublisher;
         private SaveMigrationChain? _migrationChain;
         private int _currentSchemaVersion = 1;
+
+        // Profile reference
+        private SaveServiceAdapterProfile? _profile;
 
         // Internal save service for delegation
         private SaveService? _saveService;
@@ -89,30 +96,93 @@ namespace _VuTH.Core.Persistant.SaveSystem
 
         protected override void InitializeBootstrap()
         {
-            this.Log("[SaveServiceManager] Initializing Save Service...");
+            this.Log("Initializing Save Service...");
 
-            // Create default components if not injected
-            _backend ??= new PlayerPrefsSaveBackend();
-            _serializer ??= new JsonSerializer();
-            _encryptor ??= new XorEncryptor();
-            _eventPublisher ??= new NullSaveEventPublisher();
-            _migrationChain ??= new SaveMigrationChain(_serializer);
+            // Load profile from Resources
+            _profile = Resources.Load<SaveServiceAdapterProfile>("SaveServiceAdapterProfile");
+
+            InitializeSaveService(null);
+        }
+
+        private void InitializeSaveService(IPublisher<SaveEvent>? eventPublisher)
+        {
+            if (_profile != null)
+            {
+                this.Log("SaveServiceAdapterProfile loaded successfully.");
+                InitializeFromProfile(eventPublisher);
+            }
+            else
+            {
+                this.Log("No SaveServiceAdapterProfile found. Using default configuration.");
+                InitializeWithDefaults(eventPublisher);
+            }
 
             // Create the internal save service
             _saveService = new SaveService(
-                _backend,
-                _serializer,
-                _encryptor,
+                _backend!,
+                _serializer!,
+                _encryptor!,
                 _currentSchemaVersion,
                 _eventPublisher
             );
 
-            this.Log("[SaveServiceManager] Save Service initialized successfully.");
+            // Add migrators from profile if available
+            if (_profile && _migrationChain != null)
+            {
+                foreach (var migrator in _profile.Migrators)
+                {
+                    _migrationChain.AddMigrator(migrator);
+                }
+            }
+
+            this.Log("Save Service initialized successfully.");
+        }
+
+        private void InitializeFromProfile(IPublisher<SaveEvent>? eventPublisher)
+        {
+            // Use profile adapters if available, otherwise fall back to defaults
+            _encryptor = _profile!.Encryptor;
+            _serializer = _profile.Serializer;
+            _eventPublisher = eventPublisher != null
+                ? new MessagePipeSaveEventPublisher(eventPublisher)
+                : new NullSaveEventPublisher();
+
+            if (_profile.Backend != null)
+            {
+                _backend = _profile.Backend;
+            }
+            else
+            {
+                // Fallback backend based on environment
+#if UNITY_EDITOR
+                _backend = new JsonFileSaveBackend();
+#else
+                _backend = new PlayerPrefsSaveBackend();
+#endif
+            }
+
+            // Initialize migration chain with serializer from profile
+            _migrationChain = new SaveMigrationChain(_serializer!);
+        }
+
+        private void InitializeWithDefaults(IPublisher<SaveEvent>? eventPublisher)
+        {
+#if UNITY_EDITOR
+            _backend = new JsonFileSaveBackend();
+#else
+            _backend = new PlayerPrefsSaveBackend();
+#endif
+            _serializer = new NewtonsoftJsonSerializer();
+            _encryptor = new XorEncryptor();
+            _eventPublisher = eventPublisher != null
+                ? new MessagePipeSaveEventPublisher(eventPublisher)
+                : new NullSaveEventPublisher();
+            _migrationChain = new SaveMigrationChain(_serializer!);
         }
 
         protected override void DeinitializeBootstrap()
         {
-            this.Log("[SaveServiceManager] Deinitializing Save Service...");
+            this.Log("Deinitializing Save Service...");
 
             _saveService = null;
             _backend = null;
@@ -120,13 +190,24 @@ namespace _VuTH.Core.Persistant.SaveSystem
             _encryptor = null;
             _eventPublisher = null;
             _migrationChain = null;
+            _profile = null;
 
-            this.Log("[SaveServiceManager] Save Service deinitialized.");
+            this.Log("Save Service deinitialized.");
         }
 
         #endregion
 
         #region Configuration Methods
+
+        /// <summary>
+        /// Gets the loaded profile (null if not loaded).
+        /// </summary>
+        public SaveServiceAdapterProfile? GetProfile() => _profile;
+
+        /// <summary>
+        /// Checks if a profile is loaded.
+        /// </summary>
+        public bool HasProfile => _profile != null;
 
         /// <summary>
         /// Configures the backend. Call before InitializeBootstrap.
