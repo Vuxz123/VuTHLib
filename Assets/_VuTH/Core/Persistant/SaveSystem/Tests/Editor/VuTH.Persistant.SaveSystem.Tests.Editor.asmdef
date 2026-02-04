@@ -1,0 +1,20 @@
+{
+    "name": "VuTH.Persistant.SaveSystem.Tests.Editor",
+    "rootNamespace": "",
+    "references": [
+        "VuTH.Persistant.SaveSystem.Tests",
+        "VuTH.Persistant.SaveSystem.Editor",
+        "UnityEngine.TestFramework"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

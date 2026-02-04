@@ -1,0 +1,20 @@
+{
+    "name": "VuTH.Persistant.SaveSystem.Tests.PlayMode",
+    "rootNamespace": "",
+    "references": [
+        "VuTH.Persistant.SaveSystem.Tests",
+        "UnityEngine.TestRunner",
+        "UniTask",
+        "VuTH.Persistant.SaveSystem",
+        "VuTH.Common"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

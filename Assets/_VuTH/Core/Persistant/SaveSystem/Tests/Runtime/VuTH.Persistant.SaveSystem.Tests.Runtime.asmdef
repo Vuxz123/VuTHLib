@@ -1,0 +1,21 @@
+{
+    "name": "VuTH.Persistant.SaveSystem.Tests.Runtime",
+    "rootNamespace": "",
+    "references": [
+        "VuTH.Persistant.SaveSystem",
+        "UniTask",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

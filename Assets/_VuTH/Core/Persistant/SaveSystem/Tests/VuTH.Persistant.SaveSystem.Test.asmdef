@@ -1,0 +1,23 @@
+{
+    "name": "VuTH.Persistant.SaveSystem.Test",
+    "rootNamespace": "",
+    "references": [
+        "GUID:ef12a56a14f1de041862c371e2c9bfe9",
+        "GUID:e52abfc2cfb08ca4c921f3ea315a7ba6",
+        "GUID:0acc523941302664db1f4e527237feb3",
+        "GUID:27619889b8ba8c24980f49ee34dbb44a",
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "VuTH.Common"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
