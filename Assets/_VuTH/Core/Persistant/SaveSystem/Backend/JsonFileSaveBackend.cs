@@ -1,8 +1,8 @@
 #nullable enable
 using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
+using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using ZLinq;
@@ -35,12 +35,15 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
                 .AsValueEnumerable()
                 .Aggregate(key, (current, invalidFileNameChar) => 
                     current.Replace(invalidFileNameChar, '_'));
-            return Path.Combine(_basePath, $"{key}.json");
+            var filePath = Path.Combine(_basePath, $"{key}.json");
+            this.Log($"GetFilePath key='{key}' basePath='{_basePath}' result='{filePath}'");
+            return filePath;
         }
 
-        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken)
+        public async UniTask SaveRawAsync(string key, string? data, CancellationToken cancellationToken)
         {
             string filePath = GetFilePath(key);
+            this.Log($"SaveRawAsync key='{key}' filePath='{filePath}' dataLength={data?.Length ?? 0}");
             
             try
             {
@@ -48,14 +51,16 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
                 string? directory = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 {
+                    this.Log($"Creating directory: {directory}");
                     Directory.CreateDirectory(directory);
                 }
 
                 await File.WriteAllTextAsync(filePath, data, cancellationToken);
+                this.Log($"SaveRawAsync SUCCESS for key '{key}'");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"[JsonFileSaveBackend] Save failed for key '{key}': {ex.Message}");
+                this.LogError($"Save failed for key '{key}': {ex.Message}");
                 throw;
             }
         }
@@ -64,19 +69,23 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
             string key, CancellationToken cancellationToken)
         {
             var filePath = GetFilePath(key);
+            this.Log($"LoadRawAsync key='{key}' filePath='{filePath}'");
             
             try
             {
                 if (!File.Exists(filePath))
                 {
+                    this.Log($"LoadRawAsync: File does not exist: {filePath}");
                     return null;
                 }
 
-                return await File.ReadAllTextAsync(filePath, cancellationToken);
+                var result = await File.ReadAllTextAsync(filePath, cancellationToken);
+                this.Log($"LoadRawAsync SUCCESS for key '{key}' length={result?.Length ?? 0}");
+                return result;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"[JsonFileSaveBackend] Load failed for key '{key}': {ex.Message}");
+                this.LogError($"Load failed for key '{key}': {ex.Message}");
                 return null;
             }
         }
@@ -89,7 +98,7 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
 
         public async UniTask DeleteAsync(string key, CancellationToken cancellationToken)
         {
-            string filePath = GetFilePath(key);
+            var filePath = GetFilePath(key);
             
             try
             {
@@ -98,9 +107,9 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
                     File.Delete(filePath);
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"[JsonFileSaveBackend] Delete failed for key '{key}': {ex.Message}");
+                this.LogError($"Delete failed for key '{key}': {ex.Message}");
                 throw;
             }
         }

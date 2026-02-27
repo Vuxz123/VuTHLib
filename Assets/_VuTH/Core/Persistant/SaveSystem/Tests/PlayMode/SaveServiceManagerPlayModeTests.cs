@@ -89,13 +89,17 @@ namespace _VuTH.Core.Persistant.SaveSystem.Tests.PlayMode
             // Inject temp backend before Init
             var field = typeof(SaveServiceManager).GetField("_backend",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(Path.Combine(_tempDir, "default_test.json"));
+            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
             LogManagerState("Before EnableSystem");
 
             // Act - Enable system triggers InitializeManager -> InitializeBootstrap
             _manager.EnableSystem(true);
+            
+            // For VCONTAINER builds, manually initialize since DI isn't used in tests
+            _manager.InitializeForTesting();
+            
             LogManagerState("After EnableSystem");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");
@@ -114,11 +118,12 @@ namespace _VuTH.Core.Persistant.SaveSystem.Tests.PlayMode
             // Inject temp backend
             var field = typeof(SaveServiceManager).GetField("_backend",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(Path.Combine(_tempDir, "profile_test.json"));
+            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
             LogManagerState("Before EnableSystem");
             _manager.EnableSystem(true);
+            _manager.InitializeForTesting();  // For VCONTAINER builds, manually initialize
             LogManagerState("After EnableSystem");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");
@@ -145,11 +150,12 @@ namespace _VuTH.Core.Persistant.SaveSystem.Tests.PlayMode
 
             var field = typeof(SaveServiceManager).GetField("_backend",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(Path.Combine(_tempDir, "default_test.json"));
+            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
             LogManagerState("Before EnableSystem");
             _manager.EnableSystem(true);
+            _manager.InitializeForTesting();  // For VCONTAINER builds, manually initialize
             LogManagerState("After EnableSystem");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");

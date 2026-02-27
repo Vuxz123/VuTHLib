@@ -117,7 +117,20 @@ namespace _VuTH.Core.Persistant.SaveSystem
 
 #if !VCONTAINER
             InitializeSaveService(null);
+#else
+            // For VCONTAINER builds: if Construct() hasn't been called within a reasonable time,
+            // the test should call InitializeForTesting() method to initialize directly.
+            // This ensures the save service is initialized even when DI isn't used (e.g., in tests).
 #endif
+        }
+
+        /// <summary>
+        /// Manual initialization for testing scenarios where VCONTAINER DI isn't used.
+        /// Call this after EnableSystem(true) in tests.
+        /// </summary>
+        public void InitializeForTesting()
+        {
+            InitializeSaveService(null);
         }
 
         private void InitializeSaveService(IPublisher<SaveEvent>? eventPublisher)
@@ -166,18 +179,26 @@ namespace _VuTH.Core.Persistant.SaveSystem
                 ? new MessagePipeSaveEventPublisher(eventPublisher)
                 : new NullSaveEventPublisher();
 
-            if (_profile.Backend != null)
+            // Only use profile backend if _backend wasn't manually set (e.g., by tests)
+            if (_backend == null)
             {
-                _backend = _profile.Backend;
+                if (_profile.Backend != null)
+                {
+                    _backend = _profile.Backend;
+                }
+                else
+                {
+                    // Fallback backend based on environment
+#if UNITY_EDITOR
+                    _backend = new JsonFileSaveBackend();
+#else
+                    _backend = new PlayerPrefsSaveBackend();
+#endif
+                }
             }
             else
             {
-                // Fallback backend based on environment
-#if UNITY_EDITOR
-                _backend = new JsonFileSaveBackend();
-#else
-                _backend = new PlayerPrefsSaveBackend();
-#endif
+                this.Log("InitializeFromProfile: Using manually set backend (e.g., from test).");
             }
 
             // Initialize migration chain with serializer from profile
@@ -186,11 +207,20 @@ namespace _VuTH.Core.Persistant.SaveSystem
 
         private void InitializeWithDefaults(IPublisher<SaveEvent>? eventPublisher)
         {
+            // Only initialize backend if not manually set (e.g., by tests)
+            if (_backend == null)
+            {
 #if UNITY_EDITOR
-            _backend = new JsonFileSaveBackend();
+                _backend = new JsonFileSaveBackend();
 #else
-            _backend = new PlayerPrefsSaveBackend();
+                _backend = new PlayerPrefsSaveBackend();
 #endif
+            }
+            else
+            {
+                this.Log("InitializeWithDefaults: Using manually set backend (e.g., from test).");
+            }
+
             _serializer = new NewtonsoftJsonSerializer();
             _encryptor = new XorEncryptor();
             _eventPublisher = eventPublisher != null
