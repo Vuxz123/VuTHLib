@@ -1,4 +1,5 @@
 using _VuTH.Core.GameCycle.ScreenFlow.Condition;
+using _VuTH.Core.GameCycle.ScreenFlow.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,6 +12,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
     internal sealed class ScreenTransitionSelectionProxy : ScriptableObject
     {
         [SerializeField] private ScreenFlowGraph graph;
+        [SerializeField] private int transitionIndex = -1;
         [SerializeField] private string fromGuid;
         [SerializeField] private string toGuid;
 
@@ -23,6 +25,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             var proxy = CreateInstance<ScreenTransitionSelectionProxy>();
             proxy.hideFlags = HideFlags.HideAndDontSave;
             proxy.graph = graph;
+            proxy.transitionIndex = FindTransitionIndex(graph, transition);
             proxy.fromGuid = transition.FromNodeGuid;
             proxy.toGuid = transition.ToNodeGuid;
             proxy.eventName = transition.EventName;
@@ -44,21 +47,47 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             var so = new SerializedObject(graph);
             so.Update();
             var transitionsProp = so.FindProperty("transitions");
-            for (var i = 0; i < transitionsProp.arraySize; i++)
-            {
-                var t = transitionsProp.GetArrayElementAtIndex(i);
-                var from = t.FindPropertyRelative("fromNodeGuid").stringValue;
-                var to = t.FindPropertyRelative("toNodeGuid").stringValue;
-                if (from != fromGuid || to != toGuid)
-                    continue;
 
-                // Update first match (MVP). Later we can add a transition GUID.
-                t.FindPropertyRelative("eventName").stringValue = eventName;
-                t.FindPropertyRelative("condition").objectReferenceValue = condition;
-                break;
+            if (transitionIndex >= 0 && transitionIndex < transitionsProp.arraySize)
+            {
+                var transitionProperty = transitionsProp.GetArrayElementAtIndex(transitionIndex);
+                transitionProperty.FindPropertyRelative("eventName").stringValue = eventName;
+                transitionProperty.FindPropertyRelative("condition").objectReferenceValue = condition;
+            }
+            else
+            {
+                for (var i = 0; i < transitionsProp.arraySize; i++)
+                {
+                    var transitionProperty = transitionsProp.GetArrayElementAtIndex(i);
+                    var from = transitionProperty.FindPropertyRelative("fromNodeGuid").stringValue;
+                    var to = transitionProperty.FindPropertyRelative("toNodeGuid").stringValue;
+                    if (from != fromGuid || to != toGuid)
+                        continue;
+
+                    transitionIndex = i;
+                    transitionProperty.FindPropertyRelative("eventName").stringValue = eventName;
+                    transitionProperty.FindPropertyRelative("condition").objectReferenceValue = condition;
+                    break;
+                }
             }
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(graph);
+            ScreenFlowGraphEditorWindow.NotifyGraphChanged(graph);
+        }
+
+        private static int FindTransitionIndex(ScreenFlowGraph graph, ScreenFlowTransition transition)
+        {
+            if (!graph || transition == null) return -1;
+
+            for (var i = 0; i < graph.Transitions.Count; i++)
+            {
+                if (ReferenceEquals(graph.Transitions[i], transition))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
     }
 }

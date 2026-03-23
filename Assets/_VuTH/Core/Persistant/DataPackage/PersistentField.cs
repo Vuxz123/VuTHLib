@@ -59,12 +59,11 @@ namespace _VuTH.Core.Persistant.DataPackage
         
         /// <summary>
         /// Subscribe to value changes.
-        /// IMPORTANT: Always add .AddTo(disposable) to prevent memory leaks!
+        /// Returns IDisposable — caller MUST dispose when done to prevent leaks.
         /// </summary>
-        public Observable<T> Subscribe(Action<T> onNext)
+        public IDisposable Subscribe(Action<T> onNext)
         {
-            _value.Subscribe(onNext);
-            return _value;
+            return _value.Subscribe(onNext);
         }
         
         public void Dispose()

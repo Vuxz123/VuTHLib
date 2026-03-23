@@ -1,5 +1,7 @@
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Core.A;
+using _VuTH.Core.GameCycle.ScreenFlow.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -25,12 +27,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             return proxy;
         }
 
-        private void OnValidate()
-        {
-            PushToGraph();
-        }
-
-        private void PushToGraph()
+        internal void ApplyToGraph()
         {
             if (!graph || string.IsNullOrEmpty(nodeGuid))
                 return;
@@ -50,9 +47,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             }
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(graph);
-
-            // Nudge editor selection so the window can refresh the view (GraphView reads from graph).
-            Selection.activeObject = graph;
+            ScreenFlowGraphEditorWindow.NotifyGraphChanged(graph);
         }
 
         public void PingScreen()
@@ -71,8 +66,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             Undo.RecordObject(graph, "Set Start Node");
             graph.SetStartNode(nodeGuid);
             EditorUtility.SetDirty(graph);
-
-            Selection.activeObject = graph;
+            ScreenFlowGraphEditorWindow.NotifyGraphChanged(graph);
         }
 
         public string Guid => nodeGuid;

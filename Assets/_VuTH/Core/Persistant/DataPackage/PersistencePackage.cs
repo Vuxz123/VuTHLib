@@ -1,6 +1,7 @@
+#nullable enable
 using System;
-using System.Collections.Generic;
 using System.Threading;
+using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using R3;
 using _VuTH.Core.Persistant.SaveSystem;
@@ -9,8 +10,8 @@ namespace _VuTH.Core.Persistant.DataPackage
 {
     /// <summary>
     /// Base class for persistence packages.
-    /// Acts as an Aggregator that groups multiple PersistentField and handles save/load logic.
-    /// Uses Debounce from R3 to optimize I/O operations.
+    /// Acts as a data container only — save logic is handled by DataPersistenceManager.
+    /// Uses R3 Observable for dirty state notifications.
     /// </summary>
     /// <typeparam name="TData">DTO type for serialization.</typeparam>
     public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, IDisposable 
@@ -19,14 +20,15 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// <summary>
         /// Default debounce time in seconds for Debounced strategy.
         /// </summary>
-        protected virtual float DebounceSeconds => 3.0f;
+        public virtual float DebounceSeconds => 3.0f;
         
-        private readonly List<PersistentFieldBase> _fields = new();
-        private readonly CompositeDisposable _disposables = new();
-        private IDisposable? _saveSubscription;
+        private readonly Subject<bool> _dirtySubject = new();
         private ISaveService? _saveService;
         private bool _isDirty;
         private bool _isLoading;
+        private bool _isSaving;
+        private bool _saveRequestedWhileSaving;
+        private int _dirtyVersion;
         
         /// <inheritdoc/>
         public string StorageKey { get; }
@@ -36,6 +38,9 @@ namespace _VuTH.Core.Persistant.DataPackage
         
         /// <inheritdoc/>
         public bool IsDirty => _isDirty;
+        
+        /// <inheritdoc/>
+        public Observable<bool> DirtyObservable => _dirtySubject;
 
         protected PersistencePackage(string storageKey, SaveStrategy strategy)
         {
@@ -44,92 +49,85 @@ namespace _VuTH.Core.Persistant.DataPackage
         }
         
         /// <summary>
-        /// Initialize the package with save service. Call this after construction.
+        /// Set the save service. Called by Manager during initialization.
         /// </summary>
-        public void Initialize(ISaveService saveService)
+        public void SetSaveService(ISaveService saveService)
         {
             _saveService = saveService;
-            SetupSavePipeline();
         }
         
         /// <summary>
-        /// Register a persistent field to this package.
+        /// Mark this package as dirty, notifying the Manager's save pipeline.
         /// </summary>
-        protected void RegisterField(PersistentFieldBase field)
+        public void MarkDirty()
         {
-            _fields.Add(field);
-        }
-        
-        /// <summary>
-        /// Setup the save pipeline based on strategy.
-        /// </summary>
-        private void SetupSavePipeline()
-        {
-            // Create observable that tracks dirty state
-            var dirtyObservable = Observable.EveryValueChanged(this, x => x.IsDirty);
-
-            Func<bool, bool> predicate = dirty => dirty && !_isLoading;
-            Action<bool> onNext = _ => SaveNow();
-            switch (Strategy)
-            {
-                case SaveStrategy.Immediate:
-                    // Save immediately when dirty
-                    _saveSubscription = dirtyObservable
-                        .Where(predicate)
-                        .Subscribe(onNext);
-                    break;
-                    
-                case SaveStrategy.Debounced:
-                    // Debounce saves - wait for stable state
-                    _saveSubscription = dirtyObservable
-                        .Where(predicate)
-                        .ThrottleFirst(TimeSpan.FromSeconds(DebounceSeconds))
-                        .Subscribe(onNext);
-                    break;
-                    
-                case SaveStrategy.ManualOnly:
-                case SaveStrategy.OnAppClose:
-                    // No auto-save, manual only
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
-            
-            _saveSubscription?.AddTo(_disposables);
-        }
-        
-        /// <inheritdoc/>
-        public virtual void MarkDirty()
-        {
+            if (_isLoading) return;
+            _dirtyVersion++;
             _isDirty = true;
+            _dirtySubject.OnNext(true);
         }
         
-        /// <inheritdoc/>
-        public virtual void SaveNow()
+        /// <summary>
+        /// Force save immediately. Called by Manager's save pipeline.
+        /// </summary>
+        public void SaveNow()
+        {
+            _ = SaveNowAsync();
+        }
+        
+        public async UniTask SaveNowAsync()
         {
             if (_saveService == null || !_isDirty)
                 return;
-                
-            var payload = ExtractPayload();
-            _ = SaveInternalAsync(payload);
+
+            if (_isSaving)
+            {
+                _saveRequestedWhileSaving = true;
+                return;
+            }
+
+            do
+            {
+                _isSaving = true;
+                _saveRequestedWhileSaving = false;
+
+                var payload = ExtractPayload();
+                var versionAtSaveStart = _dirtyVersion;
+
+                try
+                {
+                    await _saveService.SaveAsync(StorageKey, payload, CancellationToken.None);
+
+                    if (_dirtyVersion == versionAtSaveStart)
+                    {
+                        _isDirty = false;
+                        _dirtySubject.OnNext(false);
+                    }
+                    else
+                    {
+                        _isDirty = true;
+                        _saveRequestedWhileSaving = true;
+                    }
+
+                    this.Log($"Saved {StorageKey}");
+                }
+                catch (Exception ex)
+                {
+                    _isDirty = true;
+                    this.LogError($"Save failed for {StorageKey}: {ex.Message}");
+                    break;
+                }
+                finally
+                {
+                    _isSaving = false;
+                }
+            } while (_saveRequestedWhileSaving && _saveService != null);
         }
         
-        private async UniTask SaveInternalAsync(TData payload)
-        {
-            try
-            {
-                await _saveService!.SaveAsync(StorageKey, payload, CancellationToken.None);
-                _isDirty = false;
-                UnityEngine.Debug.Log($"[PersistencePackage] Saved {StorageKey}");
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogError($"[PersistencePackage] Save failed for {StorageKey}: {ex.Message}");
-            }
-        }
-        
-        /// <inheritdoc/>
-        public virtual void Load()
+        /// <summary>
+        /// Load data from storage. Called by Manager.
+        /// </summary>
+        public void Load()
         {
             if (_saveService == null)
                 return;
@@ -138,7 +136,6 @@ namespace _VuTH.Core.Persistant.DataPackage
             
             try
             {
-                // Use LoadAsync with default to get existing or default data
                 var loadedData = _saveService.LoadAsync(StorageKey, ExtractPayload(), CancellationToken.None)
                     .GetAwaiter().GetResult();
 
@@ -148,11 +145,12 @@ namespace _VuTH.Core.Persistant.DataPackage
                 }
                 
                 _isDirty = false;
-                UnityEngine.Debug.Log($"[PersistencePackage] Loaded {StorageKey}");
+                _dirtySubject.OnNext(false);
+                this.Log($"Loaded {StorageKey}");
             }
             catch (Exception ex)
             {
-                UnityEngine.Debug.LogError($"[PersistencePackage] Load failed for {StorageKey}: {ex.Message}");
+                this.LogError($"Load failed for {StorageKey}: {ex.Message}");
             }
             finally
             {
@@ -166,8 +164,13 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// <inheritdoc/>
         public abstract void InjectPayload(TData data);
         
+        // Explicit implementation for non-generic IPersistencePackage
+        object IPersistencePackage.ExtractPayload() => ExtractPayload()!;
+        
+        void IPersistencePackage.InjectPayload(object data) => InjectPayload((TData)data);
+        
         /// <summary>
-        /// Load without triggering auto-save. Used during InjectPayload.
+        /// Load without triggering dirty notification. Used during InjectPayload.
         /// </summary>
         protected void LoadWithoutNotify(Action loadAction)
         {
@@ -180,50 +183,13 @@ namespace _VuTH.Core.Persistant.DataPackage
             _isDirty = false;
         }
         
+        /// <summary>
+        /// Dispose the package.
+        /// </summary>
         public virtual void Dispose()
         {
-            _saveSubscription?.Dispose();
-            
-            foreach (var field in _fields)
-            {
-                field.Dispose();
-            }
-            _fields.Clear();
-            
-            _disposables.Dispose();
-        }
-    }
-    
-    /// <summary>
-    /// Non-generic base for field registration.
-    /// </summary>
-    public abstract class PersistentFieldBase : IDisposable
-    {
-        public abstract void Dispose();
-    }
-    
-    /// <summary>
-    /// Typed field wrapper for internal use.
-    /// </summary>
-    public class PersistentFieldTyped<T> : PersistentFieldBase
-    {
-        private readonly PersistentField<T> _field;
-        
-        public PersistentField<T> Field => _field;
-        public T Value
-        {
-            get => _field.Value;
-            set => _field.Value = value;
-        }
-        
-        public PersistentFieldTyped(PersistentField<T> field)
-        {
-            _field = field;
-        }
-        
-        public override void Dispose()
-        {
-            _field.Dispose();
+            _dirtySubject?.OnNext(false);
+            _dirtySubject?.Dispose();
         }
     }
 }

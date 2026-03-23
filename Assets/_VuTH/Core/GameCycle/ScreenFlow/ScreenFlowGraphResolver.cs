@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using _VuTH.Core.GameCycle.ScreenFlow.Condition;
+using UnityEngine;
 using ZLinq;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow
@@ -52,34 +53,51 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
             if (!_transitionsByKey.TryGetValue((currentNode.Guid, eventName), out var transitions) || transitions == null)
                 return false;
 
-            foreach (var t in transitions.AsValueEnumerable()
-                         .Where(t => t != null)
-                         .Where(t => Evaluate(t.Condition)))
+            ScreenFlowNode firstMatch = null;
+            bool multipleConditionsTrue = false;
+
+            foreach (var t in transitions.AsValueEnumerable().Where(t => t != null))
             {
-                if (string.IsNullOrWhiteSpace(t.ToNodeGuid))
-                    return false;
+                if (!Evaluate(t.Condition)) continue;
+                if (firstMatch == null)
+                {
+                    if (string.IsNullOrWhiteSpace(t.ToNodeGuid))
+                        return false;
 
-                if (!_nodeByGuid.TryGetValue(t.ToNodeGuid, out var toNode) || toNode == null) return false;
-                nextNode = toNode;
-                return true;
-
+                    if (!_nodeByGuid.TryGetValue(t.ToNodeGuid, out var toNode) || toNode == null)
+                        return false;
+                    firstMatch = toNode;
+                }
+                else
+                {
+                    multipleConditionsTrue = true;
+                }
             }
 
-            return false;
+            if (multipleConditionsTrue)
+            {
+                Debug.LogWarning($"[ScreenFlowGraphResolver] Multiple conditions evaluated to true for event '{eventName}' from node '{currentNode.Guid}'. First matching transition wins deterministically. This may indicate unintended graph configuration.");
+            }
+
+            nextNode = firstMatch;
+            return firstMatch != null;
         }
 
         private static bool Evaluate(TransitionCondition condition)
         {
-            // Policy: null condition is ALWAYS TRUE.
-            if (!condition) return true;
+            if (!condition)
+            {
+                Debug.LogError($"[ScreenFlowGraphResolver] TransitionCondition is null. A null condition should not silently pass.");
+                return false;
+            }
 
             try
             {
                 return condition.Evaluate();
             }
-            catch
+            catch (Exception ex)
             {
-                // Fail-safe: if condition throws, treat as false.
+                Debug.LogWarning($"[ScreenFlowGraphResolver] Condition evaluation threw exception: {ex.Message}");
                 return false;
             }
         }
@@ -117,8 +135,32 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                         _transitionsByKey[key] = list;
                     }
 
-                    // Preserve graph order.
                     list.Add(t);
+                }
+
+                DetectAmbiguousTransitions();
+            }
+        }
+
+        private void DetectAmbiguousTransitions()
+        {
+            foreach (var kvp in _transitionsByKey)
+            {
+                var (fromGuid, eventName) = kvp.Key;
+                var transitions = kvp.Value;
+
+                int nullConditionCount = 0;
+                foreach (var t in transitions)
+                {
+                    if (t != null && !t.Condition)
+                    {
+                        nullConditionCount++;
+                    }
+                }
+
+                if (nullConditionCount > 1)
+                {
+                    Debug.LogWarning($"[ScreenFlowGraphResolver] Multiple unconditional transitions (null conditions) for event '{eventName}' from node '{fromGuid}'. Only the first in graph order will be selected.");
                 }
             }
         }

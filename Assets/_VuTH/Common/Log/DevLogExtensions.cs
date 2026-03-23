@@ -172,6 +172,19 @@ namespace _VuTH.Common.Log
             LogInternal(origin, $"[VERBOSE] {msg}", c, PrefixKind.Log);
         }
         
+        public static void Assert(this object origin, bool condition, string msg, Color? color = null)
+        {
+            if (origin == null)
+            {
+                LogUtils.LogError("Attempted to assert from null origin", Color.red);
+                return;
+            }
+
+            if (condition) return;
+            var c = color ?? Color.red;
+            LogInternal(origin, $"[ASSERT FAILED] {msg}", c, PrefixKind.Error);
+        }
+        
         private static void LogInternal(object origin, string msg, Color? color, PrefixKind kind)
         {
             try

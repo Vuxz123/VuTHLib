@@ -31,14 +31,16 @@ namespace _VuTH.Core.Persistant.DataPackage
         public PersistentField<int> HighScore { get; }
         
         public PlayerProfilePackage() 
-            : base("player_profile", SaveStrategy.Debounced)
+            : base("player_profile", SaveStrategy.Immediate)
         {
-            // Initialize fields and register them
+            // Initialize fields
             PlayerName = new PersistentField<string>(this, "Player");
             Level = new PersistentField<int>(this, 1);
             Gold = new PersistentField<long>(this, 0);
             Exp = new PersistentField<long>(this, 0);
             HighScore = new PersistentField<int>(this, 0);
+            // Note: SaveLifecycleHook only saves ManualOnly/OnAppClose packages.
+            // Debounced packages auto-save via R3 throttle — no hook registration needed.
         }
         
         // Step 2 (continued): Implement ExtractPayload - map fields to DTO
@@ -91,7 +93,11 @@ namespace _VuTH.Core.Persistant.DataPackage
         
         public override void Dispose()
         {
-            SaveLifecycleHook.UnregisterPackage(this);
+            PlayerName.Dispose();
+            Level.Dispose();
+            Gold.Dispose();
+            Exp.Dispose();
+            HighScore.Dispose();
             base.Dispose();
         }
     }

@@ -1,5 +1,6 @@
 ﻿using _VuTH.Common;
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Core.A;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow
@@ -32,5 +33,13 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         /// Event cuối cùng đã trigger (debug / telemetry).
         /// </summary>
         string LastEvent { get; }
+
+        /// <summary>
+        /// Truy cập history của flow.
+        /// </summary>
+        /// <param name="stepsBack">Số bước lùi (1 = previous, 2 = 2 steps back, etc.)</param>
+        /// <param name="node">Node tương ứng hoặc null nếu không đủ history</param>
+        /// <returns>True nếu có đủ history, false nếu stepsBack vượt quá độ dài history</returns>
+        bool TryGetPrevious(int stepsBack, out ScreenFlowNode node);
     }
 }

@@ -5,7 +5,7 @@
       "depth": 0,
       "source": "git",
       "dependencies": {},
-      "hash": "94ec0872e4f9addcddc05ef4db2286b6691e82b5"
+      "hash": "2b49ed40436b89e023df4cc0d39db67de2c78735"
     },
     "com.cysharp.messagepipe.vcontainer": {
       "version": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
@@ -52,7 +52,7 @@
       "hash": "34432703a177c97631a4eb1d908f086037c67969"
     },
     "com.kyrylokuzyk.primetween": {
-      "version": "1.3.7",
+      "version": "1.3.8",
       "depth": 0,
       "source": "registry",
       "dependencies": {},
@@ -364,7 +364,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.memoryprofiler": {
-      "version": "1.1.9",
+      "version": "1.1.12",
       "depth": 0,
       "source": "registry",
       "dependencies": {

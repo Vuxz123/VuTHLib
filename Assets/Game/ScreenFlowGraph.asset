@@ -16,19 +16,21 @@ MonoBehaviour:
   nodes:
   - guid: d9ea2a86d2fd57f4fb5ed89a619b0501
     screen: {fileID: 11400000, guid: 96e301abb6e202c4d9db593e2390ab0c, type: 2}
-    editorPosition: {x: 419, y: 83}
+    editorPosition: {x: 313, y: 772}
   - guid: b4a92a889a16e3549985b4dfc5eb4a7e
     screen: {fileID: 11400000, guid: c182e7f0329784d48bf323a117bdd81d, type: 2}
-    editorPosition: {x: 1214, y: 83}
+    editorPosition: {x: 1005, y: 136}
   - guid: a8f1baf506f31924395e9d0855f724ae
     screen: {fileID: 11400000, guid: 7cb7659b83ba6cb4e928543a9ad8c421, type: 2}
-    editorPosition: {x: 833, y: 83}
+    editorPosition: {x: 678, y: 424}
   transitions:
-  - fromNodeGuid: d9ea2a86d2fd57f4fb5ed89a619b0501
+  - guid: 
+    fromNodeGuid: d9ea2a86d2fd57f4fb5ed89a619b0501
     toNodeGuid: a8f1baf506f31924395e9d0855f724ae
-    eventName: BoostrapCompleted
+    eventName: BoostrapEvent
     condition: {fileID: 11400000, guid: 6a6e53779182a784fa91267caa6e3a92, type: 2}
-  - fromNodeGuid: a8f1baf506f31924395e9d0855f724ae
+  - guid: 
+    fromNodeGuid: a8f1baf506f31924395e9d0855f724ae
     toNodeGuid: b4a92a889a16e3549985b4dfc5eb4a7e
     eventName: Play
     condition: {fileID: 11400000, guid: 6a6e53779182a784fa91267caa6e3a92, type: 2}

@@ -1,3 +1,4 @@
+using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Core.A;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -21,6 +22,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             var guidProp = serializedObject.FindProperty("nodeGuid");
             var graphProp = serializedObject.FindProperty("graph");
             var screenProp = serializedObject.FindProperty("screen");
+            var proxy = (ScreenNodeSelectionProxy)target;
 
             var guidField = new TextField("Guid") { isReadOnly = true };
             guidField.SetValueWithoutNotify(guidProp.stringValue);
@@ -38,11 +40,15 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                 value = screenProp.objectReferenceValue as ScreenModel
             };
 
+            var helpBox = new HelpBox(string.Empty, HelpBoxMessageType.Info);
+
             screenField.RegisterValueChangedCallback(evt =>
             {
                 serializedObject.Update();
                 screenProp.objectReferenceValue = evt.newValue as ScreenModel;
                 serializedObject.ApplyModifiedProperties();
+                ((ScreenNodeSelectionProxy)target).ApplyToGraph();
+                RefreshHelp();
             });
 
             var buttonsRow = new VisualElement
@@ -52,8 +58,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                     flexDirection = FlexDirection.Row
                 }
             };
-
-            var proxy = (ScreenNodeSelectionProxy)target;
 
             var pingBtn = new Button(proxy.PingScreen)
             {
@@ -68,8 +72,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 
             buttonsRow.Add(pingBtn);
             buttonsRow.Add(startBtn);
-
-            var helpBox = new HelpBox(string.Empty, HelpBoxMessageType.Info);
 
             screenField.RegisterValueChangedCallback(_ => RefreshHelp());
             RefreshHelp();

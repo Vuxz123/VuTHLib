@@ -1,8 +1,12 @@
+using _VuTH.Core.Persistant.SaveSystem;
+using Cysharp.Threading.Tasks;
+using R3;
+
 namespace _VuTH.Core.Persistant.DataPackage
 {
     /// <summary>
     /// Interface for persistence packages that manage save data.
-    /// Aggregates multiple PersistentField and handles save/load logic.
+    /// Packages only hold data — save logic is managed by DataPersistenceManager.
     /// </summary>
     public interface IPersistencePackage
     {
@@ -22,14 +26,44 @@ namespace _VuTH.Core.Persistant.DataPackage
         bool IsDirty { get; }
         
         /// <summary>
-        /// Mark this package as having unsaved changes.
+        /// Observable of dirty state changes. Manager subscribes to drive save pipeline.
+        /// </summary>
+        Observable<bool> DirtyObservable { get; }
+        
+        /// <summary>
+        /// Debounce time in seconds for Debounced strategy.
+        /// </summary>
+        float DebounceSeconds { get; }
+
+        /// <summary>
+        /// Set the save service used by this package.
+        /// </summary>
+        void SetSaveService(ISaveService saveService);
+
+        /// <summary>
+        /// Mark the package as dirty and notify the save pipeline.
         /// </summary>
         void MarkDirty();
+        
+        /// <summary>
+        /// Extract current data as DTO for serialization.
+        /// </summary>
+        object ExtractPayload();
+        
+        /// <summary>
+        /// Inject data from DTO after deserialization.
+        /// </summary>
+        void InjectPayload(object data);
         
         /// <summary>
         /// Force save immediately.
         /// </summary>
         void SaveNow();
+
+        /// <summary>
+        /// Force save and await completion.
+        /// </summary>
+        UniTask SaveNowAsync();
         
         /// <summary>
         /// Load data from storage.
@@ -45,7 +79,7 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// <summary>
         /// Extract current data as DTO for serialization.
         /// </summary>
-        TData ExtractPayload();
+        new TData ExtractPayload();
         
         /// <summary>
         /// Inject data from DTO after deserialization.

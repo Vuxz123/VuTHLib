@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -8,13 +9,15 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
 {
     public class ScreenFlowGraphEditorWindow : EditorWindow
     {
-        private const string GraphViewName = "Screen Flow Graph";
+        private const float InspectorWidth = 320f;
+        private static readonly List<ScreenFlowGraphEditorWindow> OpenWindows = new();
 
         private ScreenFlowGraph _graph;
         private ScreenFlowGraphView _graphView;
-
         private VisualElement _inspectorRoot;
+        private ObjectField _graphField;
         private UnityEditor.Editor _activeSelectionEditor;
+        private bool _refreshQueued;
 
         [MenuItem("VuTH/Core/Screen Flow/Screen Flow Graph Editor")]
         public static void Open()
@@ -30,56 +33,72 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
             window.SetGraph(graph);
         }
 
+        internal static void NotifyGraphChanged(ScreenFlowGraph graph)
+        {
+            if (!graph) return;
+
+            for (var i = 0; i < OpenWindows.Count; i++)
+            {
+                var window = OpenWindows[i];
+                if (window == null || window._graph != graph) continue;
+                window.QueueGraphRefresh();
+            }
+        }
+
+        private void OnEnable()
+        {
+            if (!OpenWindows.Contains(this))
+            {
+                OpenWindows.Add(this);
+            }
+        }
+
         private void CreateGUI()
         {
             var root = rootVisualElement;
+            root.Clear();
             root.style.flexDirection = FlexDirection.Row;
 
-            // Left: graph
-            _graphView = new ScreenFlowGraphView(this);
-            _graphView.name = GraphViewName;
-            _graphView.StretchToParentSize();
-            _graphView.style.flexGrow = 1;
+            _graphView = new ScreenFlowGraphView(this)
+            {
+                name = "Screen Flow Graph"
+            };
+            _graphView.style.flexGrow = 1f;
             root.Add(_graphView);
 
-            // Right: inspector
             _inspectorRoot = new VisualElement
             {
                 name = "inspector",
                 style =
                 {
-                    width = 320,
+                    width = InspectorWidth,
                     flexShrink = 0,
                     borderLeftWidth = 1,
-                    borderLeftColor = new Color(0, 0, 0, 0.35f),
+                    borderLeftColor = new Color(0f, 0f, 0f, 0.35f),
                     paddingLeft = 8,
                     paddingRight = 8,
                     paddingTop = 8,
                     paddingBottom = 8,
-                    backgroundColor = new Color(0.15f, 0.15f, 0.15f, 1),
+                    backgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f),
                 }
             };
             root.Add(_inspectorRoot);
 
-            // Toolbar (top of inspector)
-            var graphField = new ObjectField("Graph")
+            _graphField = new ObjectField("Graph")
             {
                 objectType = typeof(ScreenFlowGraph),
-                value = _graph,
-                allowSceneObjects = false
+                allowSceneObjects = false,
+                value = _graph
             };
-            graphField.RegisterValueChangedCallback(evt => SetGraph(evt.newValue as ScreenFlowGraph));
-            _inspectorRoot.Add(graphField);
+            _graphField.RegisterValueChangedCallback(evt => SetGraph(evt.newValue as ScreenFlowGraph));
+            _inspectorRoot.Add(_graphField);
+            _inspectorRoot.Add(new Label("Select a node or transition to edit."));
 
-            _inspectorRoot.Add(new Label("Select a node/transition to edit."));
-
-            if (_graph)
-                _graphView.PopulateView(_graph);
+            RefreshGraphView();
         }
 
         private void OnSelectionChange()
         {
-            // If user selects a ScreenFlowGraph asset, open it.
             if (Selection.activeObject is ScreenFlowGraph selected)
             {
                 SetGraph(selected);
@@ -88,29 +107,52 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
 
         private void OnDisable()
         {
-            _graphView?.Dispose();
+            OpenWindows.Remove(this);
 
-            if (!_activeSelectionEditor) return;
-            DestroyImmediate(_activeSelectionEditor);
-            _activeSelectionEditor = null;
+            _graphView?.Cleanup();
+            _graphView = null;
+
+            if (_activeSelectionEditor)
+            {
+                DestroyImmediate(_activeSelectionEditor);
+                _activeSelectionEditor = null;
+            }
         }
 
-        private void SetGraph(ScreenFlowGraph newGraph)
+        internal void SetGraph(ScreenFlowGraph graph)
         {
-            _graph = newGraph;
-            if (_graphView == null) return;
-            _graphView.PopulateView(_graph);
+            _graph = graph;
+
+            if (_graphField != null)
+            {
+                _graphField.SetValueWithoutNotify(graph);
+            }
+
+            RefreshGraphView();
             ShowSelectionInspector(null);
+        }
+
+        internal void QueueGraphRefresh()
+        {
+            if (_refreshQueued) return;
+            _refreshQueued = true;
+
+            EditorApplication.delayCall += () =>
+            {
+                _refreshQueued = false;
+                if (this == null) return;
+                RefreshGraphView();
+            };
         }
 
         internal void ShowSelectionInspector(Object selection)
         {
-            if (_inspectorRoot == null)
-                return;
+            if (_inspectorRoot == null) return;
 
-            // Clear everything except the first ObjectField (Graph picker)
             while (_inspectorRoot.childCount > 1)
+            {
                 _inspectorRoot.RemoveAt(1);
+            }
 
             if (_activeSelectionEditor)
             {
@@ -120,7 +162,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
 
             if (!selection)
             {
-                _inspectorRoot.Add(new Label("Select a node/transition to edit."));
+                _inspectorRoot.Add(new Label("Select a node or transition to edit."));
                 return;
             }
 
@@ -131,9 +173,12 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
                 return;
             }
 
-            // UIElements inspector (no IMGUIContainer)
-            var inspector = new InspectorElement(_activeSelectionEditor);
-            _inspectorRoot.Add(inspector);
+            _inspectorRoot.Add(new InspectorElement(_activeSelectionEditor));
+        }
+
+        private void RefreshGraphView()
+        {
+            _graphView?.SetGraph(_graph);
         }
     }
 }

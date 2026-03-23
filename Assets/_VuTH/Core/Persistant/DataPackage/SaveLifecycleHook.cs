@@ -1,102 +1,126 @@
 using System;
 using System.Collections.Generic;
+using _VuTH.Common.Log;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
+using ZLinq;
 
 namespace _VuTH.Core.Persistant.DataPackage
 {
     /// <summary>
-    /// Singleton that handles mobile app lifecycle events.
-    /// Forces save on all dirty packages when app is paused or backgrounded.
+    /// Handles mobile app lifecycle events for persistence.
+    /// Forces save on all dirty packages when app loses focus, pauses, or quits.
     /// Registered via VContainer IStartable.
+    /// Uses instance-based package list (not static) for proper DI and testability.
     /// </summary>
     public class SaveLifecycleHook : IInitializable, IDisposable
     {
-        private static readonly List<IPersistencePackage> _packages = new();
-        
+        private readonly HashSet<IPersistencePackage> _packages = new();
+        private bool _quitRequested;
+
         [Inject]
+        public SaveLifecycleHook()
+        {
+        }
+
         public void Initialize()
         {
             // Register to Unity lifecycle events
             Application.focusChanged += OnFocusChanged;
-            //Application. += OnPause;
+            //Application.pausedChanged += OnPausedChanged;
             Application.quitting += OnQuitting;
             
-            Debug.Log("[SaveLifecycleHook] Initialized");
+            this.Log("SaveLifecycleHook initialized");
         }
-        
+
         /// <summary>
         /// Register a package to be managed by lifecycle hook.
         /// </summary>
-        public static void RegisterPackage(IPersistencePackage package)
+        public IDisposable RegisterPackage(IPersistencePackage package)
         {
-            if (!_packages.Contains(package))
-            {
-                _packages.Add(package);
-                Debug.Log($"[SaveLifecycleHook] Registered package: {package.StorageKey}");
-            }
+            _packages.Add(package);
+            return new LifecycleRegistration(_packages, package);
         }
-        
+
         /// <summary>
         /// Unregister a package from lifecycle hook.
         /// </summary>
-        public static void UnregisterPackage(IPersistencePackage package)
+        public void UnregisterPackage(IPersistencePackage package)
         {
             _packages.Remove(package);
         }
-        
+
+        private sealed class LifecycleRegistration : IDisposable
+        {
+            private readonly HashSet<IPersistencePackage> _packages;
+            private readonly IPersistencePackage _package;
+            private bool _disposed;
+
+            public LifecycleRegistration(HashSet<IPersistencePackage> packages, IPersistencePackage package)
+            {
+                _packages = packages;
+                _package = package;
+            }
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _packages.Remove(_package);
+            }
+        }
+
         private void OnFocusChanged(bool hasFocus)
         {
             if (!hasFocus)
             {
-                // App lost focus - save all dirty packages
+                // App lost focus (switched away) — save all dirty packages
                 SaveAllDirty();
             }
         }
-        
-        private void OnPause(bool paused)
-        {
-            if (paused)
-            {
-                // App was paused (e.g., user pressed home button on Android)
-                Debug.Log("[SaveLifecycleHook] App paused, saving dirty packages...");
-                SaveAllDirty();
-            }
-        }
-        
+
+        // private void OnPausedChanged(bool paused)
+        // {
+        //     if (paused)
+        //     {
+        //         // App was paused (user pressed home button on mobile, etc.)
+        //         this.Log("App paused, saving dirty packages...");
+        //         SaveAllDirty();
+        //     }
+        // }
+
         private void OnQuitting()
         {
-            // App is about to quit
-            Debug.Log("[SaveLifecycleHook] App quitting, saving dirty packages...");
+            if (_quitRequested) return;
+            _quitRequested = true;
+            
+            this.Log("App quitting, saving dirty packages...");
             SaveAllDirty();
         }
-        
+
         private void SaveAllDirty()
         {
-            foreach (var package in _packages)
+            foreach (var package in _packages.AsValueEnumerable()
+                         .Where(package => package.IsDirty &&
+                                           package.Strategy 
+                                               is SaveStrategy.OnAppClose 
+                                               or SaveStrategy.ManualOnly))
             {
-                if (package.Strategy == SaveStrategy.OnAppClose || package.Strategy == SaveStrategy.ManualOnly)
-                {
-                    // Only save packages that should save on app close
-                    if (package.IsDirty)
-                    {
-                        Debug.Log($"[SaveLifecycleHook] Saving dirty package: {package.StorageKey}");
-                        package.SaveNow();
-                    }
-                }
+                this.Log($"Saving dirty package: {package.StorageKey}");
+                package.SaveNowAsync().GetAwaiter().GetResult();
             }
         }
-        
+
         public void Dispose()
         {
             Application.focusChanged -= OnFocusChanged;
-            //Application.pause -= OnPause;
+            //Application.pausedChanged -= OnPausedChanged;
             Application.quitting -= OnQuitting;
             
             _packages.Clear();
             
-            Debug.Log("[SaveLifecycleHook] Disposed");
+            this.Log("SaveLifecycleHook disposed");
         }
     }
 }

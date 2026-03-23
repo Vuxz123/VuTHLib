@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen;
 using _VuTH.Core.GameCycle.Screen.Core.A;
@@ -17,7 +18,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         
         private IScreenManager _navigator;
 
-        private string _pendingEvent;
+        private readonly Queue<string> _pendingEvents = new();
         private bool _started;
         private bool _disposed;
 
@@ -107,13 +108,18 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
             if (string.IsNullOrWhiteSpace(eventName))
                 return;
 
-            // Mandatory policy: coalesce ONLY when ScreenManager is transitioning.
             if (_navigator.IsTransitioning)
             {
-                _pendingEvent = eventName;
+                _pendingEvents.Enqueue(eventName);
                 return;
             }
 
+            var visitedNodes = new HashSet<string>();
+            ProcessTrigger(eventName, visitedNodes);
+        }
+
+        private void ProcessTrigger(string eventName, HashSet<string> visitedNodes)
+        {
             var currentNode = _state.CurrentNode;
             if (currentNode == null)
             {
@@ -127,13 +133,17 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                 return;
             }
 
+            if (!visitedNodes.Add(currentNode.Guid))
+            {
+                this.LogError($"[ScreenFlowActor] Circular loop detected! Node '{currentNode.Guid}' already visited in this trigger chain. Aborting transition.");
+                return;
+            }
+
             if (!_resolver.TryResolve(currentNode, eventName, out var nextNode) || nextNode == null)
                 return;
 
-            // Update state first? We'll update state before side-effect to be 'source of truth'.
             _state.Set(nextNode, eventName);
 
-            // Deterministic navigation policy: Enter for every resolved transition.
             var target = nextNode.Screen;
             if (target == null)
             {
@@ -141,7 +151,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                 return;
             }
 
-            // Fire-and-forget. ScreenManager guards concurrency via IsTransitioning.
             _navigator.Enter(target, _transitionContext);
         }
 
@@ -149,13 +158,10 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         {
             if (_disposed) return;
 
-            // Drain only AFTER an actual transition completes.
-            if (string.IsNullOrWhiteSpace(_pendingEvent)) return;
+            if (_pendingEvents.Count == 0) return;
 
-            var e = _pendingEvent;
-            _pendingEvent = null;
-
-            Trigger(e);
+            var nextEvent = _pendingEvents.Dequeue();
+            Trigger(nextEvent);
         }
     }
 }

@@ -1,11 +1,12 @@
 ﻿using System;
 using _VuTH.Common.Log;
+using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 using _VuTH.Core.GameCycle.Screen.Loading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
     [Serializable]
     public struct AdditiveSceneAddressableData
@@ -30,7 +31,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 
         [Header("Cache")]
         [Tooltip("Nếu true: khi đóng Screen sẽ chỉ SetActive(false) root GameObjects, không Unload scene.")]
-        public bool softCache = false;
+        public bool softCache;
 
         [Header("Settings")]
         public bool showLoadingScreen = true;

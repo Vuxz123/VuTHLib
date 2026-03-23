@@ -2,6 +2,7 @@ using System;
 using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen;
+using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Transition;
 using _VuTH.Core.GameCycle.ScreenFlow.Profile;
@@ -75,6 +76,19 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         public ScreenModel Current => _state.Current;
 
         public string LastEvent => _state.LastEvent;
+
+        public bool TryGetPrevious(int stepsBack, out ScreenFlowNode node)
+        {
+            node = null;
+            if (stepsBack < 1) return false;
+
+            var history = _state.History;
+            var index = history.Count - stepsBack;
+            if (index < 0) return false;
+
+            node = history[index];
+            return true;
+        }
 
         public ScreenFlowStateContainer State => _state;
 

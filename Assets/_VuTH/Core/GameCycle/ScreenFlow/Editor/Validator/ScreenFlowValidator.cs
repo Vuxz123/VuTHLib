@@ -213,6 +213,44 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                     eventName: g.Key.Event));
             }
 
+            // --- Orphan nodes: nodes with no incoming or outgoing transitions ---
+            var nodesWithOutgoing = new HashSet<string>();
+            var nodesWithIncoming = new HashSet<string>();
+
+            foreach (var t in transitions)
+            {
+                if (t == null) continue;
+                if (!string.IsNullOrWhiteSpace(t.FromNodeGuid))
+                    nodesWithOutgoing.Add(t.FromNodeGuid);
+                if (!string.IsNullOrWhiteSpace(t.ToNodeGuid))
+                    nodesWithIncoming.Add(t.ToNodeGuid);
+            }
+
+            foreach (var node in nodes)
+            {
+                if (node == null || string.IsNullOrWhiteSpace(node.Guid)) continue;
+
+                bool hasOutgoing = nodesWithOutgoing.Contains(node.Guid);
+                bool hasIncoming = nodesWithIncoming.Contains(node.Guid);
+                bool isStartNode = node.Guid == graph.StartNodeGuid;
+
+                if (!hasOutgoing && !isStartNode)
+                {
+                    issues.Add(new ScreenFlowValidationIssue(
+                        ScreenFlowValidationSeverity.Warning,
+                        $"Orphan node '{node.Guid}' has no outgoing transitions and is not the start node.",
+                        nodeGuid: node.Guid));
+                }
+
+                if (!hasIncoming && !isStartNode)
+                {
+                    issues.Add(new ScreenFlowValidationIssue(
+                        ScreenFlowValidationSeverity.Warning,
+                        $"Unreachable node '{node.Guid}' has no incoming transitions and cannot be reached from start.",
+                        nodeGuid: node.Guid));
+                }
+            }
+
             return issues;
         }
 

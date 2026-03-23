@@ -39,8 +39,11 @@ namespace TScript
             else
             {
                 // Fallback: initialize directly
-                _playerProfile.Initialize(SaveServiceManager.Instance);
-                _playerProfile.Load();
+                if (SaveServiceManager.HasInstance)
+                {
+                    _playerProfile.SetSaveService(SaveServiceManager.Instance);
+                    _playerProfile.Load();
+                }
             }
         }
         
@@ -92,7 +95,7 @@ namespace TScript
         private void OnDestroy()
         {
             // Clean up - save any dirty data
-            _playerProfile?.SaveNow();
+            _playerProfile?.SaveNowAsync().GetAwaiter().GetResult();
             
             // Unregister from manager
             _persistenceManager?.UnregisterPackage(_playerProfile!);
@@ -151,6 +154,16 @@ namespace TScript
                 MusicVolume.SetValueWithoutNotify(data.musicVolume);
                 QualityLevel.SetValueWithoutNotify(data.qualityLevel);
             });
+        }
+
+        public override void Dispose()
+        {
+            SoundEnabled.Dispose();
+            MusicEnabled.Dispose();
+            SoundVolume.Dispose();
+            MusicVolume.Dispose();
+            QualityLevel.Dispose();
+            base.Dispose();
         }
     }
     
