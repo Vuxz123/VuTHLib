@@ -12,6 +12,7 @@ using _VuTH.Core.Persistant.SaveSystem.Serialize;
 using Cysharp.Threading.Tasks;
 using MessagePipe;
 using UnityEngine;
+using VContainer.Unity;
 
 #if VCONTAINER
 using VContainer;
@@ -90,7 +91,7 @@ namespace _VuTH.Core.Persistant.SaveSystem
 #if VCONTAINER
         public override void ConfigureRootScope(IContainerBuilder builder)
         {
-            builder.RegisterInstance<ISaveManager>(this);
+            builder.RegisterComponent(this).As<ISaveManager>();
         }
         
         [Inject]

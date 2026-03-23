@@ -1,12 +1,12 @@
 using System;
 using _VuTH.Common;
 using _VuTH.Common.Log;
-using _VuTH.Core.GameCycle.Screen;
 using _VuTH.Core.GameCycle.Screen.Core;
-using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Transition;
 using _VuTH.Core.GameCycle.ScreenFlow.Profile;
 using UnityEngine;
+using VContainer;
+using VContainer.Unity;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow
 {
@@ -24,6 +24,18 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         private ScreenFlowStateContainer _state;
         private ScreenFlowActor _actor;
         private IScreenFlowResolver _resolver;
+        
+#if VCONTAINER
+        public override void ConfigureRootScope(IContainerBuilder builder)
+        {
+            builder.RegisterComponent(this).As<IScreenFlowManager>();
+        }
+        
+        [Inject]
+        public void Construct()
+        {
+        }
+#endif
         
         protected override void InitializeBootstrap()
         {

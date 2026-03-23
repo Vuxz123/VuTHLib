@@ -16,11 +16,12 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
     [Serializable]
     public class JsonFileSaveBackend : ISaveBackend
     {
-        private readonly string _basePath;
+        private readonly string? _basePath = null;
+        
+        private string GetBasePath => _basePath ?? Application.persistentDataPath;
 
         public JsonFileSaveBackend()
         {
-            _basePath = Application.persistentDataPath;
         }
 
         public JsonFileSaveBackend(string basePath)
@@ -35,8 +36,8 @@ namespace _VuTH.Core.Persistant.SaveSystem.Backend
                 .AsValueEnumerable()
                 .Aggregate(key, (current, invalidFileNameChar) => 
                     current.Replace(invalidFileNameChar, '_'));
-            var filePath = Path.Combine(_basePath, $"{key}.json");
-            this.Log($"GetFilePath key='{key}' basePath='{_basePath}' result='{filePath}'");
+            var filePath = Path.Combine(GetBasePath, $"{key}.json");
+            this.Log($"GetFilePath key='{key}' basePath='{GetBasePath}' result='{filePath}'");
             return filePath;
         }
 

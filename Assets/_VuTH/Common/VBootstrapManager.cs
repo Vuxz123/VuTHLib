@@ -1,11 +1,17 @@
-﻿using _VuTH.Common.Log;
+using _VuTH.Common.Log;
+using VContainer;
+using VContainer.Unity;
 
 namespace _VuTH.Common
 {
-    public abstract class VBootstrapManager<T, TI> : VManager<T, TI> 
-        where T : VBootstrapManager<T, TI>, TI, new() 
+    public abstract class VBootstrapManager<T, TI> : VManager<T, TI>, IBootstrapOrderProvider
+        where T : VBootstrapManager<T, TI>, TI, new()
         where TI : ICommonManager
     {
+        [UnityEngine.SerializeField] private int bootstrapOrder;
+
+        public int BootstrapOrder => bootstrapOrder;
+
         public override bool IsEnabledSystem
         {
             get
@@ -31,7 +37,7 @@ namespace _VuTH.Common
         {
             DeinitializeBootstrap();
         }
-        
+
         protected abstract void InitializeBootstrap();
         protected abstract void DeinitializeBootstrap();
     }

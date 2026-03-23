@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.Persistant.SaveSystem;
+using Cysharp.Threading.Tasks;
 using R3;
 using UnityEngine;
 using VContainer;
@@ -26,6 +27,7 @@ namespace _VuTH.Core.Persistant.DataPackage
         private readonly List<IPersistencePackage> _packages = new();
         private readonly Dictionary<IPersistencePackage, IDisposable> _saveSubscriptions = new();
         private bool _configuredPackagesLoaded;
+        private bool _initializationStarted;
         private bool _initialized;
 
         #region VContainer DI
@@ -42,7 +44,7 @@ namespace _VuTH.Core.Persistant.DataPackage
                 Debug.LogError("[DataPersistenceManager] ISaveManager does not implement ISaveService!");
             }
 
-            InitializePackages(packages);
+            BeginInitializePackages(packages);
         }
         
         public override void ConfigureRootScope(IContainerBuilder builder)
@@ -53,7 +55,7 @@ namespace _VuTH.Core.Persistant.DataPackage
             }
 
             builder.RegisterComponent(this).AsImplementedInterfaces();
-            builder.Register<SaveLifecycleHook>(Lifetime.Singleton).AsImplementedInterfaces();
+            builder.Register<SaveLifecycleHook>(Lifetime.Singleton);
         }
 #endif
 
@@ -89,30 +91,79 @@ namespace _VuTH.Core.Persistant.DataPackage
                 return;
             }
 
-            InitializePackages(GetConfiguredPackages());
+            BeginInitializePackages(GetConfiguredPackages());
         }
 
-        private void InitializePackages(IReadOnlyList<IPersistencePackage> initialPackages)
+        private void BeginInitializePackages(IReadOnlyList<IPersistencePackage> initialPackages)
         {
-            if (_initialized) return;
-            _initialized = true;
-
             foreach (var package in initialPackages)
             {
                 if (_packages.Contains(package)) continue;
                 _packages.Add(package);
             }
 
-            foreach (var package in _packages)
-            {
-                SetupSavePipeline(package);
+            if (_initializationStarted) return;
+            _initializationStarted = true;
+            InitializePackagesAsync().Forget();
+        }
 
-                if (_saveService == null) continue;
-                package.SetSaveService(_saveService);
-                package.Load();
+        private async UniTaskVoid InitializePackagesAsync()
+        {
+            try
+            {
+                if (!await WaitForSaveServiceReadyAsync())
+                {
+                    return;
+                }
+
+                foreach (var package in _packages)
+                {
+                    SetupSavePipeline(package);
+
+                    if (_saveService == null) continue;
+                    package.SetSaveService(_saveService);
+                    package.Load();
+                }
+
+                _initialized = true;
+                this.Log($"Initialized {_packages.Count} persistence packages");
             }
-            
-            this.Log($"Initialized {_packages.Count} persistence packages");
+            catch (Exception e)
+            {
+                this.LogError($"Exception during package initialization: {e}");
+                Debug.LogException(e);
+            }
+        }
+
+        private async UniTask<bool> WaitForSaveServiceReadyAsync()
+        {
+            if (_saveService == null)
+            {
+                this.LogError("Cannot initialize packages because ISaveService is missing.");
+                return false;
+            }
+
+            if (_saveService is not SaveServiceManager saveServiceManager)
+            {
+                return true;
+            }
+
+            const int maxFramesToWait = 300;
+            var waitedFrames = 0;
+
+            while (!saveServiceManager.IsInitialized && waitedFrames < maxFramesToWait)
+            {
+                waitedFrames++;
+                await UniTask.Yield(PlayerLoopTiming.Update);
+            }
+
+            if (saveServiceManager.IsInitialized)
+            {
+                return true;
+            }
+
+            this.LogError("SaveServiceManager was injected but never finished initialization before persistence packages were loaded.");
+            return false;
         }
 
         private IReadOnlyList<IPersistencePackage> GetConfiguredPackages()
@@ -216,6 +267,8 @@ namespace _VuTH.Core.Persistant.DataPackage
             _saveSubscriptions.Clear();
 
             _packages.Clear();
+            _initializationStarted = false;
+            _initialized = false;
             this.Log("DataPersistenceManager deinitialized.");
         }
 
