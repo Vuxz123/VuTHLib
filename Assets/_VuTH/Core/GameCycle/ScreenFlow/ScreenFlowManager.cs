@@ -34,7 +34,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         [Inject]
         public void Construct()
         {
-        }
+        }   
 #endif
         
         protected override void InitializeBootstrap()

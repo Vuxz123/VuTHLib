@@ -18,6 +18,15 @@ namespace _VuTH.Core.Persistant.DataPackage
     /// Handles all save pipeline setup — packages only hold data.
     /// Supports both VContainer DI and non-VContainer modes via VCONTAINER macro.
     /// </summary>
+    /// <remarks>
+    /// Package initialization is started asynchronously and is not a blocking bootstrap barrier for other managers.
+    /// Resolving a package instance does not guarantee that its persisted data has finished loading.
+    /// <see cref="IsInitialized"/> only becomes true after the initially configured packages have completed loading.
+    /// Packages registered later via <see cref="RegisterPackage"/> are initialized asynchronously as well and are not guaranteed
+    /// to be ready immediately after registration returns.
+    /// Consumers that require loaded persistence data must explicitly wait for a readiness signal instead of assuming that
+    /// registration, resolution, or manager construction implies load completion.
+    /// </remarks>
     public class DataPersistenceManager : VBootstrapManager<DataPersistenceManager, IDataPersistenceManager>, IDataPersistenceManager
     {
         private ISaveService? _saveService;
@@ -118,11 +127,7 @@ namespace _VuTH.Core.Persistant.DataPackage
 
                 foreach (var package in _packages)
                 {
-                    SetupSavePipeline(package);
-
-                    if (_saveService == null) continue;
-                    package.SetSaveService(_saveService);
-                    package.Load();
+                    await InitializePackageAsync(package);
                 }
 
                 _initialized = true;
@@ -164,6 +169,19 @@ namespace _VuTH.Core.Persistant.DataPackage
 
             this.LogError("SaveServiceManager was injected but never finished initialization before persistence packages were loaded.");
             return false;
+        }
+
+        private async UniTask InitializePackageAsync(IPersistencePackage package)
+        {
+            SetupSavePipeline(package);
+
+            if (_saveService == null)
+            {
+                return;
+            }
+
+            package.SetSaveService(_saveService);
+            await package.LoadAsync();
         }
 
         private IReadOnlyList<IPersistencePackage> GetConfiguredPackages()
@@ -253,11 +271,12 @@ namespace _VuTH.Core.Persistant.DataPackage
 
         protected override void DeinitializeBootstrap()
         {
-            // Force save all dirty packages
-            foreach (var package in _packages.AsValueEnumerable().Where(package => package.IsDirty))
-            {
-                package.SaveNowAsync().GetAwaiter().GetResult();
-            }
+            var dirtyPackages = _packages
+                .AsValueEnumerable()
+                .Where(package => package.IsDirty)
+                .ToList();
+
+            FlushDirtyPackagesAsync(dirtyPackages).Forget();
             
             // Dispose all subscriptions
             foreach (var kvp in _saveSubscriptions)
@@ -272,6 +291,14 @@ namespace _VuTH.Core.Persistant.DataPackage
             this.Log("DataPersistenceManager deinitialized.");
         }
 
+        private async UniTask FlushDirtyPackagesAsync(IReadOnlyList<IPersistencePackage> packages)
+        {
+            foreach (var package in packages)
+            {
+                await package.SaveNowAsync();
+            }
+        }
+
         #endregion
 
         #region Package Management
@@ -280,6 +307,10 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// Register a persistence package to be managed.
         /// If strategy is OnAppClose or ManualOnly, auto-registers to SaveLifecycleHook.
         /// </summary>
+        /// <remarks>
+        /// When the manager is already initialized, the package setup and load still run asynchronously.
+        /// Returning from this method does not guarantee that the package has finished loading its persisted data.
+        /// </remarks>
         public void RegisterPackage(IPersistencePackage package)
         {
             if (_packages.Contains(package)) return;
@@ -288,11 +319,7 @@ namespace _VuTH.Core.Persistant.DataPackage
 
             // If already initialized, setup save pipeline and initialize
             if (!_initialized) return;
-            SetupSavePipeline(package);
-
-            if (_saveService == null) return;
-            package.SetSaveService(_saveService);
-            package.Load();
+            InitializePackageAsync(package).Forget();
         }
 
         /// <summary>
@@ -308,11 +335,16 @@ namespace _VuTH.Core.Persistant.DataPackage
                 _saveSubscriptions.Remove(package);
             }
             
+            SavePackageBeforeUnregisterAsync(package).Forget();
+            this.Log($"Unregistered package: {package.StorageKey}");
+        }
+
+        private async UniTask SavePackageBeforeUnregisterAsync(IPersistencePackage package)
+        {
             if (package.IsDirty)
             {
-                package.SaveNowAsync().GetAwaiter().GetResult();
+                await package.SaveNowAsync();
             }
-            this.Log($"Unregistered package: {package.StorageKey}");
         }
 
         /// <summary>
@@ -320,9 +352,14 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// </summary>
         public void SaveAll()
         {
+            SaveAllAsync().Forget();
+        }
+
+        public async UniTask SaveAllAsync()
+        {
             foreach (var package in _packages.AsValueEnumerable().Where(package => package.IsDirty))
             {
-                package.SaveNowAsync().GetAwaiter().GetResult();
+                await package.SaveNowAsync();
             }
 
             this.Log("Saved all dirty packages");
@@ -331,24 +368,69 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// <summary>
         /// Load all packages from storage.
         /// </summary>
+        /// <remarks>
+        /// This method triggers <see cref="LoadAllAsync"/> via <c>Forget()</c> and returns immediately.
+        /// Use <see cref="LoadAllAsync"/> when the caller must await completion.
+        /// </remarks>
         public void LoadAll()
+        {
+            LoadAllAsync().Forget();
+        }
+
+        public async UniTask LoadAllAsync()
         {
             foreach (var package in _packages)
             {
-                package.Load();
+                await package.LoadAsync();
             }
+
             this.Log("Loaded all packages");
         }
 
         /// <summary>
-        /// Check if manager is initialized.
+        /// Gets whether the initially configured package set has completed asynchronous initialization.
         /// </summary>
+        /// <remarks>
+        /// This flag does not mean that every package ever registered with the manager is fully loaded.
+        /// Packages added later through <see cref="RegisterPackage"/> may still be loading after this becomes true.
+        /// </remarks>
         public bool IsInitialized => _initialized;
 
         /// <summary>
         /// Get the number of registered packages.
         /// </summary>
         public int PackageCount => _packages.Count;
+
+        #endregion
+
+        #region Package Retrieval
+
+        private readonly Dictionary<Type, IPersistencePackage> _packageTypeCache = new();
+        
+        public T? GetPackage<T>() where T : class, IPersistencePackage
+        {
+            var type = typeof(T);
+            if (_packageTypeCache.TryGetValue(type, out var cachedPackage))
+            {
+                return cachedPackage as T;
+            }
+
+            var package = _packages.AsValueEnumerable().FirstOrDefault(p => p.GetType() == type);
+            if (package != null)
+            {
+                _packageTypeCache[type] = package;
+                return package as T;
+            }
+
+            this.LogWarning($"Requested package of type {type.Name} not found.");
+            return null;
+        }
+        
+        public bool TryGetPackage<T>(out T? package) where T : class, IPersistencePackage
+        {
+            package = GetPackage<T>();
+            return package != null;
+        }
 
         #endregion
 

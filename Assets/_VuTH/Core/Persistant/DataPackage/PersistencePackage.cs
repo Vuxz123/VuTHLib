@@ -72,7 +72,7 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// </summary>
         public void SaveNow()
         {
-            _ = SaveNowAsync();
+            SaveNowAsync().Forget();
         }
         
         public async UniTask SaveNowAsync()
@@ -129,6 +129,11 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// </summary>
         public void Load()
         {
+            LoadAsync().Forget();
+        }
+
+        public async UniTask LoadAsync()
+        {
             if (_saveService == null)
                 return;
                 
@@ -136,8 +141,10 @@ namespace _VuTH.Core.Persistant.DataPackage
             
             try
             {
-                var loadedData = _saveService.LoadAsync(StorageKey, ExtractPayload(), CancellationToken.None)
-                    .GetAwaiter().GetResult();
+                var loadedData = await _saveService.LoadAsync(
+                    StorageKey,
+                    ExtractPayload(),
+                    CancellationToken.None);
 
                 if (loadedData != null)
                 {

@@ -69,6 +69,11 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// Load data from storage.
         /// </summary>
         void Load();
+
+        /// <summary>
+        /// Load data from storage and await completion.
+        /// </summary>
+        UniTask LoadAsync();
     }
     
     /// <summary>

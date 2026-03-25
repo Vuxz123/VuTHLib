@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using _VuTH.Common.Log;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -71,12 +72,12 @@ namespace _VuTH.Core.Persistant.DataPackage
             }
         }
 
-        private void OnFocusChanged(bool hasFocus)
+        private async void OnFocusChanged(bool hasFocus)
         {
             if (!hasFocus)
             {
                 // App lost focus (switched away) — save all dirty packages
-                SaveAllDirty();
+                await SaveAllDirtyAsync();
             }
         }
 
@@ -90,16 +91,16 @@ namespace _VuTH.Core.Persistant.DataPackage
         //     }
         // }
 
-        private void OnQuitting()
+        private async void OnQuitting()
         {
             if (_quitRequested) return;
             _quitRequested = true;
             
             this.Log("App quitting, saving dirty packages...");
-            SaveAllDirty();
+            await SaveAllDirtyAsync();
         }
 
-        private void SaveAllDirty()
+        private async UniTask SaveAllDirtyAsync()
         {
             foreach (var package in _packages.AsValueEnumerable()
                          .Where(package => package.IsDirty &&
@@ -108,7 +109,7 @@ namespace _VuTH.Core.Persistant.DataPackage
                                                or SaveStrategy.ManualOnly))
             {
                 this.Log($"Saving dirty package: {package.StorageKey}");
-                package.SaveNowAsync().GetAwaiter().GetResult();
+                await package.SaveNowAsync();
             }
         }
 
