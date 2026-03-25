@@ -43,7 +43,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7f2c3e258c3c41af8b8d4d2d8ab4d4d1, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: VuTH.Screen::_VuTH.Core.Audio.AudioManager
+  m_EditorClassIdentifier: VuTH.Audio::_VuTH.Core.Audio.AudioManager
   enableSystem: 1
   customLifecycleManagement: 0
   bootstrapOrder: 110

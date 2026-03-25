@@ -108,10 +108,7 @@ namespace _VuTH.Core.Audio
             {
                 _settingsPackage.SaveNowAsync().Forget();
 
-                if (_persistenceManager != null)
-                {
-                    _persistenceManager.UnregisterPackage(_settingsPackage);
-                }
+                _persistenceManager?.UnregisterPackage(_settingsPackage);
 
                 _settingsPackage.Dispose();
                 _settingsPackage = null;
@@ -144,7 +141,7 @@ namespace _VuTH.Core.Audio
 
         public AudioPlaybackHandle PlayMusic(AudioClip clip, float volume = 1f, float fadeDuration = -1f)
         {
-            if (clip == null)
+            if (!clip)
             {
                 return AudioPlaybackHandle.Invalid;
             }
@@ -175,8 +172,8 @@ namespace _VuTH.Core.Audio
             var musicAPlaybackId = 0;
             var musicBPlaybackId = 0;
             
-            var hasA = _musicSourceA != null && _sourceToPlayback.TryGetValue(_musicSourceA, out musicAPlaybackId);
-            var hasB = _musicSourceB != null && _sourceToPlayback.TryGetValue(_musicSourceB, out musicBPlaybackId);
+            var hasA = _musicSourceA && _sourceToPlayback.TryGetValue(_musicSourceA, out musicAPlaybackId);
+            var hasB = _musicSourceB && _sourceToPlayback.TryGetValue(_musicSourceB, out musicBPlaybackId);
 
             CancelMusicTransition();
             _activeMusicPlaybackId = 0;
@@ -252,10 +249,10 @@ namespace _VuTH.Core.Audio
         {
             EnsureRuntimeObjects();
 
-            if (_activeMusicSource != null &&
+            if (_activeMusicSource &&
                 _activeMusicPlaybackId != 0 &&
                 _playbacks.TryGetValue(_activeMusicPlaybackId, out var activePlayback) &&
-                activePlayback.Source != null &&
+                activePlayback.Source &&
                 activePlayback.Source.clip == clip &&
                 activePlayback.Source.isPlaying)
             {
@@ -295,9 +292,9 @@ namespace _VuTH.Core.Audio
             _activeMusicSource = nextSource;
             _activeMusicPlaybackId = playbackId;
 
-            if (previousSource == null || !previousSource.isPlaying || effectiveFade <= 0f)
+            if (!previousSource || !previousSource.isPlaying || effectiveFade <= 0f)
             {
-                if (previousSource != null)
+                if (previousSource)
                 {
                     ReleasePlaybackForSource(previousSource, stopSource: true);
                 }
@@ -312,7 +309,7 @@ namespace _VuTH.Core.Audio
 
         private AudioPlaybackHandle PlayMusicCue(AudioCue cue, float volumeScale, float fadeDuration)
         {
-            if (cue == null || !cue.IsValid)
+            if (!cue || !cue.IsValid)
             {
                 return AudioPlaybackHandle.Invalid;
             }
@@ -338,7 +335,7 @@ namespace _VuTH.Core.Audio
             EnsureRuntimeObjects();
 
             var source = AcquireOneShotSource();
-            if (source == null)
+            if (!source)
             {
                 this.LogWarning("AudioManager: No available one-shot source.");
                 return AudioPlaybackHandle.Invalid;
@@ -376,7 +373,7 @@ namespace _VuTH.Core.Audio
 
             entry.CancellationTokenSource.Cancel();
 
-            if (fadeDuration > 0f && entry.Source != null && entry.Source.isPlaying)
+            if (fadeDuration > 0f && entry.Source && entry.Source.isPlaying)
             {
                 await FadePlaybackAsync(entry, 0f, fadeDuration);
             }
@@ -480,7 +477,7 @@ namespace _VuTH.Core.Audio
             try
             {
                 await UniTask.WaitUntil(
-                    () => source == null || !source.isPlaying,
+                    WaitUntilCondition,
                     cancellationToken: cancellationToken);
             }
             catch (OperationCanceledException)
@@ -489,6 +486,10 @@ namespace _VuTH.Core.Audio
             }
 
             ReleaseOneShotPlayback(source, playbackId);
+            
+            return;
+
+            bool WaitUntilCondition() => !source || !source.isPlaying;
         }
 
         private void HandlePostScreenEnter(PostScreenEnterEvent eventArgs)
@@ -529,11 +530,9 @@ namespace _VuTH.Core.Audio
         {
             EnsureSettingsPackage();
 
-            if (DataPersistenceManager.HasInstance)
-            {
-                _persistenceManager = DataPersistenceManager.Instance;
-                _persistenceManager.RegisterPackage(_settingsPackage);
-            }
+            if (!DataPersistenceManager.HasInstance) return;
+            _persistenceManager = DataPersistenceManager.Instance;
+            _persistenceManager.RegisterPackage(_settingsPackage);
         }
 
         private void EnsureSettingsPackage()
@@ -559,26 +558,26 @@ namespace _VuTH.Core.Audio
 
         private void EnsureRuntimeObjects()
         {
-            if (_runtimeRoot == null)
+            if (!_runtimeRoot)
             {
                 var rootObject = new GameObject("_AudioRuntime");
                 rootObject.transform.SetParent(transform, false);
                 _runtimeRoot = rootObject.transform;
             }
 
-            if (_oneShotRoot == null)
+            if (!_oneShotRoot)
             {
                 var oneShotObject = new GameObject("OneShots");
                 oneShotObject.transform.SetParent(_runtimeRoot, false);
                 _oneShotRoot = oneShotObject.transform;
             }
 
-            if (_musicSourceA == null)
+            if (!_musicSourceA)
             {
                 _musicSourceA = CreateManagedSource("Music_A");
             }
 
-            if (_musicSourceB == null)
+            if (!_musicSourceB)
             {
                 _musicSourceB = CreateManagedSource("Music_B");
             }
@@ -625,7 +624,7 @@ namespace _VuTH.Core.Audio
 
         private AudioSource GetInactiveMusicSource()
         {
-            if (_activeMusicSource == null)
+            if (!_activeMusicSource)
             {
                 return _musicSourceA;
             }
@@ -646,9 +645,9 @@ namespace _VuTH.Core.Audio
 
         private void ReleasePlaybackForSource(AudioSource source, bool stopSource)
         {
-            if (source == null || !_sourceToPlayback.TryGetValue(source, out var playbackId))
+            if (!source || !_sourceToPlayback.TryGetValue(source, out var playbackId))
             {
-                if (stopSource && source != null)
+                if (stopSource && source)
                 {
                     ResetSource(source);
                 }
@@ -699,7 +698,7 @@ namespace _VuTH.Core.Audio
 
         private void ReleaseOneShotPlayback(AudioSource source, int playbackId)
         {
-            if (source == null)
+            if (!source)
             {
                 return;
             }
@@ -761,7 +760,7 @@ namespace _VuTH.Core.Audio
 
         private void ApplyResolvedVolume(PlaybackEntry entry)
         {
-            if (entry.Source == null)
+            if (!entry.Source)
             {
                 return;
             }
@@ -808,7 +807,7 @@ namespace _VuTH.Core.Audio
 
         private static void ResetSource(AudioSource source)
         {
-            if (source == null)
+            if (!source)
             {
                 return;
             }
