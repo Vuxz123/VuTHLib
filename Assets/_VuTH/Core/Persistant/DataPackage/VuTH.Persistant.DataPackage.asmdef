@@ -1,0 +1,26 @@
+{
+    "name": "VuTH.Persistant.DataPackage",
+    "rootNamespace": "",
+    "references": [
+        "VContainer",
+        "MessagePipe",
+        "VuTH.Common",
+        "VuTH.Common.MessagePipe",
+        "VuTH.Common.DI",
+        "UniTask",
+        "VuTH.Common.Log",
+        "ZLinq.Unity",
+        "Newtonsoft.Json",
+        "VuTH.Persistant.SaveSystem",
+        "R3"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

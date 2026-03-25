@@ -95,7 +95,7 @@ namespace _VuTH.Common.Log
             var sb = ZString.CreateStringBuilder();
             try
             {
-                sb.Append(message.AsSpan(0, MaxLOGLength - 50));
+                sb.Append(message.AsSpan(0, MaxLOGLength - 50).ToString());
                 sb.Append("\n... [TRUNCATED ");
                 sb.Append(message.Length - MaxLOGLength);
                 sb.Append(" chars]");

@@ -347,7 +347,7 @@ namespace _VuTH.Common.Log
                 
                         if (lineIndex == 0)
                         {
-                            sb.Append(line);
+                            sb.Append(line.ToString());
                             sb.Append("</color>\n");
                         }
                         else if (lineIndex == totalLines - 1)
@@ -355,14 +355,14 @@ namespace _VuTH.Common.Log
                             sb.Append("<color=#");
                             sb.Append(hex);
                             sb.Append('>');
-                            sb.Append(line);
+                            sb.Append(line.ToString());
                         }
                         else
                         {
                             sb.Append("<color=#");
                             sb.Append(hex);
                             sb.Append('>');
-                            sb.Append(line);
+                            sb.Append(line.ToString());
                             sb.Append("</color>\n");
                         }
                 
