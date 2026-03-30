@@ -1,7 +1,10 @@
 ﻿using System.IO;
 using _VuTH.Common.Log;
-using UnityEditor;
 using UnityEngine;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace _VuTH.Core.Booststrap.Profile
 {
@@ -38,7 +41,7 @@ namespace _VuTH.Core.Booststrap.Profile
             return true;
 #else
             // Runtime logic (giữ nguyên nếu cần dùng trong game)
-            profile = Resources.Load<BootstrapProfile>(BootstrapManagerCentralConst.ProfilePath);
+            profile = Resources.Load<BootstrapProfile>(BootstrapManagerCentralConst.BootstrapProfilePath);
             return profile != null;
 #endif
         }

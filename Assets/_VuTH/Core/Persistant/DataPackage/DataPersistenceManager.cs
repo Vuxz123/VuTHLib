@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.Persistant.SaveSystem;
@@ -35,6 +36,9 @@ namespace _VuTH.Core.Persistant.DataPackage
         private readonly List<IPersistencePackage> _configuredPackages = new();
         private readonly List<IPersistencePackage> _packages = new();
         private readonly Dictionary<IPersistencePackage, IDisposable> _saveSubscriptions = new();
+        private readonly HashSet<IPersistencePackage> _initializedPackages = new();
+        private readonly HashSet<IPersistencePackage> _initializingPackages = new();
+        private CancellationTokenSource? _initializationCts;
         private bool _configuredPackagesLoaded;
         private bool _initializationStarted;
         private bool _initialized;
@@ -113,25 +117,30 @@ namespace _VuTH.Core.Persistant.DataPackage
 
             if (_initializationStarted) return;
             _initializationStarted = true;
-            InitializePackagesAsync().Forget();
+            _initializationCts = new CancellationTokenSource();
+            InitializePackagesAsync(_initializationCts.Token).Forget();
         }
 
-        private async UniTaskVoid InitializePackagesAsync()
+        private async UniTaskVoid InitializePackagesAsync(CancellationToken cancellationToken)
         {
             try
             {
-                if (!await WaitForSaveServiceReadyAsync())
+                if (!await WaitForSaveServiceReadyAsync(cancellationToken))
                 {
                     return;
                 }
 
-                foreach (var package in _packages)
+                while (TryGetNextPendingPackage(out var package))
                 {
-                    await InitializePackageAsync(package);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await InitializePackageAsync(package, cancellationToken);
                 }
 
                 _initialized = true;
                 this.Log($"Initialized {_packages.Count} persistence packages");
+            }
+            catch (OperationCanceledException)
+            {
             }
             catch (Exception e)
             {
@@ -140,7 +149,25 @@ namespace _VuTH.Core.Persistant.DataPackage
             }
         }
 
-        private async UniTask<bool> WaitForSaveServiceReadyAsync()
+        private bool TryGetNextPendingPackage(out IPersistencePackage package)
+        {
+            for (var i = 0; i < _packages.Count; i++)
+            {
+                var candidate = _packages[i];
+                if (_initializedPackages.Contains(candidate) || _initializingPackages.Contains(candidate))
+                {
+                    continue;
+                }
+
+                package = candidate;
+                return true;
+            }
+
+            package = null!;
+            return false;
+        }
+
+        private async UniTask<bool> WaitForSaveServiceReadyAsync(CancellationToken cancellationToken)
         {
             if (_saveService == null)
             {
@@ -158,8 +185,9 @@ namespace _VuTH.Core.Persistant.DataPackage
 
             while (!saveServiceManager.IsInitialized && waitedFrames < maxFramesToWait)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 waitedFrames++;
-                await UniTask.Yield(PlayerLoopTiming.Update);
+                await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
             }
 
             if (saveServiceManager.IsInitialized)
@@ -171,17 +199,43 @@ namespace _VuTH.Core.Persistant.DataPackage
             return false;
         }
 
-        private async UniTask InitializePackageAsync(IPersistencePackage package)
+        private async UniTask InitializePackageAsync(IPersistencePackage package, CancellationToken cancellationToken)
         {
-            SetupSavePipeline(package);
-
-            if (_saveService == null)
+            if (_initializedPackages.Contains(package) ||
+                _initializingPackages.Contains(package) ||
+                !_packages.Contains(package))
             {
                 return;
             }
 
-            package.SetSaveService(_saveService);
-            await package.LoadAsync();
+            _initializingPackages.Add(package);
+
+            try
+            {
+                SetupSavePipeline(package);
+
+                if (_saveService == null)
+                {
+                    return;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                package.SetSaveService(_saveService);
+                await package.LoadAsync();
+
+                if (!_packages.Contains(package))
+                {
+                    this.Log($"Skipped completion for unregistered package: {package.StorageKey}");
+                    return;
+                }
+
+                _initializedPackages.Add(package);
+                this.Log($"Initialized package: {package.StorageKey}");
+            }
+            finally
+            {
+                _initializingPackages.Remove(package);
+            }
         }
 
         private IReadOnlyList<IPersistencePackage> GetConfiguredPackages()
@@ -285,7 +339,14 @@ namespace _VuTH.Core.Persistant.DataPackage
             }
             _saveSubscriptions.Clear();
 
+            _initializationCts?.Cancel();
+            _initializationCts?.Dispose();
+            _initializationCts = null;
+
             _packages.Clear();
+            _initializedPackages.Clear();
+            _initializingPackages.Clear();
+            _packageTypeCache.Clear();
             _initializationStarted = false;
             _initialized = false;
             this.Log("DataPersistenceManager deinitialized.");
@@ -308,18 +369,34 @@ namespace _VuTH.Core.Persistant.DataPackage
         /// If strategy is OnAppClose or ManualOnly, auto-registers to SaveLifecycleHook.
         /// </summary>
         /// <remarks>
-        /// When the manager is already initialized, the package setup and load still run asynchronously.
+        /// Packages registered during bootstrap are queued and initialized by the active bootstrap pass.
+        /// Packages registered after bootstrap still initialize asynchronously.
         /// Returning from this method does not guarantee that the package has finished loading its persisted data.
         /// </remarks>
         public void RegisterPackage(IPersistencePackage package)
         {
-            if (_packages.Contains(package)) return;
+            if (_packages.Contains(package))
+            {
+                this.Log($"Skipped duplicate package registration: {package.StorageKey}");
+                return;
+            }
+
             _packages.Add(package);
             this.Log($"Registered package: {package.StorageKey}");
 
-            // If already initialized, setup save pipeline and initialize
-            if (!_initialized) return;
-            InitializePackageAsync(package).Forget();
+            if (!_initializationStarted)
+            {
+                this.Log($"Package {package.StorageKey} queued before persistence initialization starts.");
+                return;
+            }
+
+            if (!_initialized)
+            {
+                this.Log($"Package {package.StorageKey} queued for bootstrap-time initialization.");
+                return;
+            }
+
+            InitializeLateRegisteredPackageAsync(package).Forget();
         }
 
         /// <summary>
@@ -328,6 +405,10 @@ namespace _VuTH.Core.Persistant.DataPackage
         public void UnregisterPackage(IPersistencePackage package)
         {
             if (!_packages.Remove(package)) return;
+
+            _initializedPackages.Remove(package);
+            _initializingPackages.Remove(package);
+            _packageTypeCache.Remove(package.GetType());
 
             if (_saveSubscriptions.TryGetValue(package, out var sub))
             {
@@ -412,7 +493,14 @@ namespace _VuTH.Core.Persistant.DataPackage
             var type = typeof(T);
             if (_packageTypeCache.TryGetValue(type, out var cachedPackage))
             {
-                return cachedPackage as T;
+                if (!_packages.Contains(cachedPackage))
+                {
+                    _packageTypeCache.Remove(type);
+                }
+                else
+                {
+                    return cachedPackage as T;
+                }
             }
 
             var package = _packages.AsValueEnumerable().FirstOrDefault(p => p.GetType() == type);
@@ -430,6 +518,23 @@ namespace _VuTH.Core.Persistant.DataPackage
         {
             package = GetPackage<T>();
             return package != null;
+        }
+
+        private async UniTaskVoid InitializeLateRegisteredPackageAsync(IPersistencePackage package)
+        {
+            try
+            {
+                if (_initializationCts == null)
+                {
+                    this.LogWarning($"Skipped late registration init because manager is not active: {package.StorageKey}");
+                    return;
+                }
+
+                await InitializePackageAsync(package, _initializationCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         #endregion

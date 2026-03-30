@@ -25,6 +25,11 @@ namespace _VuTH.Core.Audio
         public PersistentField<float> SfxVolume { get; }
         public PersistentField<float> UiVolume { get; }
 
+        public AudioSettingsPackage()
+            : this(false, 1f, 1f, 1f, 1f)
+        {
+        }
+
         public AudioSettingsPackage(
             bool muted = false,
             float masterVolume = 1f,

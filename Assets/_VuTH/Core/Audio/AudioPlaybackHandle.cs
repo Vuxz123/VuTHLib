@@ -20,9 +20,7 @@ namespace _VuTH.Core.Audio
 
         public UniTask StopAsync(float fadeDuration = 0f)
         {
-            return _manager == null
-                ? UniTask.CompletedTask
-                : _manager.StopAsync(this, fadeDuration);
+            return _manager?.StopAsync(this, fadeDuration) ?? UniTask.CompletedTask;
         }
     }
 }

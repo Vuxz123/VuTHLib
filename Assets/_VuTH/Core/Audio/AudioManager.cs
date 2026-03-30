@@ -35,11 +35,13 @@ namespace _VuTH.Core.Audio
         [SerializeField, Range(0f, 1f)] private float defaultSfxVolume = 1f;
         [SerializeField, Range(0f, 1f)] private float defaultUiVolume = 1f;
 
+        // Playback state is mutated from Unity's main thread only.
         private readonly Dictionary<int, PlaybackEntry> _playbacks = new();
         private readonly Dictionary<AudioSource, int> _sourceToPlayback = new();
         private readonly Queue<AudioSource> _oneShotPool = new();
         private readonly List<AudioSource> _ownedOneShotSources = new();
         private readonly List<IDisposable> _subscriptions = new();
+        private readonly List<IDisposable> _settingsSubscriptions = new();
 
         private Transform _runtimeRoot;
         private Transform _oneShotRoot;
@@ -49,8 +51,11 @@ namespace _VuTH.Core.Audio
         private int _activeMusicPlaybackId;
         private int _nextPlaybackId = 1;
         private CancellationTokenSource _musicTransitionCts;
+        private CancellationTokenSource _settingsRegistrationCts;
         private AudioSettingsPackage _settingsPackage;
         private IDataPersistenceManager _persistenceManager;
+        private bool _ownsSettingsPackage;
+        private bool _settingsPackageRegistered;
 
         public float MasterVolume => _settingsPackage?.MasterVolume.Value ?? defaultMasterVolume;
         public float MusicVolume => _settingsPackage?.MusicVolume.Value ?? defaultMusicVolume;
@@ -85,12 +90,14 @@ namespace _VuTH.Core.Audio
         protected override void DeinitializeBootstrap()
         {
             CancelMusicTransition();
+            CancelSettingsRegistration();
 
             foreach (var subscription in _subscriptions)
             {
                 subscription.Dispose();
             }
             _subscriptions.Clear();
+            DisposeSettingsSubscriptions();
 
             foreach (var playback in _playbacks.Values)
             {
@@ -106,15 +113,23 @@ namespace _VuTH.Core.Audio
 
             if (_settingsPackage != null)
             {
-                _settingsPackage.SaveNowAsync().Forget();
+                if (_ownsSettingsPackage)
+                {
+                    _settingsPackage.SaveNowAsync().Forget();
 
-                _persistenceManager?.UnregisterPackage(_settingsPackage);
+                    if (_settingsPackageRegistered)
+                    {
+                        _persistenceManager?.UnregisterPackage(_settingsPackage);
+                    }
 
-                _settingsPackage.Dispose();
+                    _settingsPackage.Dispose();
+                }
                 _settingsPackage = null;
             }
 
             _persistenceManager = null;
+            _ownsSettingsPackage = false;
+            _settingsPackageRegistered = false;
             _activeMusicPlaybackId = 0;
             _activeMusicSource = null;
         }
@@ -152,6 +167,7 @@ namespace _VuTH.Core.Audio
                 null,
                 true,
                 Vector2.one,
+                false,
                 64,
                 false,
                 fadeDuration);
@@ -209,31 +225,31 @@ namespace _VuTH.Core.Audio
 
         public void SetMuted(bool muted)
         {
-            EnsureSettingsPackage();
+            EnsureOwnedSettingsPackage();
             _settingsPackage.Muted.Value = muted;
         }
 
         public void SetMasterVolume(float volume)
         {
-            EnsureSettingsPackage();
+            EnsureOwnedSettingsPackage();
             _settingsPackage.MasterVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetMusicVolume(float volume)
         {
-            EnsureSettingsPackage();
+            EnsureOwnedSettingsPackage();
             _settingsPackage.MusicVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetSfxVolume(float volume)
         {
-            EnsureSettingsPackage();
+            EnsureOwnedSettingsPackage();
             _settingsPackage.SfxVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetUiVolume(float volume)
         {
-            EnsureSettingsPackage();
+            EnsureOwnedSettingsPackage();
             _settingsPackage.UiVolume.Value = Mathf.Clamp01(volume);
         }
 
@@ -243,6 +259,7 @@ namespace _VuTH.Core.Audio
             AudioMixerGroup mixerGroup,
             bool loop,
             Vector2 pitchRange,
+            bool randomizePitch,
             int priority,
             bool ignoreListenerPause,
             float fadeDuration)
@@ -281,6 +298,7 @@ namespace _VuTH.Core.Audio
                 mixerGroup,
                 loop,
                 pitchRange,
+                randomizePitch,
                 priority,
                 ignoreListenerPause);
 
@@ -320,6 +338,7 @@ namespace _VuTH.Core.Audio
                 cue.OutputMixerGroup,
                 cue.Loop,
                 cue.PitchRange,
+                cue.RandomizePitch,
                 cue.Priority,
                 cue.IgnoreListenerPause,
                 fadeDuration);
@@ -348,6 +367,7 @@ namespace _VuTH.Core.Audio
                 cue.OutputMixerGroup,
                 cue.Loop,
                 cue.PitchRange,
+                cue.RandomizePitch,
                 cue.Priority,
                 cue.IgnoreListenerPause);
 
@@ -528,32 +548,43 @@ namespace _VuTH.Core.Audio
 
         private void InitializeSettingsPackage()
         {
-            EnsureSettingsPackage();
+            if (TryBindRegisteredSettingsPackage())
+            {
+                return;
+            }
 
-            if (!DataPersistenceManager.HasInstance) return;
-            _persistenceManager = DataPersistenceManager.Instance;
-            _persistenceManager.RegisterPackage(_settingsPackage);
+            if (DataPersistenceManager.HasInstance)
+            {
+                this.LogWarning("AudioManager: AudioSettingsPackage is not pre-registered in DataPersistenceManager. Falling back to self-registration.");
+            }
+
+            EnsureOwnedSettingsPackage();
+            if (TryRegisterOwnedSettingsPackage())
+            {
+                return;
+            }
+
+            CancelSettingsRegistration();
+            _settingsRegistrationCts = new CancellationTokenSource();
+            RegisterOwnedSettingsPackageWhenInstanceAvailableAsync(_settingsRegistrationCts).Forget();
         }
 
-        private void EnsureSettingsPackage()
+        private void EnsureOwnedSettingsPackage()
         {
             if (_settingsPackage != null)
             {
                 return;
             }
 
-            _settingsPackage = new AudioSettingsPackage(
+            BindSettingsPackage(
+                new AudioSettingsPackage(
                 defaultMuted,
                 defaultMasterVolume,
                 defaultMusicVolume,
                 defaultSfxVolume,
-                defaultUiVolume);
-
-            _subscriptions.Add(_settingsPackage.Muted.Subscribe(_ => RefreshAllVolumes()));
-            _subscriptions.Add(_settingsPackage.MasterVolume.Subscribe(_ => RefreshAllVolumes()));
-            _subscriptions.Add(_settingsPackage.MusicVolume.Subscribe(_ => RefreshAllVolumes()));
-            _subscriptions.Add(_settingsPackage.SfxVolume.Subscribe(_ => RefreshAllVolumes()));
-            _subscriptions.Add(_settingsPackage.UiVolume.Subscribe(_ => RefreshAllVolumes()));
+                defaultUiVolume),
+                ownsPackage: true,
+                isRegistered: false);
         }
 
         private void EnsureRuntimeObjects()
@@ -791,18 +822,139 @@ namespace _VuTH.Core.Audio
             AudioMixerGroup mixerGroup,
             bool loop,
             Vector2 pitchRange,
+            bool randomizePitch,
             int priority,
             bool ignoreListenerPause)
         {
+            var minPitch = Mathf.Max(0.01f, pitchRange.x);
+            var maxPitch = Mathf.Max(minPitch, pitchRange.y);
+
             source.clip = clip;
             source.loop = loop;
             source.outputAudioMixerGroup = mixerGroup;
-            source.pitch = UnityEngine.Random.Range(
-                Mathf.Max(0.01f, pitchRange.x),
-                Mathf.Max(Mathf.Max(0.01f, pitchRange.x), pitchRange.y));
+            source.pitch = randomizePitch
+                ? UnityEngine.Random.Range(minPitch, maxPitch)
+                : minPitch;
             source.priority = priority;
             source.ignoreListenerPause = ignoreListenerPause;
             source.time = 0f;
+        }
+
+        private bool TryBindRegisteredSettingsPackage()
+        {
+            if (!DataPersistenceManager.HasInstance)
+            {
+                return false;
+            }
+
+            _persistenceManager = DataPersistenceManager.Instance;
+            if (!_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) || package == null)
+            {
+                return false;
+            }
+
+            BindSettingsPackage(package, ownsPackage: false, isRegistered: true);
+            return true;
+        }
+
+        private bool TryRegisterOwnedSettingsPackage()
+        {
+            if (_settingsPackageRegistered || !_ownsSettingsPackage || _settingsPackage == null || !DataPersistenceManager.HasInstance)
+            {
+                return false;
+            }
+
+            _persistenceManager = DataPersistenceManager.Instance;
+            if (_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) && package != null)
+            {
+                BindSettingsPackage(package, ownsPackage: false, isRegistered: true);
+                return true;
+            }
+
+            _persistenceManager.RegisterPackage(_settingsPackage);
+            _settingsPackageRegistered = true;
+            return true;
+        }
+
+        private async UniTaskVoid RegisterOwnedSettingsPackageWhenInstanceAvailableAsync(CancellationTokenSource registrationCts)
+        {
+            try
+            {
+                while (!registrationCts.IsCancellationRequested)
+                {
+                    if (TryRegisterOwnedSettingsPackage())
+                    {
+                        return;
+                    }
+
+                    await UniTask.Yield(PlayerLoopTiming.Update, registrationCts.Token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (ReferenceEquals(_settingsRegistrationCts, registrationCts))
+                {
+                    _settingsRegistrationCts.Dispose();
+                    _settingsRegistrationCts = null;
+                }
+            }
+        }
+
+        private void BindSettingsPackage(AudioSettingsPackage package, bool ownsPackage, bool isRegistered)
+        {
+            if (ReferenceEquals(_settingsPackage, package))
+            {
+                _ownsSettingsPackage = ownsPackage;
+                _settingsPackageRegistered = isRegistered;
+                return;
+            }
+
+            if (_settingsPackage != null && _ownsSettingsPackage)
+            {
+                if (_settingsPackageRegistered)
+                {
+                    _persistenceManager?.UnregisterPackage(_settingsPackage);
+                }
+
+                _settingsPackage.Dispose();
+            }
+
+            DisposeSettingsSubscriptions();
+
+            _settingsPackage = package;
+            _ownsSettingsPackage = ownsPackage;
+            _settingsPackageRegistered = isRegistered;
+
+            _settingsSubscriptions.Add(_settingsPackage.Muted.Subscribe(_ => RefreshAllVolumes()));
+            _settingsSubscriptions.Add(_settingsPackage.MasterVolume.Subscribe(_ => RefreshAllVolumes()));
+            _settingsSubscriptions.Add(_settingsPackage.MusicVolume.Subscribe(_ => RefreshAllVolumes()));
+            _settingsSubscriptions.Add(_settingsPackage.SfxVolume.Subscribe(_ => RefreshAllVolumes()));
+            _settingsSubscriptions.Add(_settingsPackage.UiVolume.Subscribe(_ => RefreshAllVolumes()));
+        }
+
+        private void DisposeSettingsSubscriptions()
+        {
+            foreach (var subscription in _settingsSubscriptions)
+            {
+                subscription.Dispose();
+            }
+
+            _settingsSubscriptions.Clear();
+        }
+
+        private void CancelSettingsRegistration()
+        {
+            if (_settingsRegistrationCts == null)
+            {
+                return;
+            }
+
+            _settingsRegistrationCts.Cancel();
+            _settingsRegistrationCts.Dispose();
+            _settingsRegistrationCts = null;
         }
 
         private static void ResetSource(AudioSource source)

@@ -1,0 +1,19 @@
+{
+    "name": "VuTH.Audio.Tests.PlayMode",
+    "rootNamespace": "",
+    "references": [
+        "VuTH.Audio",
+        "VuTH.Common",
+        "UnityEngine.TestRunner",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

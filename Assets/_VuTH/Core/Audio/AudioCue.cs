@@ -16,6 +16,7 @@ namespace _VuTH.Core.Audio
         [SerializeField] private bool ignoreListenerPause;
         [SerializeField, Range(0f, 1f)] private float volume = 1f;
         [SerializeField] private Vector2 pitchRange = Vector2.one;
+        [SerializeField] private bool randomizePitch = true;
         [SerializeField, Range(0, 256)] private int priority = 128;
 
         public AudioChannel Channel => channel;
@@ -25,6 +26,7 @@ namespace _VuTH.Core.Audio
         public bool IgnoreListenerPause => ignoreListenerPause;
         public float Volume => volume;
         public Vector2 PitchRange => pitchRange;
+        public bool RandomizePitch => randomizePitch;
         public int Priority => priority;
 
         public bool IsValid => clip != null;
