@@ -11,8 +11,8 @@ on:
         required: false
         type: string
 
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+permissions:
+  contents: write
 
 jobs:
   release:
