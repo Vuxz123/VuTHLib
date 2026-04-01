@@ -1,5 +1,4 @@
 #if UNITY_EDITOR
-using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -7,91 +6,103 @@ using UnityEngine;
 namespace VuTH.Editor
 {
     /// <summary>
-    /// Command-line package exporter for CI/CD pipelines.
+    /// Exports VuTH Lib as a single .unitypackage to the repo root.
     /// 
-    /// Usage from command line (PowerShell):
+    /// Local usage:
+    ///   Unity menu: Window > VuTH > Export Package
+    /// 
+    /// CI usage (command line):
     ///   & Unity.exe -projectPath . -quit -batchmode -nographics `
-    ///     -executeMethod PackageExporter.ExportPackage `
-    ///     -packagePath="Assets/_VuTH/Core/Audio" `
-    ///     -outputPath="build-output/VuTH.Audio.unitypackage"
+    ///     -executeMethod PackageExporter.Build
     /// </summary>
     public static class PackageExporter
     {
-        [MenuItem("VuTH/Export All Packages")]
-        public static void ExportAllPackages()
+        private const string PackageName = "VuTH.Lib";
+        private const string SourcePath = "Assets/_VuTH";
+
+        [MenuItem("Window/VuTH/Export Package", priority = 100)]
+        public static void Build()
         {
-            var packages = new[]
-            {
-                ("Assets/_VuTH/Core/Audio", "VuTH.Audio"),
-                ("Assets/_VuTH/Core/Window", "VuTH.Window"),
-                ("Assets/_VuTH/Core/Window.Transition", "VuTH.Window.Transition"),
-                ("Assets/_VuTH/Core/Screen", "VuTH.Screen"),
-                ("Assets/_VuTH/Core/ScreenFlow", "VuTH.ScreenFlow"),
-                ("Assets/_VuTH/Core/Pool", "VuTH.Pool"),
-                ("Assets/_VuTH/Core/Bootstrap", "VuTH.Bootstrap"),
-                ("Assets/_VuTH/Core/GameCycle", "VuTH.GameCycle"),
-                ("Assets/_VuTH/Core/Persistant", "VuTH.Persistant"),
-            };
-
-            string outputDir = Path.Combine(Application.dataPath, "..", "build-output");
-            Directory.CreateDirectory(outputDir);
-
-            foreach (var (path, name) in packages)
-            {
-                string fullPath = Path.Combine(Application.dataPath, "..", path);
-                if (!Directory.Exists(fullPath))
-                {
-                    Debug.LogWarning($"[PackageExporter] Skipping {name} — path not found: {path}");
-                    continue;
-                }
-
-                string output = Path.Combine(outputDir, $"{name}.unitypackage");
-                AssetDatabase.ExportPackage(
-                    path,
-                    output,
-                    ExportPackageOptions.Recurse
-                );
-                Debug.Log($"[PackageExporter] Exported: {output}");
-            }
-
-            Debug.Log("[PackageExporter] All packages exported.");
+            ExportVuTHPackage();
         }
 
-        // Called from CI command line
-        public static void ExportPackage(string packagePath, string outputPath)
+        [MenuItem("Window/VuTH/Export Package (with Version)", priority = 100)]
+        public static void BuildWithVersion()
         {
-            if (string.IsNullOrEmpty(packagePath) || string.IsNullOrEmpty(outputPath))
+            var version = GetVersionFromArgs();
+            var outputPath = Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
+            ExportToPath(SourcePath, outputPath);
+        }
+
+        // Called from CI
+        public static void CIBuild()
+        {
+            var version = GetVersionFromArgs();
+            var outputPath = string.IsNullOrEmpty(version)
+                ? Path.Combine(GetRepoRoot(), $"{PackageName}.unitypackage")
+                : Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
+            ExportToPath(SourcePath, outputPath);
+        }
+
+        private static void ExportVuTHPackage()
+        {
+            var version = GetVersionFromArgs();
+            if (string.IsNullOrEmpty(version))
             {
-                throw new ArgumentException("packagePath and outputPath are required.");
+                // Ask user
+                var path = EditorUtility.SaveFilePanel(
+                    "Export VuTH Lib",
+                    Application.dataPath,
+                    $"{PackageName}",
+                    "unitypackage"
+                );
+                if (string.IsNullOrEmpty(path))
+                    return;
+
+                ExportToPath(SourcePath, path);
+                return;
             }
 
-            string fullSourcePath = Path.Combine(Application.dataPath, "..", packagePath);
-            if (!Directory.Exists(fullSourcePath))
+            var outputPath = Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
+            ExportToPath(SourcePath, outputPath);
+        }
+
+        private static void ExportToPath(string source, string outputPath)
+        {
+            if (!Directory.Exists(Path.Combine(Application.dataPath, "..", source)))
             {
-                throw new IOException($"Package path not found: {fullSourcePath}");
+                Debug.LogError($"[PackageExporter] Source path not found: {source}");
+                return;
             }
 
-            // Resolve output path — if relative, place next to project root
-            string outputFullPath = outputPath;
-            if (!Path.IsPathRooted(outputFullPath))
-            {
-                outputFullPath = Path.Combine(Application.dataPath, "..", outputPath);
-            }
-
-            string outputDir = Path.GetDirectoryName(outputFullPath);
-            if (!string.IsNullOrEmpty(outputDir))
-            {
-                Directory.CreateDirectory(outputDir);
-            }
+            Debug.Log($"[PackageExporter] Exporting {source} → {outputPath}");
 
             AssetDatabase.ExportPackage(
-                packagePath,
-                outputFullPath,
+                source,
+                outputPath,
                 ExportPackageOptions.Recurse
             );
 
-            Debug.Log($"[PackageExporter] Exported {packagePath} → {outputFullPath}");
-            Console.WriteLine($"[PackageExporter] Exported {packagePath} → {outputFullPath}");
+            Debug.Log($"[PackageExporter] Done: {outputPath}");
+
+            // Refresh to show new file
+            AssetDatabase.Refresh();
+        }
+
+        private static string GetRepoRoot()
+        {
+            return Path.GetDirectoryName(Application.dataPath);
+        }
+
+        private static string GetVersionFromArgs()
+        {
+            var args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "-version" || args[i] == "-v")
+                    return args[i + 1];
+            }
+            return null;
         }
     }
 }

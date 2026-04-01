@@ -1,0 +1,150 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.0.0)'
+        required: false
+        type: string
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  release:
+    name: Create Release v${{ github.event.inputs.version || github.ref_name }}
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          # Remove 'v' prefix if present
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Find .unitypackage
+        id: find
+        run: |
+          # Look for .unitypackage in root
+          PKG=$(find . -maxdepth 1 -name "*.unitypackage" -type f | head -1)
+          if [ -z "$PKG" ]; then
+            # Try in dist or release folders
+            PKG=$(find . -maxdepth 2 -name "*.unitypackage" -type f | head -1)
+          fi
+          if [ -z "$PKG" ]; then
+            echo "package=none" >> $GITHUB_OUTPUT
+          else
+            echo "package=$PKG" >> $GITHUB_OUTPUT
+            echo "Found: $PKG"
+            ls -la "$PKG"
+          fi
+
+      - name: Set package name
+        id: pkgname
+        run: |
+          if [ "${{ steps.find.outputs.package }}" == "none" ]; then
+            echo "name=VuTH.Lib.${{ steps.version.outputs.version }}.unitypackage" >> $GITHUB_OUTPUT
+          else
+            NAME=$(basename "${{ steps.find.outputs.package }}")
+            echo "name=$NAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload artifact (local workflow)
+        if: github.event_name == 'workflow_dispatch' && steps.find.outputs.package == 'none'
+        run: |
+          echo "No .unitypackage found in repo."
+          echo "Please either:"
+          echo "1. Build the package locally using Unity: Window > VuTH > Export Package"
+          echo "2. Place the .unitypackage file in the repo root"
+          echo "3. Commit and push, then run this workflow again"
+          echo ""
+          echo "Or enable 'Build on CI' mode to have GitHub Actions build it automatically."
+          exit 1
+
+      - name: Create GitHub Release
+        if: steps.find.outputs.package != 'none'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: VuTH Lib v${{ steps.version.outputs.version }}
+          body: |
+            ## VuTH Lib v${{ steps.version.outputs.version }}
+
+            ### Installation
+
+            **Option 1: Import .unitypackage**
+            1. Download `VuTH.Lib.${{ steps.version.outputs.version }}.unitypackage` below
+            2. Open Unity → Assets → Import Package → Custom Package
+            3. Select the downloaded `.unitypackage` file
+
+            **Option 2: UPM via git URL**
+            ```json
+            {
+              "dependencies": {
+                "com.vuth.lib": "https://github.com/${{ github.repository }}.git#${{ steps.version.outputs.tag }}"
+              }
+            }
+            ```
+
+          files: ${{ steps.find.outputs.package }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────
+  # Optional: Build on CI if no .unitypackage is committed
+  # ──────────────────────────────────────────────────────────
+  build-ci:
+    name: Build on CI (if needed)
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release
+
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if package exists
+        id: check
+        run: |
+          PKG=$(find . -maxdepth 2 -name "*.unitypackage" -type f | head -1)
+          if [ -n "$PKG" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Package already exists: $PKG"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Will build on CI"
+          fi
+
+      - name: Cache Unity Library
+        if: needs.release.outputs != 'true'
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+
+      - name: Build Package
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "Building .unitypackage on CI..."
+          echo "Note: This requires Unity to be installed on the runner."
+          echo "Enable game-ci/unity-builder in the workflow if needed."
+          # Unity installation on Ubuntu runner would go here
+          # For now, this serves as a placeholder for CI-based builds

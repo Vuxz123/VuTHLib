@@ -17,3 +17,5 @@ MonoBehaviour:
     PublicKeyToken=null
   - _VuTH.Core.Persistant.DataPackage.PlayerProfilePackage, VuTH.Persistant.DataPackage,
     Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  - _VuTH.Core.Audio.AudioSettingsPackage, VuTH.Audio, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null

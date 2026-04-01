@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4408d8ae37aeeff489318a0398845fdc, type: 3}
   m_Name: EventScopeLookup
   m_EditorClassIdentifier: VuTH.Common.MessagePipe::_VuTH.Common.MessagePipe.Core.EventScopeLookup
-  version: 11
-  checksum: ae0508595c2f943cf57881f9b7a634ad
-  bakedAt: 2026-02-03 11:42:50 UTC
+  version: 12
+  checksum: cc9650b06a2a567924f88fc30218bdef
+  bakedAt: 2026-04-01 11:11:07 UTC
   entries:
   - typeFullName: TScript.TestEvent, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
       PublicKeyToken=null
@@ -53,11 +53,6 @@ MonoBehaviour:
     registerAsyncBroker: 0
   - typeFullName: _VuTH.Core.GameCycle.Screen.Events.MessagePipe.ScreenTransitionCompletedEvent,
       VuTH.Screen, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-    scope: 0
-    sceneName: 
-    registerAsyncBroker: 0
-  - typeFullName: _VuTH.Core.Persistant.SaveSystem.Events.SaveEvent, VuTH.Core.Persistant,
-      Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
     scope: 0
     sceneName: 
     registerAsyncBroker: 0

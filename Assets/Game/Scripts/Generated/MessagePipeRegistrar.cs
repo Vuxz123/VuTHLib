@@ -43,8 +43,6 @@ namespace Core.Generated
             builder.RegisterMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenEnterEvent>(options);
             builder.RegisterMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenExitEvent>(options);
             builder.RegisterMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.ScreenTransitionCompletedEvent>(options);
-            builder.RegisterMessageBroker<_VuTH.Core.Audio.Events.MessagePipe.PlayAudioCueEvent>(options);
-            builder.RegisterMessageBroker<_VuTH.Core.Persistant.SaveSystem.Events.SaveEvent>(options);
         }
 
         /// <summary>
@@ -103,8 +101,6 @@ namespace Core.Generated
             builder.AddMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenEnterEvent>();
             builder.AddMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenExitEvent>();
             builder.AddMessageBroker<_VuTH.Core.GameCycle.Screen.Events.MessagePipe.ScreenTransitionCompletedEvent>();
-            builder.AddMessageBroker<_VuTH.Core.Audio.Events.MessagePipe.PlayAudioCueEvent>();
-            builder.AddMessageBroker<_VuTH.Core.Persistant.SaveSystem.Events.SaveEvent>();
         }
 
         #endif
@@ -120,8 +116,6 @@ namespace Core.Generated
             yield return typeof(_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenEnterEvent);
             yield return typeof(_VuTH.Core.GameCycle.Screen.Events.MessagePipe.PreScreenExitEvent);
             yield return typeof(_VuTH.Core.GameCycle.Screen.Events.MessagePipe.ScreenTransitionCompletedEvent);
-            yield return typeof(_VuTH.Core.Audio.Events.MessagePipe.PlayAudioCueEvent);
-            yield return typeof(_VuTH.Core.Persistant.SaveSystem.Events.SaveEvent);
         }
     }
 }
