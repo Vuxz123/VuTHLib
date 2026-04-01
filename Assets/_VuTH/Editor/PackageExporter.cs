@@ -6,14 +6,9 @@ using UnityEngine;
 namespace VuTH.Editor
 {
     /// <summary>
-    /// Exports VuTH Lib as a single .unitypackage to the repo root.
+    /// Exports VuTH Lib as a single .unitypackage.
     /// 
-    /// Local usage:
-    ///   Unity menu: Window > VuTH > Export Package
-    /// 
-    /// CI usage (command line):
-    ///   & Unity.exe -projectPath . -quit -batchmode -nographics `
-    ///     -executeMethod PackageExporter.Build
+    /// Menu: Window > VuTH > Export Package
     /// </summary>
     public static class PackageExporter
     {
@@ -23,55 +18,31 @@ namespace VuTH.Editor
         [MenuItem("Window/VuTH/Export Package", priority = 100)]
         public static void Build()
         {
-            ExportVuTHPackage();
-        }
+            var repoRoot = Path.GetDirectoryName(Application.dataPath);
+            var defaultPath = Path.Combine(repoRoot, $"{PackageName}.unitypackage");
 
-        [MenuItem("Window/VuTH/Export Package (with Version)", priority = 100)]
-        public static void BuildWithVersion()
-        {
-            var version = GetVersionFromArgs();
-            var outputPath = Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
-            ExportToPath(SourcePath, outputPath);
-        }
+            var path = EditorUtility.SaveFilePanel(
+                "Export VuTH Lib",
+                repoRoot,
+                PackageName,
+                "unitypackage"
+            );
 
-        // Called from CI
-        public static void CIBuild()
-        {
-            var version = GetVersionFromArgs();
-            var outputPath = string.IsNullOrEmpty(version)
-                ? Path.Combine(GetRepoRoot(), $"{PackageName}.unitypackage")
-                : Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
-            ExportToPath(SourcePath, outputPath);
-        }
-
-        private static void ExportVuTHPackage()
-        {
-            var version = GetVersionFromArgs();
-            if (string.IsNullOrEmpty(version))
+            if (string.IsNullOrEmpty(path))
             {
-                // Ask user
-                var path = EditorUtility.SaveFilePanel(
-                    "Export VuTH Lib",
-                    Application.dataPath,
-                    $"{PackageName}",
-                    "unitypackage"
-                );
-                if (string.IsNullOrEmpty(path))
-                    return;
-
-                ExportToPath(SourcePath, path);
+                Debug.Log("[PackageExporter] Cancelled.");
                 return;
             }
 
-            var outputPath = Path.Combine(GetRepoRoot(), $"{PackageName}.{version}.unitypackage");
-            ExportToPath(SourcePath, outputPath);
+            ExportToPath(SourcePath, path);
         }
 
         private static void ExportToPath(string source, string outputPath)
         {
-            if (!Directory.Exists(Path.Combine(Application.dataPath, "..", source)))
+            var fullSourcePath = Path.Combine(Application.dataPath, "..", source);
+            if (!Directory.Exists(fullSourcePath))
             {
-                Debug.LogError($"[PackageExporter] Source path not found: {source}");
+                Debug.LogError($"[PackageExporter] Source path not found: {fullSourcePath}");
                 return;
             }
 
@@ -84,25 +55,7 @@ namespace VuTH.Editor
             );
 
             Debug.Log($"[PackageExporter] Done: {outputPath}");
-
-            // Refresh to show new file
-            AssetDatabase.Refresh();
-        }
-
-        private static string GetRepoRoot()
-        {
-            return Path.GetDirectoryName(Application.dataPath);
-        }
-
-        private static string GetVersionFromArgs()
-        {
-            var args = System.Environment.GetCommandLineArgs();
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                if (args[i] == "-version" || args[i] == "-v")
-                    return args[i + 1];
-            }
-            return null;
+            EditorUtility.RevealInFinder(outputPath);
         }
     }
 }
