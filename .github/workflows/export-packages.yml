@@ -1,0 +1,114 @@
+name: Build & Export Unity Packages
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+  UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+  UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+jobs:
+  export-packages:
+    name: Export Packages (${{ matrix.unity-version }} on ${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        unity-version: ['2022.3.x']
+        platform: [windows]
+        package:
+          - { path: 'Assets/_VuTH/Core/Audio', name: 'VuTH.Audio' }
+          - { path: 'Assets/_VuTH/Core/Window', name: 'VuTH.Window' }
+          - { path: 'Assets/_VuTH/Core/Window.Transition', name: 'VuTH.Window.Transition' }
+          - { path: 'Assets/_VuTH/Core/Screen', name: 'VuTH.Screen' }
+          - { path: 'Assets/_VuTH/Core/ScreenFlow', name: 'VuTH.ScreenFlow' }
+          - { path: 'Assets/_VuTH/Core/Pool', name: 'VuTH.Pool' }
+          - { path: 'Assets/_VuTH/Core/Bootstrap', name: 'VuTH.Bootstrap' }
+          - { path: 'Assets/_VuTH/Core/GameCycle', name: 'VuTH.GameCycle' }
+          - { path: 'Assets/_VuTH/Core/Persistant', name: 'VuTH.Persistant' }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create output directory
+        run: mkdir -p build-output
+
+      - name: Setup Unity
+        uses: game-ci/unity-builder@v4
+        with:
+          unityVersion: ${{ matrix.unity-version }}
+          targetPlatform: ${{ matrix.platform }}
+          buildMethod: null  # skip build, just want activation
+          # No build needed for package export
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ matrix.unity-version }}-${{ matrix.platform }}-${{ hashFiles('Assets/**', 'Packages/**') }}
+          restore-keys: |
+            Library-${{ matrix.unity-version }}-${{ matrix.platform }}-
+
+      - name: Export Package
+        run: |
+          $packagePath = "${{ matrix.package.path }}"
+          $packageName = "${{ matrix.package.name }}"
+          echo "Exporting $packageName from $packagePath"
+          
+          # Run Unity headless to export package
+          & "${{ matrix.platform == 'windows' && 'C:/Program Files/Unity/Hub/Editor/' || '/usr/local/share/unity-editor/' }}${{ matrix.unity-version }}/Editor/Unity.exe" \
+            -projectPath "${{ github.workspace }}" \
+            -quit \
+            -batchmode \
+            -nographics \
+            -executeMethod PackageExporter.ExportPackage `
+              -packagePath="$packagePath" `
+              -outputPath="build-output/${packageName}.unitypackage"
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package.name }}
+          path: build-output/${{ matrix.package.name }}.unitypackage
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────
+  # Full Release: build ALL packages + create GitHub Release
+  # ──────────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: export-packages
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: List packages
+        run: ls -la packages/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/*.unitypackage
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
