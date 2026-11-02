@@ -39,21 +39,19 @@ namespace _VuTH.Core.Pool
         
         #region Private Fields
         
-        // Pool Data - Key = InstanceID
-        private readonly Dictionary<int, PoolData> _prefabPools = new();
-        
-        // Track spawned objects to their pool
-        private readonly Dictionary<int, PoolData> _instanceToPool = new();
+        // Prefab pools (prefab id -> pool) & instance -> owning pool lookup
+        private readonly PrefabPoolRegistry _prefabPools = new();
         
         // Class Pools
         private readonly Dictionary<Type, ClassPoolData> _classPools = new();
         
         // Category Management
-        private readonly Dictionary<string, HashSet<int>> _categories = new();
+        private readonly PoolCategoryRegistry _categories = new();
         
         // Scheduled Despawns
-        private readonly List<ScheduledDespawn> _scheduledDespawns = new();
-        
+        private readonly ScheduledDespawnQueue _scheduledDespawns = new();
+        private Action<GameObject> _despawnScheduledCallback; // cached to avoid a per-frame allocation
+
         // Analytics
         private PoolAnalytics _analytics;
         
@@ -122,8 +120,8 @@ namespace _VuTH.Core.Pool
         public void WarmupPool(PoolConfig config)
         {
             var prefabId = config.prefab.GetEntityId();
-            var poolData = CreatePoolData(config.prefab, config);
-            _prefabPools[prefabId] = poolData;
+            var poolData = PrefabPool.Create(config.prefab, config);
+            _prefabPools.SetPool(prefabId, poolData);
             
             // Pre-spawn
             for (int i = 0; i < config.preloadCount; i++)
@@ -132,13 +130,13 @@ namespace _VuTH.Core.Pool
                 obj.SetActive(false);
                 obj.transform.SetParent(rootPoolTransform);
                 poolData.Pool.Enqueue(obj);
-                _instanceToPool[obj.GetEntityId()] = poolData;
+                _prefabPools.TrackInstance(obj, poolData);
             }
             
             // Add to category if specified
             if (!string.IsNullOrEmpty(config.category))
             {
-                AddToCategory(config.category, prefabId);
+                _categories.Add(config.category, prefabId);
             }
             
             LogX($"Warmed up pool for {config.prefab.name}: {config.preloadCount} objects");
@@ -182,10 +180,10 @@ namespace _VuTH.Core.Pool
             var prefabId = prefabObj.GetEntityId();
 
             // Get or create pool
-            if (!_prefabPools.TryGetValue(prefabId, out var poolData))
+            if (!_prefabPools.TryGetPool(prefabId, out var poolData))
             {
-                poolData = CreatePoolData(prefabObj);
-                _prefabPools[prefabId] = poolData;
+                poolData = PrefabPool.Create(prefabObj);
+                _prefabPools.SetPool(prefabId, poolData);
             }
 
             GameObject spawnedObj;
@@ -244,26 +242,26 @@ namespace _VuTH.Core.Pool
             var t = spawnedObj.transform;
             t.position = position;
             t.rotation = rotation;
-            t.SetParent(parent ?? rootPoolTransform);
+            t.SetParent(parent != null ? parent : rootPoolTransform);
 
             spawnedObj.SetActive(true);
             poolData.ActiveCount++;
             poolData.SpawnOrder.Enqueue(spawnedObj);
             
             // Track instance to pool
-            _instanceToPool[spawnedObj.GetEntityId()] = poolData;
+            _prefabPools.TrackInstance(spawnedObj, poolData);
             
             // Category tracking
             if (!string.IsNullOrEmpty(category))
             {
-                AddToCategory(category, prefabId);
+                _categories.Add(category, prefabId);
             }
 
             // Lifecycle callbacks
             NotifyPoolables(spawnedObj, true);
             
             // Stats
-            UpdateStats(poolData, true, fromPool);
+            poolData.RecordStats(true, fromPool);
             _analytics.RecordSpawn(prefabId);
             
             // Event
@@ -304,8 +302,7 @@ namespace _VuTH.Core.Pool
         {
             if (obj == null) return;
             
-            var objId = obj.GetEntityId();
-            if (!_instanceToPool.TryGetValue(objId, out var poolData))
+            if (!_prefabPools.TryGetOwningPool(obj, out var poolData))
             {
                 LogWarningX($"Object {obj.name} not tracked by pool. Destroying instead.");
                 Destroy(obj);
@@ -323,24 +320,22 @@ namespace _VuTH.Core.Pool
             poolData.ActiveCount--;
             
             // Remove from spawn order if immediate recycle
-            if (immediate && poolData.SpawnOrder.Count > 0)
+            if (immediate)
             {
-                var list = poolData.SpawnOrder.ToList();
-                list.Remove(obj);
-                poolData.SpawnOrder = new Queue<GameObject>(list);
+                poolData.RemoveFromSpawnOrder(obj);
             }
             
             // Check pool size limit
             if (poolData.Config.maxPoolSize > 0 && poolData.Pool.Count > poolData.Config.maxPoolSize)
             {
                 var excess = poolData.Pool.Dequeue();
-                _instanceToPool.Remove(excess.GetEntityId());
+                _prefabPools.UntrackInstance(excess);
                 Destroy(excess);
                 LogX($"Pool size exceeded, destroyed excess object");
             }
             
             // Stats
-            UpdateStats(poolData, false, false);
+            poolData.RecordStats(false, false);
             _analytics.RecordDespawn(poolData.PrefabId);
             
             // Event
@@ -429,23 +424,13 @@ namespace _VuTH.Core.Pool
 
         #region CATEGORY MANAGEMENT
         
-        private void AddToCategory(string category, int prefabId)
-        {
-            if (!_categories.TryGetValue(category, out var prefabIds))
-            {
-                prefabIds = new HashSet<int>();
-                _categories[category] = prefabIds;
-            }
-            prefabIds.Add(prefabId);
-        }
-        
         public void DespawnCategory(string category, float delay = 0f)
         {
-            if (!_categories.TryGetValue(category, out var prefabIds)) return;
+            if (!_categories.TryGetPrefabIds(category, out var prefabIds)) return;
             
             foreach (var prefabId in prefabIds)
             {
-                if (!_prefabPools.TryGetValue(prefabId, out var poolData)) continue;
+                if (!_prefabPools.TryGetPool(prefabId, out var poolData)) continue;
                 var activeObjects = poolData.SpawnOrder.ToArray();
                 foreach (var obj in activeObjects)
                 {
@@ -465,17 +450,17 @@ namespace _VuTH.Core.Pool
         
         public string[] GetCategories()
         {
-            return _categories.Keys.ToArray();
+            return _categories.GetNames();
         }
         
         public int GetCategoryCount(string category)
         {
-            if (!_categories.TryGetValue(category, out var prefabIds)) return 0;
+            if (!_categories.TryGetPrefabIds(category, out var prefabIds)) return 0;
             
             int count = 0;
             foreach (var prefabId in prefabIds)
             {
-                if (_prefabPools.TryGetValue(prefabId, out var poolData))
+                if (_prefabPools.TryGetPool(prefabId, out var poolData))
                 {
                     count += poolData.ActiveCount;
                 }
@@ -490,17 +475,11 @@ namespace _VuTH.Core.Pool
         public void ClearPool(GameObject prefab)
         {
             var prefabId = prefab.GetEntityId();
-            if (!_prefabPools.TryGetValue(prefabId, out var poolData)) return;
+            if (!_prefabPools.TryGetPool(prefabId, out var poolData)) return;
             
-            while (poolData.Pool.Count > 0)
-            {
-                var obj = poolData.Pool.Dequeue();
-                if (obj == null) continue;
-                _instanceToPool.Remove(obj.GetEntityId());
-                Destroy(obj);
-            }
+            _prefabPools.DrainInactive(poolData, 0, Destroy);
             
-            _prefabPools.Remove(prefabId);
+            _prefabPools.RemovePool(prefabId);
             LogX($"Cleared pool for {prefab.name}");
         }
         
@@ -512,17 +491,12 @@ namespace _VuTH.Core.Pool
         
         public void ClearAllPools()
         {
-            foreach (var poolData in _prefabPools.Values)
+            foreach (var poolData in _prefabPools.Pools)
             {
-                while (poolData.Pool.Count > 0)
-                {
-                    var obj = poolData.Pool.Dequeue();
-                    if (obj != null) Destroy(obj);
-                }
+                _prefabPools.DrainInactive(poolData, 0, Destroy);
             }
             
             _prefabPools.Clear();
-            _instanceToPool.Clear();
             _classPools.Clear();
             _categories.Clear();
             _scheduledDespawns.Clear();
@@ -533,17 +507,9 @@ namespace _VuTH.Core.Pool
         
         public void TrimExcess(int keepMinimum = 5)
         {
-            foreach (var poolData in _prefabPools.Values)
+            foreach (var poolData in _prefabPools.Pools)
             {
-                while (poolData.Pool.Count > keepMinimum)
-                {
-                    var obj = poolData.Pool.Dequeue();
-                    if (obj != null)
-                    {
-                        _instanceToPool.Remove(obj.GetEntityId());
-                        Destroy(obj);
-                    }
-                }
+                _prefabPools.DrainInactive(poolData, keepMinimum, Destroy);
                 poolData.Stats?.UpdatePooledCount(poolData.Pool.Count);
             }
             
@@ -555,7 +521,7 @@ namespace _VuTH.Core.Pool
             var currentTime = Time.time;
             var toRemove = new List<int>();
             
-            foreach (var kvp in _prefabPools)
+            foreach (var kvp in _prefabPools.Entries)
             {
                 var poolData = kvp.Value;
                 if (poolData.Stats != null &&
@@ -568,18 +534,10 @@ namespace _VuTH.Core.Pool
             
             foreach (var prefabId in toRemove)
             {
-                if (_prefabPools.TryGetValue(prefabId, out var poolData))
+                if (_prefabPools.TryGetPool(prefabId, out var poolData))
                 {
-                    while (poolData.Pool.Count > 0)
-                    {
-                        var obj = poolData.Pool.Dequeue();
-                        if (obj != null)
-                        {
-                            _instanceToPool.Remove(obj.GetEntityId());
-                            Destroy(obj);
-                        }
-                    }
-                    _prefabPools.Remove(prefabId);
+                    _prefabPools.DrainInactive(poolData, 0, Destroy);
+                    _prefabPools.RemovePool(prefabId);
                 }
             }
             
@@ -592,11 +550,7 @@ namespace _VuTH.Core.Pool
         
         private void ScheduleDespawn(GameObject obj, float delay)
         {
-            _scheduledDespawns.Add(new ScheduledDespawn
-            {
-                Object = obj,
-                DespawnTime = Time.time + delay
-            });
+            _scheduledDespawns.Schedule(obj, Time.time + delay);
         }
         
         private void Update()
@@ -606,22 +560,8 @@ namespace _VuTH.Core.Pool
         
         private void ProcessScheduledDespawns()
         {
-            for (int i = _scheduledDespawns.Count - 1; i >= 0; i--)
-            {
-                var scheduled = _scheduledDespawns[i];
-                
-                if (scheduled.Object == null)
-                {
-                    _scheduledDespawns.RemoveAt(i);
-                    continue;
-                }
-                
-                if (Time.time >= scheduled.DespawnTime)
-                {
-                    DespawnInternal(scheduled.Object);
-                    _scheduledDespawns.RemoveAt(i);
-                }
-            }
+            _despawnScheduledCallback ??= obj => DespawnInternal(obj);
+            _scheduledDespawns.Process(Time.time, _despawnScheduledCallback);
         }
         
         #endregion
@@ -631,7 +571,7 @@ namespace _VuTH.Core.Pool
         public PoolStats GetPrefabStats(GameObject prefab)
         {
             var prefabId = prefab.GetEntityId();
-            return _prefabPools.TryGetValue(prefabId, out var poolData) ? poolData.Stats : null;
+            return _prefabPools.TryGetPool(prefabId, out var poolData) ? poolData.Stats : null;
         }
         
         public PoolStats GetClassStats<T>() where T : class
@@ -643,7 +583,7 @@ namespace _VuTH.Core.Pool
         {
             var result = new Dictionary<string, PoolStats>();
             
-            foreach (var kvp in _prefabPools)
+            foreach (var kvp in _prefabPools.Entries)
             {
                 var poolData = kvp.Value;
                 var name = poolData.Prefab ? poolData.Prefab.name : $"Unknown_{kvp.Key}";
@@ -671,18 +611,18 @@ namespace _VuTH.Core.Pool
             var summary = _analytics?.GetSummary() ?? default;
             
             var categoryCounts = new Dictionary<string, int>();
-            foreach (var category in _categories.Keys)
+            foreach (var category in _categories.Names)
             {
                 categoryCounts[category] = GetCategoryCount(category);
             }
             
             return new PoolMetrics
             {
-                TotalPools = _prefabPools.Count + _classPools.Count,
-                TotalActiveObjects = _prefabPools.Values.Sum(p => p.ActiveCount),
-                TotalPooledObjects = _prefabPools.Values.Sum(p => p.Pool.Count),
+                TotalPools = _prefabPools.PoolCount + _classPools.Count,
+                TotalActiveObjects = _prefabPools.TotalActiveCount,
+                TotalPooledObjects = _prefabPools.TotalPooledCount,
                 OverallHitRate = summary.OverallHitRate,
-                EstimatedMemoryBytes = EstimateMemoryUsage(),
+                EstimatedMemoryBytes = _prefabPools.EstimateMemoryUsage(),
                 CategoryCounts = categoryCounts
             };
         }
@@ -693,46 +633,15 @@ namespace _VuTH.Core.Pool
             
             return new Dictionary<string, object>
             {
-                ["TotalPrefabPools"] = _prefabPools.Count,
+                ["TotalPrefabPools"] = _prefabPools.PoolCount,
                 ["TotalClassPools"] = _classPools.Count,
-                ["TotalActiveObjects"] = _prefabPools.Values.Sum(p => p.ActiveCount),
-                ["TotalPooledObjects"] = _prefabPools.Values.Sum(p => p.Pool.Count),
-                ["MemoryEstimate"] = EstimateMemoryUsage(),
+                ["TotalActiveObjects"] = _prefabPools.TotalActiveCount,
+                ["TotalPooledObjects"] = _prefabPools.TotalPooledCount,
+                ["MemoryEstimate"] = _prefabPools.EstimateMemoryUsage(),
                 ["HitRate"] = $"{summary.OverallHitRate:P1}",
                 ["Categories"] = _categories.Count,
                 ["ScheduledDespawns"] = _scheduledDespawns.Count
             };
-        }
-        
-        private void UpdateStats(PoolData poolData, bool isSpawn, bool fromPool)
-        {
-            poolData.Stats ??= new PoolStats
-            {
-                prefabId = poolData.PrefabId,
-                poolName = poolData.Prefab?.name ?? "Unknown",
-                createdTime = Time.time
-            };
-            
-            if (isSpawn)
-            {
-                poolData.Stats.RecordSpawn(fromPool);
-            }
-            else
-            {
-                poolData.Stats.RecordDespawn();
-            }
-            
-            poolData.Stats.UpdatePooledCount(poolData.Pool.Count);
-        }
-        
-        private long EstimateMemoryUsage()
-        {
-            long total = 0;
-            foreach (var poolData in _prefabPools.Values)
-            {
-                total += poolData.Pool.Count * poolData.Config.estimatedSizeBytes;
-            }
-            return total;
         }
         
         #endregion
@@ -746,26 +655,6 @@ namespace _VuTH.Core.Pool
 #else
             return Instantiate(prefab);
 #endif
-        }
-        
-        private PoolData CreatePoolData(GameObject prefab, PoolConfig config = null)
-        {
-            config ??= new PoolConfig { prefab = prefab };
-            
-            return new PoolData
-            {
-                Prefab = prefab,
-                PrefabId = prefab.GetEntityId(),
-                Config = config,
-                Pool = new Queue<GameObject>(),
-                SpawnOrder = new Queue<GameObject>(),
-                Stats = new PoolStats
-                {
-                    prefabId = prefab.GetEntityId(),
-                    poolName = prefab.name,
-                    createdTime = Time.time
-                }
-            };
         }
         
         private void NotifyPoolables(GameObject obj, bool isSpawn)
@@ -794,29 +683,12 @@ namespace _VuTH.Core.Pool
 
         #region DATA CLASSES
         
-        private class PoolData
-        {
-            public GameObject Prefab;
-            public int PrefabId;
-            public PoolConfig Config;
-            public Queue<GameObject> Pool;
-            public Queue<GameObject> SpawnOrder;
-            public int ActiveCount;
-            public PoolStats Stats;
-        }
-        
         private class ClassPoolData
         {
             public Type Type;
             public readonly Stack<object> Pool = new();
             public int ActiveCount;
             public PoolStats Stats;
-        }
-        
-        private struct ScheduledDespawn
-        {
-            public GameObject Object;
-            public float DespawnTime;
         }
         
         #endregion

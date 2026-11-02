@@ -389,7 +389,7 @@ MonoBehaviour
 **Purpose:** Test scripts and demonstration code for the framework.
 
 The TScript folder contains example scripts for testing various framework features:
-- `TestBoostraper.cs` / `TestBoostraperB.cs` - Bootstrap testing
+- `TestBootstraper.cs` / `TestBootstraperB.cs` - Bootstrap testing
 - `TestEvent.cs` - Event system testing
 - `TestInjector.cs` - DI injection testing
 - `TestPopup.cs` - Window/Popup testing

@@ -1,4 +1,4 @@
-﻿using _VuTH.Core.Persistant.SaveSystem.Migrate;
+﻿using _VuTH.Core.Persistent.SaveSystem.Migrate;
 
 namespace TScript
 {

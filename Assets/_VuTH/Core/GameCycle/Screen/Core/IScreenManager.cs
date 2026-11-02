@@ -5,7 +5,7 @@ using _VuTH.Core.GameCycle.Screen.Identifier;
 using _VuTH.Core.GameCycle.Screen.Transition;
 using Cysharp.Threading.Tasks;
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
     public interface IScreenManager : ICommonManager
     {

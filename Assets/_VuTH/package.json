@@ -1,0 +1,28 @@
+{
+  "name": "com.vuth.lib",
+  "version": "1.0.0",
+  "displayName": "VuTH Lib",
+  "description": "Modular Unity game framework: DI bootstrap (VContainer), MessagePipe integration, Screen/ScreenFlow, Window & transitions, Pool, Audio, Camera, Save System (encrypt + migrate) and DataPackage persistence.",
+  "unity": "6000.4",
+  "author": {
+    "name": "Tran Hoang Vu",
+    "url": "https://github.com/Vuxz123/VuTHLib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vuxz123/VuTHLib.git"
+  },
+  "keywords": [
+    "framework",
+    "vcontainer",
+    "messagepipe",
+    "save-system",
+    "screen-flow",
+    "pool"
+  ],
+  "dependencies": {
+    "com.unity.addressables": "2.9.1",
+    "com.unity.inputsystem": "1.19.0",
+    "com.unity.ugui": "2.0.0"
+  }
+}

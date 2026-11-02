@@ -6,7 +6,7 @@ using _VuTH.Common.Log;
 using _VuTH.Core.Audio.Events.MessagePipe;
 using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Events.MessagePipe;
-using _VuTH.Core.Persistant.DataPackage;
+using _VuTH.Core.Persistent.DataPackage;
 using Cysharp.Threading.Tasks;
 using MessagePipe;
 using UnityEngine;
@@ -36,12 +36,12 @@ namespace _VuTH.Core.Audio
         [SerializeField, Range(0f, 1f)] private float defaultUiVolume = 1f;
 
         // Playback state is mutated from Unity's main thread only.
-        private readonly Dictionary<int, PlaybackEntry> _playbacks = new();
-        private readonly Dictionary<AudioSource, int> _sourceToPlayback = new();
-        private readonly Queue<AudioSource> _oneShotPool = new();
-        private readonly List<AudioSource> _ownedOneShotSources = new();
+        private readonly AudioPlaybackRegistry _playbacks = new();
         private readonly List<IDisposable> _subscriptions = new();
-        private readonly List<IDisposable> _settingsSubscriptions = new();
+
+        // Created lazily because they call back into this instance.
+        private AudioSourcePool _oneShotPool;
+        private AudioSettingsBinding _settings;
 
         private Transform _runtimeRoot;
         private Transform _oneShotRoot;
@@ -49,19 +49,16 @@ namespace _VuTH.Core.Audio
         private AudioSource _musicSourceB;
         private AudioSource _activeMusicSource;
         private int _activeMusicPlaybackId;
-        private int _nextPlaybackId = 1;
         private CancellationTokenSource _musicTransitionCts;
-        private CancellationTokenSource _settingsRegistrationCts;
-        private AudioSettingsPackage _settingsPackage;
-        private IDataPersistenceManager _persistenceManager;
-        private bool _ownsSettingsPackage;
-        private bool _settingsPackageRegistered;
 
-        public float MasterVolume => _settingsPackage?.MasterVolume.Value ?? defaultMasterVolume;
-        public float MusicVolume => _settingsPackage?.MusicVolume.Value ?? defaultMusicVolume;
-        public float SfxVolume => _settingsPackage?.SfxVolume.Value ?? defaultSfxVolume;
-        public float UiVolume => _settingsPackage?.UiVolume.Value ?? defaultUiVolume;
-        public bool Muted => _settingsPackage?.Muted.Value ?? defaultMuted;
+        public float MasterVolume => Settings.Package?.MasterVolume.Value ?? defaultMasterVolume;
+        public float MusicVolume => Settings.Package?.MusicVolume.Value ?? defaultMusicVolume;
+        public float SfxVolume => Settings.Package?.SfxVolume.Value ?? defaultSfxVolume;
+        public float UiVolume => Settings.Package?.UiVolume.Value ?? defaultUiVolume;
+        public bool Muted => Settings.Package?.Muted.Value ?? defaultMuted;
+
+        private AudioSourcePool OneShotPool => _oneShotPool ??= new AudioSourcePool(CreateOneShotSource);
+        private AudioSettingsBinding Settings => _settings ??= new AudioSettingsBinding(RefreshAllVolumes);
 
 #if VCONTAINER
         [Inject]
@@ -82,7 +79,7 @@ namespace _VuTH.Core.Audio
         protected override void InitializeBootstrap()
         {
             EnsureRuntimeObjects();
-            WarmOneShotPool();
+            OneShotPool.Warm(initialOneShotSources);
             InitializeSettingsPackage();
             RefreshAllVolumes();
         }
@@ -90,16 +87,16 @@ namespace _VuTH.Core.Audio
         protected override void DeinitializeBootstrap()
         {
             CancelMusicTransition();
-            CancelSettingsRegistration();
+            Settings.CancelRegistration();
 
             foreach (var subscription in _subscriptions)
             {
                 subscription.Dispose();
             }
             _subscriptions.Clear();
-            DisposeSettingsSubscriptions();
+            Settings.DisposeSubscriptions();
 
-            foreach (var playback in _playbacks.Values)
+            foreach (var playback in _playbacks.Entries)
             {
                 playback.CancellationTokenSource.Cancel();
                 playback.CancellationTokenSource.Dispose();
@@ -107,29 +104,9 @@ namespace _VuTH.Core.Audio
             }
 
             _playbacks.Clear();
-            _sourceToPlayback.Clear();
-            _oneShotPool.Clear();
-            _ownedOneShotSources.Clear();
+            OneShotPool.Clear();
 
-            if (_settingsPackage != null)
-            {
-                if (_ownsSettingsPackage)
-                {
-                    _settingsPackage.SaveNowAsync().Forget();
-
-                    if (_settingsPackageRegistered)
-                    {
-                        _persistenceManager?.UnregisterPackage(_settingsPackage);
-                    }
-
-                    _settingsPackage.Dispose();
-                }
-                _settingsPackage = null;
-            }
-
-            _persistenceManager = null;
-            _ownsSettingsPackage = false;
-            _settingsPackageRegistered = false;
+            Settings.ReleasePackage();
             _activeMusicPlaybackId = 0;
             _activeMusicSource = null;
         }
@@ -188,8 +165,8 @@ namespace _VuTH.Core.Audio
             var musicAPlaybackId = 0;
             var musicBPlaybackId = 0;
             
-            var hasA = _musicSourceA && _sourceToPlayback.TryGetValue(_musicSourceA, out musicAPlaybackId);
-            var hasB = _musicSourceB && _sourceToPlayback.TryGetValue(_musicSourceB, out musicBPlaybackId);
+            var hasA = _musicSourceA && _playbacks.TryGetPlaybackId(_musicSourceA, out musicAPlaybackId);
+            var hasB = _musicSourceB && _playbacks.TryGetPlaybackId(_musicSourceB, out musicBPlaybackId);
 
             CancelMusicTransition();
             _activeMusicPlaybackId = 0;
@@ -220,37 +197,37 @@ namespace _VuTH.Core.Audio
 
         public bool IsValid(AudioPlaybackHandle handle)
         {
-            return handle.PlaybackId > 0 && _playbacks.ContainsKey(handle.PlaybackId);
+            return handle.PlaybackId > 0 && _playbacks.Contains(handle.PlaybackId);
         }
 
         public void SetMuted(bool muted)
         {
             EnsureOwnedSettingsPackage();
-            _settingsPackage.Muted.Value = muted;
+            Settings.Package.Muted.Value = muted;
         }
 
         public void SetMasterVolume(float volume)
         {
             EnsureOwnedSettingsPackage();
-            _settingsPackage.MasterVolume.Value = Mathf.Clamp01(volume);
+            Settings.Package.MasterVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetMusicVolume(float volume)
         {
             EnsureOwnedSettingsPackage();
-            _settingsPackage.MusicVolume.Value = Mathf.Clamp01(volume);
+            Settings.Package.MusicVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetSfxVolume(float volume)
         {
             EnsureOwnedSettingsPackage();
-            _settingsPackage.SfxVolume.Value = Mathf.Clamp01(volume);
+            Settings.Package.SfxVolume.Value = Mathf.Clamp01(volume);
         }
 
         public void SetUiVolume(float volume)
         {
             EnsureOwnedSettingsPackage();
-            _settingsPackage.UiVolume.Value = Mathf.Clamp01(volume);
+            Settings.Package.UiVolume.Value = Mathf.Clamp01(volume);
         }
 
         private AudioPlaybackHandle PlayMusicInternal(
@@ -268,7 +245,7 @@ namespace _VuTH.Core.Audio
 
             if (_activeMusicSource &&
                 _activeMusicPlaybackId != 0 &&
-                _playbacks.TryGetValue(_activeMusicPlaybackId, out var activePlayback) &&
+                _playbacks.TryGet(_activeMusicPlaybackId, out var activePlayback) &&
                 activePlayback.Source &&
                 activePlayback.Source.clip == clip &&
                 activePlayback.Source.isPlaying)
@@ -291,7 +268,8 @@ namespace _VuTH.Core.Audio
 
             ReleasePlaybackForSource(nextSource, stopSource: true);
 
-            var playbackId = RegisterPlayback(nextSource, AudioChannel.Music, Mathf.Clamp01(baseVolume), isMusic: true);
+            var entry = RegisterPlayback(nextSource, AudioChannel.Music, Mathf.Clamp01(baseVolume), isMusic: true);
+            var playbackId = entry.PlaybackId;
             ConfigureSource(
                 nextSource,
                 clip,
@@ -302,7 +280,6 @@ namespace _VuTH.Core.Audio
                 priority,
                 ignoreListenerPause);
 
-            var entry = _playbacks[playbackId];
             entry.FadeFactor = previousSource != null && previousSource.isPlaying && effectiveFade > 0f ? 0f : 1f;
             ApplyResolvedVolume(entry);
             nextSource.Play();
@@ -353,14 +330,15 @@ namespace _VuTH.Core.Audio
 
             EnsureRuntimeObjects();
 
-            var source = AcquireOneShotSource();
+            var source = OneShotPool.Acquire(maxOneShotSources);
             if (!source)
             {
                 this.LogWarning("AudioManager: No available one-shot source.");
                 return AudioPlaybackHandle.Invalid;
             }
 
-            var playbackId = RegisterPlayback(source, channel, Mathf.Clamp01(cue.Volume * Mathf.Max(0f, volumeScale)), isMusic: false);
+            var entry = RegisterPlayback(source, channel, Mathf.Clamp01(cue.Volume * Mathf.Max(0f, volumeScale)), isMusic: false);
+            var playbackId = entry.PlaybackId;
             ConfigureSource(
                 source,
                 cue.Clip,
@@ -371,7 +349,6 @@ namespace _VuTH.Core.Audio
                 cue.Priority,
                 cue.IgnoreListenerPause);
 
-            var entry = _playbacks[playbackId];
             entry.FadeFactor = 1f;
             ApplyResolvedVolume(entry);
             source.Play();
@@ -386,7 +363,7 @@ namespace _VuTH.Core.Audio
 
         private async UniTask StopPlaybackAsync(int playbackId, float fadeDuration)
         {
-            if (!_playbacks.TryGetValue(playbackId, out var entry))
+            if (!_playbacks.TryGet(playbackId, out var entry))
             {
                 return;
             }
@@ -423,13 +400,13 @@ namespace _VuTH.Core.Audio
                     elapsed += Time.unscaledDeltaTime;
                     var t = Mathf.Clamp01(elapsed / duration);
 
-                    if (_playbacks.TryGetValue(fromPlaybackId, out var fromEntry))
+                    if (_playbacks.TryGet(fromPlaybackId, out var fromEntry))
                     {
                         fromEntry.FadeFactor = 1f - t;
                         ApplyResolvedVolume(fromEntry);
                     }
 
-                    if (_playbacks.TryGetValue(toPlaybackId, out var toEntry))
+                    if (_playbacks.TryGet(toPlaybackId, out var toEntry))
                     {
                         toEntry.FadeFactor = t;
                         ApplyResolvedVolume(toEntry);
@@ -451,7 +428,7 @@ namespace _VuTH.Core.Audio
                 }
             }
 
-            if (_playbacks.TryGetValue(toPlaybackId, out var activeEntry))
+            if (_playbacks.TryGet(toPlaybackId, out var activeEntry))
             {
                 activeEntry.FadeFactor = 1f;
                 ApplyResolvedVolume(activeEntry);
@@ -463,7 +440,7 @@ namespace _VuTH.Core.Audio
             }
         }
 
-        private async UniTask FadePlaybackAsync(PlaybackEntry entry, float targetFadeFactor, float duration)
+        private async UniTask FadePlaybackAsync(AudioPlaybackEntry entry, float targetFadeFactor, float duration)
         {
             var source = entry.Source;
             if (source == null)
@@ -548,7 +525,7 @@ namespace _VuTH.Core.Audio
 
         private void InitializeSettingsPackage()
         {
-            if (TryBindRegisteredSettingsPackage())
+            if (Settings.TryBindRegisteredPackage())
             {
                 return;
             }
@@ -559,24 +536,22 @@ namespace _VuTH.Core.Audio
             }
 
             EnsureOwnedSettingsPackage();
-            if (TryRegisterOwnedSettingsPackage())
+            if (Settings.TryRegisterOwnedPackage())
             {
                 return;
             }
 
-            CancelSettingsRegistration();
-            _settingsRegistrationCts = new CancellationTokenSource();
-            RegisterOwnedSettingsPackageWhenInstanceAvailableAsync(_settingsRegistrationCts).Forget();
+            Settings.StartDeferredRegistration();
         }
 
         private void EnsureOwnedSettingsPackage()
         {
-            if (_settingsPackage != null)
+            if (Settings.Package != null)
             {
                 return;
             }
 
-            BindSettingsPackage(
+            Settings.Bind(
                 new AudioSettingsPackage(
                 defaultMuted,
                 defaultMasterVolume,
@@ -614,31 +589,9 @@ namespace _VuTH.Core.Audio
             }
         }
 
-        private void WarmOneShotPool()
+        private AudioSource CreateOneShotSource(int index)
         {
-            for (var i = _ownedOneShotSources.Count; i < initialOneShotSources; i++)
-            {
-                var source = CreateManagedSource($"OneShot_{i + 1}", _oneShotRoot);
-                _ownedOneShotSources.Add(source);
-                _oneShotPool.Enqueue(source);
-            }
-        }
-
-        private AudioSource AcquireOneShotSource()
-        {
-            if (_oneShotPool.Count > 0)
-            {
-                return _oneShotPool.Dequeue();
-            }
-
-            if (_ownedOneShotSources.Count >= maxOneShotSources)
-            {
-                return null;
-            }
-
-            var source = CreateManagedSource($"OneShot_{_ownedOneShotSources.Count + 1}", _oneShotRoot);
-            _ownedOneShotSources.Add(source);
-            return source;
+            return CreateManagedSource($"OneShot_{index}", _oneShotRoot);
         }
 
         private AudioSource CreateManagedSource(string sourceName, Transform parent = null)
@@ -663,20 +616,16 @@ namespace _VuTH.Core.Audio
             return ReferenceEquals(_activeMusicSource, _musicSourceA) ? _musicSourceB : _musicSourceA;
         }
 
-        private int RegisterPlayback(AudioSource source, AudioChannel channel, float baseVolume, bool isMusic)
+        private AudioPlaybackEntry RegisterPlayback(AudioSource source, AudioChannel channel, float baseVolume, bool isMusic)
         {
             ReleasePlaybackForSource(source, stopSource: true);
 
-            var playbackId = _nextPlaybackId++;
-            var entry = new PlaybackEntry(playbackId, source, channel, baseVolume, isMusic);
-            _playbacks[playbackId] = entry;
-            _sourceToPlayback[source] = playbackId;
-            return playbackId;
+            return _playbacks.Register(source, channel, baseVolume, isMusic);
         }
 
         private void ReleasePlaybackForSource(AudioSource source, bool stopSource)
         {
-            if (!source || !_sourceToPlayback.TryGetValue(source, out var playbackId))
+            if (!source || !_playbacks.TryGetPlaybackId(source, out var playbackId))
             {
                 if (stopSource && source)
                 {
@@ -685,9 +634,9 @@ namespace _VuTH.Core.Audio
                 return;
             }
 
-            if (!_playbacks.TryGetValue(playbackId, out var entry))
+            if (!_playbacks.TryGet(playbackId, out var entry))
             {
-                _sourceToPlayback.Remove(source);
+                _playbacks.RemoveSource(source);
                 if (stopSource)
                 {
                     ResetSource(source);
@@ -698,8 +647,7 @@ namespace _VuTH.Core.Audio
             entry.CancellationTokenSource.Cancel();
             entry.CancellationTokenSource.Dispose();
 
-            _playbacks.Remove(playbackId);
-            _sourceToPlayback.Remove(source);
+            _playbacks.Remove(playbackId, source);
 
             if (entry.IsMusic)
             {
@@ -721,10 +669,7 @@ namespace _VuTH.Core.Audio
                 ResetSource(source);
             }
 
-            if (!_oneShotPool.Contains(source))
-            {
-                _oneShotPool.Enqueue(source);
-            }
+            OneShotPool.Return(source);
         }
 
         private void ReleaseOneShotPlayback(AudioSource source, int playbackId)
@@ -734,7 +679,7 @@ namespace _VuTH.Core.Audio
                 return;
             }
 
-            if (!_sourceToPlayback.TryGetValue(source, out var currentPlaybackId) || currentPlaybackId != playbackId)
+            if (!_playbacks.TryGetPlaybackId(source, out var currentPlaybackId) || currentPlaybackId != playbackId)
             {
                 return;
             }
@@ -744,7 +689,7 @@ namespace _VuTH.Core.Audio
 
         private void ReleaseMusicPlayback(int playbackId)
         {
-            if (!_playbacks.TryGetValue(playbackId, out var entry))
+            if (!_playbacks.TryGet(playbackId, out var entry))
             {
                 return;
             }
@@ -757,8 +702,7 @@ namespace _VuTH.Core.Audio
 
             entry.CancellationTokenSource.Cancel();
             entry.CancellationTokenSource.Dispose();
-            _playbacks.Remove(playbackId);
-            _sourceToPlayback.Remove(entry.Source);
+            _playbacks.Remove(playbackId, entry.Source);
 
             if (ReferenceEquals(_activeMusicSource, entry.Source))
             {
@@ -783,13 +727,13 @@ namespace _VuTH.Core.Audio
 
         private void RefreshAllVolumes()
         {
-            foreach (var entry in _playbacks.Values)
+            foreach (var entry in _playbacks.Entries)
             {
                 ApplyResolvedVolume(entry);
             }
         }
 
-        private void ApplyResolvedVolume(PlaybackEntry entry)
+        private void ApplyResolvedVolume(AudioPlaybackEntry entry)
         {
             if (!entry.Source)
             {
@@ -801,19 +745,14 @@ namespace _VuTH.Core.Audio
 
         private float ResolveVolume(AudioChannel channel, float requestedVolume)
         {
-            if (Muted)
-            {
-                return 0f;
-            }
-
-            var channelVolume = channel switch
-            {
-                AudioChannel.Music => MusicVolume,
-                AudioChannel.Ui => UiVolume,
-                _ => SfxVolume
-            };
-
-            return Mathf.Clamp01(requestedVolume) * Mathf.Clamp01(channelVolume) * Mathf.Clamp01(MasterVolume);
+            return AudioVolumeMixer.Resolve(
+                channel,
+                requestedVolume,
+                Muted,
+                MasterVolume,
+                MusicVolume,
+                SfxVolume,
+                UiVolume);
         }
 
         private static void ConfigureSource(
@@ -840,123 +779,6 @@ namespace _VuTH.Core.Audio
             source.time = 0f;
         }
 
-        private bool TryBindRegisteredSettingsPackage()
-        {
-            if (!DataPersistenceManager.HasInstance)
-            {
-                return false;
-            }
-
-            _persistenceManager = DataPersistenceManager.Instance;
-            if (!_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) || package == null)
-            {
-                return false;
-            }
-
-            BindSettingsPackage(package, ownsPackage: false, isRegistered: true);
-            return true;
-        }
-
-        private bool TryRegisterOwnedSettingsPackage()
-        {
-            if (_settingsPackageRegistered || !_ownsSettingsPackage || _settingsPackage == null || !DataPersistenceManager.HasInstance)
-            {
-                return false;
-            }
-
-            _persistenceManager = DataPersistenceManager.Instance;
-            if (_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) && package != null)
-            {
-                BindSettingsPackage(package, ownsPackage: false, isRegistered: true);
-                return true;
-            }
-
-            _persistenceManager.RegisterPackage(_settingsPackage);
-            _settingsPackageRegistered = true;
-            return true;
-        }
-
-        private async UniTaskVoid RegisterOwnedSettingsPackageWhenInstanceAvailableAsync(CancellationTokenSource registrationCts)
-        {
-            try
-            {
-                while (!registrationCts.IsCancellationRequested)
-                {
-                    if (TryRegisterOwnedSettingsPackage())
-                    {
-                        return;
-                    }
-
-                    await UniTask.Yield(PlayerLoopTiming.Update, registrationCts.Token);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            finally
-            {
-                if (ReferenceEquals(_settingsRegistrationCts, registrationCts))
-                {
-                    _settingsRegistrationCts.Dispose();
-                    _settingsRegistrationCts = null;
-                }
-            }
-        }
-
-        private void BindSettingsPackage(AudioSettingsPackage package, bool ownsPackage, bool isRegistered)
-        {
-            if (ReferenceEquals(_settingsPackage, package))
-            {
-                _ownsSettingsPackage = ownsPackage;
-                _settingsPackageRegistered = isRegistered;
-                return;
-            }
-
-            if (_settingsPackage != null && _ownsSettingsPackage)
-            {
-                if (_settingsPackageRegistered)
-                {
-                    _persistenceManager?.UnregisterPackage(_settingsPackage);
-                }
-
-                _settingsPackage.Dispose();
-            }
-
-            DisposeSettingsSubscriptions();
-
-            _settingsPackage = package;
-            _ownsSettingsPackage = ownsPackage;
-            _settingsPackageRegistered = isRegistered;
-
-            _settingsSubscriptions.Add(_settingsPackage.Muted.Subscribe(_ => RefreshAllVolumes()));
-            _settingsSubscriptions.Add(_settingsPackage.MasterVolume.Subscribe(_ => RefreshAllVolumes()));
-            _settingsSubscriptions.Add(_settingsPackage.MusicVolume.Subscribe(_ => RefreshAllVolumes()));
-            _settingsSubscriptions.Add(_settingsPackage.SfxVolume.Subscribe(_ => RefreshAllVolumes()));
-            _settingsSubscriptions.Add(_settingsPackage.UiVolume.Subscribe(_ => RefreshAllVolumes()));
-        }
-
-        private void DisposeSettingsSubscriptions()
-        {
-            foreach (var subscription in _settingsSubscriptions)
-            {
-                subscription.Dispose();
-            }
-
-            _settingsSubscriptions.Clear();
-        }
-
-        private void CancelSettingsRegistration()
-        {
-            if (_settingsRegistrationCts == null)
-            {
-                return;
-            }
-
-            _settingsRegistrationCts.Cancel();
-            _settingsRegistrationCts.Dispose();
-            _settingsRegistrationCts = null;
-        }
-
         private static void ResetSource(AudioSource source)
         {
             if (!source)
@@ -977,27 +799,6 @@ namespace _VuTH.Core.Audio
             source.pitch = 1f;
             source.priority = 128;
             source.ignoreListenerPause = false;
-        }
-
-        private sealed class PlaybackEntry
-        {
-            public PlaybackEntry(int playbackId, AudioSource source, AudioChannel channel, float baseVolume, bool isMusic)
-            {
-                PlaybackId = playbackId;
-                Source = source;
-                Channel = channel;
-                BaseVolume = baseVolume;
-                IsMusic = isMusic;
-                CancellationTokenSource = new CancellationTokenSource();
-            }
-
-            public int PlaybackId { get; }
-            public AudioSource Source { get; }
-            public AudioChannel Channel { get; }
-            public float BaseVolume { get; }
-            public bool IsMusic { get; }
-            public float FadeFactor { get; set; } = 1f;
-            public CancellationTokenSource CancellationTokenSource { get; }
         }
     }
 }

@@ -243,7 +243,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 1641515319002441657, guid: c1639870a0316f14ba9c90579f5f4994, type: 3}
       propertyPath: m_Name
-      value: BoostrapManager
+      value: BootstrapManager
       objectReference: {fileID: 0}
     - target: {fileID: 3356926922751908136, guid: c1639870a0316f14ba9c90579f5f4994, type: 3}
       propertyPath: m_AnchorMax.y

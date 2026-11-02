@@ -1,6 +1,6 @@
 ﻿using _VuTH.Core.GameCycle.Screen.Identifier;
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
     public interface IScreenDefinition
     {

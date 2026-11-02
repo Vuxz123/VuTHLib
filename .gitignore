@@ -93,3 +93,13 @@ UserSettings/EditorUserSettings.asset
 .idea/.idea.g009/riderModule.iml
 .idea
 UserSettings
+
+# --- VuTH Lib additions ---
+# Build artifacts (released via GitHub Releases / UPM git URL, not committed)
+*.unitypackage
+*.unitypackage.meta
+# Local tooling / captures
+/[Pp]rofilerCaptures/
+.idea/
+/Assets/_Recovery/
+/Assets/_Recovery.meta

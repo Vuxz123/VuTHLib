@@ -9,10 +9,7 @@ using _VuTH.Core.Window.Profile;
 using _VuTH.Core.Window.Transition;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.AddressableAssets;
 using UnityEngine.InputSystem;
-using UnityEngine.ResourceManagement.AsyncOperations;
-using ZLinq;
 
 #if VCONTAINER
 using VContainer;
@@ -40,15 +37,12 @@ namespace _VuTH.Core.Window
         private IUITransitionFactory _transitionFactory;
         private readonly IUITransitionRunner _transitionRunner = new UITransitionRunner();
 
-        // Cache Addressables prefab handles so we can release them properly.
-        private readonly Dictionary<Type, AsyncOperationHandle<GameObject>> _prefabHandleCache = new();
+        // Addressables prefab loading + handle caching (created lazily: needs `this` as log origin).
+        private WindowPrefabCache _prefabCache;
+        private WindowPrefabCache PrefabCache => _prefabCache ??= new WindowPrefabCache(this);
 
-
-        private readonly Stack<UIViewBase> _windowStack = new();
-        // Maintain insertion order list so we can remove arbitrary windows without allocating temp stacks.
-        // Index 0 = bottom, last = top.
-        private readonly List<UIViewBase> _windowList = new();
-        private readonly Dictionary<UIViewBase, WindowOptions> _windowOptionsMap = new();
+        // Open windows (index 0 = bottom, last = top) + resolved options per window.
+        private readonly WindowStack<UIViewBase> _windows = new();
 
         private readonly SemaphoreSlim _opGate = new SemaphoreSlim(1, 1);
 
@@ -112,8 +106,8 @@ namespace _VuTH.Core.Window
         // Track windows that were force-cleaned (despawned externally) so OpenInternal can early-exit.
         private readonly HashSet<UIViewBase> _forceCleaned = new();
 
-        public UIViewBase TopWindow => _windowList.Count > 0 ? _windowList[^1] : null;
-        public int WindowCount => _windowList.Count;
+        public UIViewBase TopWindow => _windows.Top;
+        public int WindowCount => _windows.Count;
         public bool IsTransitioning { get; private set; }
 
         public event Action<UIViewBase> OnWindowOpened;
@@ -139,7 +133,7 @@ namespace _VuTH.Core.Window
             if (transitionFactoryComponent)
                 _transitionFactory = transitionFactoryComponent.GetComponent<IUITransitionFactory>();
 
-            Pool ??= PoolManager.Instance;
+            if (!Pool.IsAlive()) Pool = PoolManager.Instance;
 
             if (Pool == null)
                 this.LogError("PoolManager is not available. Window instantiation will fail.");
@@ -165,71 +159,31 @@ namespace _VuTH.Core.Window
                 backAction.action.Disable();
             }
 
-            _windowOptionsMap.Clear();
-            _windowStack.Clear();
-            _windowList.Clear();
+            _windows.Clear();
 
             ClearPrefabCache();
         }
 
         public void ReleasePrefab<TWindow>() where TWindow : UIViewBase
         {
-            if (_windowStack.Count > 0)
+            if (_windows.Count > 0)
             {
                 this.LogWarning($"ReleasePrefab<{typeof(TWindow).Name}> called while windows are open. " +
                                  "This only releases the prefab asset handle (instances remain alive), but re-open may reload.");
             }
 
-            var type = typeof(TWindow);
-            if (_prefabHandleCache.TryGetValue(type, out var handle) && handle.IsValid())
-            {
-                // If still loading, don't release mid-flight.
-                // Caller can retry release after load completes.
-                if (handle.IsDone)
-                {
-                    Addressables.Release(handle);
-                    _prefabHandleCache.Remove(type);
-                }
-                else
-                {
-                    this.LogWarning($"ReleasePrefab<{typeof(TWindow).Name}> skipped because the Addressables handle is still loading.");
-                }
-            }
-            else
-            {
-                _prefabHandleCache.Remove(type);
-            }
+            PrefabCache.Release(typeof(TWindow));
         }
 
         public void ClearPrefabCache()
         {
-            if (_windowStack.Count > 0)
+            if (_windows.Count > 0)
             {
-                this.LogWarning($"ClearPrefabCache called while {_windowStack.Count} window(s) are open. " +
+                this.LogWarning($"ClearPrefabCache called while {_windows.Count} window(s) are open. " +
                                  "This only releases prefab asset handles; open instances remain alive.");
             }
 
-            foreach (var kv in _prefabHandleCache
-                         .AsValueEnumerable().Where(kv => kv.Value.IsValid() && kv.Value.IsDone))
-            {
-                Addressables.Release(kv.Value);
-            }
-
-            // Keep any handles that are still loading; they can be cleared later.
-            foreach (var kv in _prefabHandleCache
-                         .AsValueEnumerable()
-                         .Where(kv => kv.Value.IsValid() && !kv.Value.IsDone))
-            {
-                this.LogWarning($"Skipped releasing prefab handle for {kv.Key.Name} because it is still loading.");
-            }
-
-            var keysToRemove = _prefabHandleCache
-                .AsValueEnumerable()
-                .Where(kv => !kv.Value.IsValid() || kv.Value.IsDone)
-                .Select(kv => kv.Key);
-
-            foreach (var key in keysToRemove)
-                _prefabHandleCache.Remove(key);
+            PrefabCache.Clear();
         }
 
         private void EnsureProfile()
@@ -262,7 +216,7 @@ namespace _VuTH.Core.Window
         public async UniTask<TResult> Open<TWindow, TResult>(WindowOptions options) where TWindow : UIViewBase
         {
             // Don't block on IsTransitioning; operations are serialized.
-            var prefab = await GetOrLoadPrefab<TWindow>();
+            var prefab = await PrefabCache.GetOrLoad(typeof(TWindow));
             if (!prefab)
                 return default;
 
@@ -271,66 +225,6 @@ namespace _VuTH.Core.Window
                 return default;
 
             return await OpenInternal<TResult>(window, options);
-        }
-
-        private async UniTask<GameObject> GetOrLoadPrefab<TWindow>() where TWindow : UIViewBase
-        {
-            var type = typeof(TWindow);
-
-            if (_prefabHandleCache.TryGetValue(type, out var cachedHandle) && cachedHandle.IsValid())
-            {
-                // If handle hasn't completed yet, await completion.
-                try
-                {
-                    if (!cachedHandle.IsDone)
-                        await cachedHandle.Task;
-                }
-                catch (Exception e)
-                {
-                    this.LogError($"Addressables load faulted for key '{type.Name}': {e}");
-                    Addressables.Release(cachedHandle);
-                    _prefabHandleCache.Remove(type);
-                    return null;
-                }
-
-                if (!cachedHandle.Result)
-                {
-                    this.LogError($"Addressables prefab not found for key '{type.Name}'");
-                    Addressables.Release(cachedHandle);
-                    _prefabHandleCache.Remove(type);
-                    return null;
-                }
-
-                return cachedHandle.Result;
-            }
-
-            var handle = Addressables.LoadAssetAsync<GameObject>(type.Name);
-            _prefabHandleCache[type] = handle;
-
-            try
-            {
-                await handle.Task;
-            }
-            catch (Exception e)
-            {
-                this.LogError($"Addressables load faulted for key '{type.Name}': {e}");
-                if (handle.IsValid())
-                    Addressables.Release(handle);
-                _prefabHandleCache.Remove(type);
-                return null;
-            }
-
-            if (!handle.Result)
-            {
-                this.LogError($"Addressables prefab not found for key '{type.Name}'");
-                // Avoid keeping a failed/empty handle.
-                if (handle.IsValid())
-                    Addressables.Release(handle);
-                _prefabHandleCache.Remove(type);
-                return null;
-            }
-
-            return handle.Result;
         }
 
         private TWindow SpawnWindow<TWindow>(GameObject prefab) where TWindow : UIViewBase
@@ -372,13 +266,14 @@ namespace _VuTH.Core.Window
             var handle = await RunSerialized(async () =>
             {
                 options ??= new WindowOptions();
-                ApplyDefaultsFromDefinition(window, options);
+                if (window is IWindowDefinition def)
+                    WindowOptionsResolver.ApplyDefaults(options, def);
 
-                _windowOptionsMap[window] = options;
+                _windows.SetOptions(window, options);
 
                 // NOTE: pair Block/Unblock keys must match.
                 if (options.BlockInput.GetValueOrDefault(true) && config.blockInputDuringTransitions)
-                    _inputBlocker?.Block("WindowTransition");
+                    _inputBlocker.OrNull()?.Block("WindowTransition");
 
                 IsTransitioning = true;
 
@@ -393,11 +288,10 @@ namespace _VuTH.Core.Window
                 }
 
                 // IMPORTANT: sorting order should reflect stack index AFTER push.
-                _windowStack.Push(window);
-                _windowList.Add(window);
+                _windows.Push(window);
 
                 window.Canvas.overrideSorting = true;
-                window.Canvas.sortingOrder = GetSortingOrder(options.WindowType, _windowList.Count);
+                window.Canvas.sortingOrder = GetSortingOrder(options.WindowType, _windows.Count);
 
                 window.Setup(options.Data);
 
@@ -461,7 +355,7 @@ namespace _VuTH.Core.Window
             if (_forceCleaned.Remove(handle.Window))
             {
                 _closeSourceMap.Remove(handle.Window);
-                _windowOptionsMap.Remove(handle.Window);
+                _windows.RemoveOptions(handle.Window);
                 return default;
             }
 
@@ -485,28 +379,22 @@ namespace _VuTH.Core.Window
                 await _transitionRunner.RunOut(handle.Window, transitionOut);
 
                 // Robust remove: remove the exact window from stack (not only if it's the top).
-                // Keep list/stack consistent.
-                _windowList.Remove(handle.Window);
+                _windows.Remove(handle.Window);
 
-                // Rebuild stack from list (bottom->top). This avoids per-close temporary Stack allocations.
-                _windowStack.Clear();
-                foreach (var t in _windowList)
-                    _windowStack.Push(t);
-
-                _windowOptionsMap.Remove(handle.Window);
+                _windows.RemoveOptions(handle.Window);
                 OnWindowClosed?.Invoke(handle.Window);
                 handle.Window.OnViewHidden();
 
-                Pool?.Despawn(handle.Window.gameObject);
+                Pool.OrNull()?.Despawn(handle.Window.gameObject);
 
                 // Reset CloseAll mode when there are no windows left.
-                if (closeAllModeAtClose != CloseAllMode.None && _windowList.Count == 0)
+                if (closeAllModeAtClose != CloseAllMode.None && _windows.Count == 0)
                     _closeAllMode = CloseAllMode.None;
 
                 IsTransitioning = false;
 
                 if (handle.Options.BlockInput.GetValueOrDefault(true) && config.blockInputDuringTransitions)
-                    _inputBlocker?.Unblock("WindowTransition");
+                    _inputBlocker.OrNull()?.Unblock("WindowTransition");
             });
 
             // Only return payload for Normal closes. CloseAll/Force returns default.
@@ -517,32 +405,6 @@ namespace _VuTH.Core.Window
                 return default;
 
             return (TResult)token.Payload;
-        }
-
-        private static void ApplyDefaultsFromDefinition(UIViewBase window, WindowOptions options)
-        {
-            if (window is not IWindowDefinition def) return;
-            if (options == null) return;
-
-            // Heuristic merge: if caller left fields at the "common default" values, override from definition.
-            // If caller explicitly customized, keep caller values.
-            if (options.WindowType == WindowType.Popup)
-                options.WindowType = def.WindowType;
-
-            // Data-driven settings (preferred)
-            options.TransitionInSettings ??= def.TransitionInSettings;
-            options.TransitionOutSettings ??= def.TransitionOutSettings;
-
-            // Legacy preset fallback (single preset for both directions)
-            if ((options.TransitionInSettings == null && options.TransitionOutSettings == null)
-                && (string.IsNullOrEmpty(options.TransitionPreset) || options.TransitionPreset == "Scale"))
-            {
-                options.TransitionPreset = def.TransitionPreset;
-            }
-
-            // Nullable bools: only default from definition when caller didn't specify.
-            options.CloseOnBackPress ??= def.CloseOnBackPress;
-            options.BlockInput ??= def.BlockInput;
         }
 
         #endregion
@@ -562,7 +424,7 @@ namespace _VuTH.Core.Window
                 if (window == null)
                     return UniTask.CompletedTask;
 
-                if (!_windowList.Contains(window))
+                if (!_windows.Contains(window))
                 {
                     this.LogWarning($"Window {window.name} not in stack");
                     return UniTask.CompletedTask;
@@ -593,10 +455,10 @@ namespace _VuTH.Core.Window
         {
             return RunSerialized(() =>
             {
-                if (_windowList.Count == 0)
+                if (_windows.Count == 0)
                     return UniTask.CompletedTask;
 
-                var top = _windowList[^1];
+                var top = _windows.Top;
 
                 if (_closeSourceMap.TryGetValue(top, out var src))
                     src.TrySetResult(new CloseToken(CloseReason.Normal, result));
@@ -613,7 +475,7 @@ namespace _VuTH.Core.Window
             {
                 _closeAllMode = immediate ? CloseAllMode.Immediate : CloseAllMode.Graceful;
 
-                var windows = _windowList.ToArray();
+                var windows = _windows.ToArray();
 
                 // Graceful: signal all managed close sources; windows will clean themselves up through OpenInternal phase 3.
                 foreach (var w in windows)
@@ -632,17 +494,16 @@ namespace _VuTH.Core.Window
                     if (w == null) continue;
 
                     _forceCleaned.Add(w);
-                    _windowOptionsMap.Remove(w);
+                    _windows.RemoveOptions(w);
                     _closeSourceMap.Remove(w);
 
                     OnWindowClosed?.Invoke(w);
                     w.OnViewHidden();
 
-                    Pool?.Despawn(w.gameObject);
+                    Pool.OrNull()?.Despawn(w.gameObject);
                 }
 
-                _windowList.Clear();
-                _windowStack.Clear();
+                _windows.ClearWindows();
 
                 _closeAllMode = CloseAllMode.None;
 
@@ -658,12 +519,12 @@ namespace _VuTH.Core.Window
 
         public bool HasWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windowList.AsValueEnumerable().OfType<TWindow>().Any();
+            return _windows.HasWindowOfType<TWindow>();
         }
 
         public TWindow GetWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windowList.AsValueEnumerable().OfType<TWindow>().FirstOrDefault();
+            return _windows.GetWindowOfType<TWindow>();
         }
 
         #endregion
@@ -672,16 +533,8 @@ namespace _VuTH.Core.Window
 
         private int GetSortingOrder(WindowType windowType, int stackCountAfterPush)
         {
-            var baseOrder = windowType switch
-            {
-                WindowType.FullScreenPopup or WindowType.Popup => config.popupBaseSortingOrder,
-                WindowType.System => config.systemBaseSortingOrder,
-                WindowType.Tutorial => config.systemBaseSortingOrder + 1000,
-                _ => config.popupBaseSortingOrder
-            };
-
-            var index = Mathf.Max(0, stackCountAfterPush - 1);
-            return baseOrder + (index * config.sortingOrderStep);
+            return WindowSortingOrder.Compute(windowType, stackCountAfterPush,
+                config.popupBaseSortingOrder, config.systemBaseSortingOrder, config.sortingOrderStep);
         }
 
         #endregion
@@ -722,10 +575,10 @@ namespace _VuTH.Core.Window
             // IMPORTANT: this is fire-and-forget; attach a handler so exceptions aren't unobserved.
             RunSerialized(() =>
             {
-                if (_windowStack.Count <= 0) return UniTask.CompletedTask;
-                var topWindow = _windowStack.Peek();
+                if (_windows.Count <= 0) return UniTask.CompletedTask;
+                var topWindow = _windows.Top;
 
-                if (_windowOptionsMap.TryGetValue(topWindow, out var options) && !options.CloseOnBackPress.GetValueOrDefault(true))
+                if (_windows.TryGetOptions(topWindow, out var options) && !options.CloseOnBackPress.GetValueOrDefault(true))
                     return UniTask.CompletedTask;
 
                 // Deterministic for managed windows: complete manager-owned close token.

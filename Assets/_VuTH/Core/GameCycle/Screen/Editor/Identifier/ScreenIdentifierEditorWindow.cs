@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using _VuTH.Core.GameCycle.Screen.Core;
-using _VuTH.Core.GameCycle.Screen.Core.A;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 using UnityEditor;
 using UnityEngine;
@@ -303,7 +302,7 @@ namespace _VuTH.Core.GameCycle.Screen.Editor.Identifier
                 if (!string.IsNullOrEmpty(resourcePath))
                 {
                     sb.AppendLine($"        private static ScreenIdentifier _{varName};");
-                    sb.AppendLine($"        public static ScreenIdentifier {varName} => _{varName} ??= Resources.Load<ScreenIdentifier>(\"{resourcePath}\");");
+                    sb.AppendLine($"        public static ScreenIdentifier {varName} => _{varName} != null ? _{varName} : (_{varName} = Resources.Load<ScreenIdentifier>(\"{resourcePath}\"));");
                     sb.AppendLine("");
                 }
                 else

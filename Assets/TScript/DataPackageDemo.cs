@@ -1,6 +1,6 @@
 using UnityEngine;
-using _VuTH.Core.Persistant.DataPackage;
-using _VuTH.Core.Persistant.SaveSystem;
+using _VuTH.Core.Persistent.DataPackage;
+using _VuTH.Core.Persistent.SaveSystem;
 using JetBrains.Annotations;
 using R3;
 using UnityEngine.Serialization;

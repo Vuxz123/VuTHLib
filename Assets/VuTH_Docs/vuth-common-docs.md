@@ -518,7 +518,7 @@ Provides various editor windows, utilities, and tools for VuTH development.
 **`DictionaryDrawerAttribute`**
 - **Purpose**: Custom drawer for dictionary fields
 
-**ImGui Drag & Drop (UI/DragableGrid)**
+**ImGui Drag & Drop (UI/DraggableGrid)**
 - **Purpose**: Custom ImGui-style drag and drop controls for inventory grids
 
 ### How They Interact

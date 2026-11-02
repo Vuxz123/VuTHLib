@@ -142,14 +142,10 @@ namespace _VuTH.Core.Audio.Tests.PlayMode
 
         private AudioSource GetPlaybackSource(AudioPlaybackHandle handle)
         {
-            var playbacks = (IDictionary)GetRequiredField(typeof(AudioManager), "_playbacks").GetValue(_manager);
-            var entry = playbacks[handle.PlaybackId];
-            Assert.That(entry, Is.Not.Null, $"Expected playback entry for handle {handle.PlaybackId}.");
+            var playbacks = (AudioPlaybackRegistry)GetRequiredField(typeof(AudioManager), "_playbacks").GetValue(_manager);
+            Assert.That(playbacks.TryGet(handle.PlaybackId, out var entry), Is.True, $"Expected playback entry for handle {handle.PlaybackId}.");
 
-            var sourceProperty = entry.GetType().GetProperty("Source", InstanceFlags);
-            Assert.That(sourceProperty, Is.Not.Null, "PlaybackEntry.Source reflection lookup failed.");
-
-            return sourceProperty.GetValue(entry) as AudioSource;
+            return entry.Source;
         }
 
         private static void SetField(object target, string fieldName, object value)

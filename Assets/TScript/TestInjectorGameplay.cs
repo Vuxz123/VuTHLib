@@ -3,7 +3,7 @@ using _VuTH.Common.DI;
 using _VuTH.Common.Log;
 using _VuTH.Core.Camera;
 using _VuTH.Core.GameCycle.ScreenFlow;
-using _VuTH.Core.Persistant.DataPackage;
+using _VuTH.Core.Persistent.DataPackage;
 using R3;
 using TMPro;
 using UnityEngine;

@@ -1,4 +1,4 @@
-using _VuTH.Core.GameCycle.Screen.Core.A;
+using _VuTH.Core.GameCycle.Screen.Core;
 
 namespace _VuTH.Core.GameCycle.Screen.Transition
 {

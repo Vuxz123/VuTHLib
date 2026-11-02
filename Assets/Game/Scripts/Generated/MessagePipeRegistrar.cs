@@ -13,7 +13,7 @@ using UnityEngine.Scripting;
 #if VCONTAINER
 using VContainer;
 #endif
-using VuTH.Common.MessagePipe;
+using _VuTH.Common.MessagePipe;
 
 namespace Core.Generated
 {

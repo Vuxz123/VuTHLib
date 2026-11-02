@@ -43,7 +43,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: acb62294e57e9654b805a13858e1ef49, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: VuTH.Persistant.DataPackage::_VuTH.Core.Persistant.DataPackage.DataPersistenceManager
+  m_EditorClassIdentifier: VuTH.Persistent.DataPackage::_VuTH.Core.Persistent.DataPackage.DataPersistenceManager
   enableSystem: 1
   customLifecycleManagement: 0
   bootstrapOrder: 100

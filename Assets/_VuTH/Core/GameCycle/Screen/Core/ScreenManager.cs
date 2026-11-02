@@ -14,10 +14,8 @@ using Cysharp.Threading.Tasks;
 using MessagePipe;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
-using UnityEngine.ResourceManagement.AsyncOperations;
-using UnityEngine.ResourceManagement.ResourceProviders;
 using UnityEngine.SceneManagement;
-using VuTH.Common.MessagePipe;
+using _VuTH.Common.MessagePipe;
 using ZLinq;
 #if VCONTAINER
 using VContainer;
@@ -25,16 +23,21 @@ using VContainer.Unity;
 using _VuTH.Common.DI;
 #endif
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
+    /// <summary>
+    /// Coordinates screen transitions (Enter / Push / Pop / Override).
+    /// Navigation state lives in <see cref="ScreenNavigationState"/>, event fan-out in <see cref="ScreenEventDispatcher"/>
+    /// and Addressables scene caching in <see cref="AddressableSceneCache"/>.
+    /// </summary>
     public class ScreenManager : VBootstrapManager<ScreenManager, IScreenManager>, IScreenManager
     {
         [Header("Screen Settings")]
         [SerializeField] private ScreenModelContainer screenContainer;
-        
+
         [Header("Events Settings")]
         [SerializeField] private GlobalScreenEventProfile[] eventProfile;
-        
+
         [Header("Loading Settings")]
         [SerializeField] private float loadingBarSpeed = 0.5f;
 
@@ -50,51 +53,33 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 
         private ILoadingController _loading;
 
-        // Base (state) screen (Enter changes this)
-        private ScreenModel _current;
-
-        // Stack (runtime navigation). Top = effective current.
-        private readonly Stack<ScreenModel> _screenStack = new();
-
-        // Override (interrupt). Single slot.
-        private ScreenModel _override;
-
-        // Previous effective screen
-        private ScreenModel _previous;
+        // Base / stack / override / previous navigation state.
+        private readonly ScreenNavigationState _nav = new();
 
         private bool _isTransitioning;
 
         private readonly LocalScreenEventContainer _localEventContainer = new();
 
-        // Addressables cache: AssetGUID -> SceneInstance
-        private readonly Dictionary<string, SceneInstance> _cachedAddressableScenes = new();
+        // Global / local / MessagePipe event fan-out (created lazily: needs instance members).
+        private ScreenEventDispatcher _eventDispatcher;
+        private ScreenEventDispatcher EventDispatcher =>
+            _eventDispatcher ??= new ScreenEventDispatcher(() => eventProfile, _localEventContainer);
+
+        // Addressables cache: AssetGUID -> SceneInstance (created lazily: uses this as log origin).
+        private AddressableSceneCache _sceneCache;
+        private AddressableSceneCache SceneCache => _sceneCache ??= new AddressableSceneCache(this);
 
         public event Action<TransitionCompletedEventArgs> OnTransitionCompleted;
-        
-#if VCONTAINER
-        private LifetimeScope _coreLifetimeScope;
-#endif
-
-        #region MessagePipe
-
-        // MessagePipe publishers for screen lifecycle events\
-        private IPublisher<PreScreenEnterEvent> _preEnterPublisher;
-        private IPublisher<PostScreenEnterEvent> _postEnterPublisher;
-        private IPublisher<PreScreenExitEvent> _preExitPublisher;
-        private IPublisher<PostScreenExitEvent> _postExitPublisher;
-        private IPublisher<ScreenTransitionCompletedEvent> _transitionCompletedPublisher;
-
-        #endregion
 
         #region IScreenManager
 
-        public ScreenModel Current => GetEffectiveCurrent();
-        public ScreenModel Previous => _previous;
+        public ScreenModel Current => _nav.EffectiveCurrent;
+        public ScreenModel Previous => _nav.Previous;
         public bool IsTransitioning => _isTransitioning;
         public ILocalScreenEventRegistration LocalEventRegistration => _localEventContainer;
 
-        public bool CanPop => _screenStack.Count > 1;
-        public bool IsOverriding => _override != null;
+        public bool CanPop => _nav.CanPop;
+        public bool IsOverriding => _nav.IsOverriding;
 
         #endregion
 
@@ -108,11 +93,11 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             IPublisher<PostScreenExitEvent> postExitPublisher,
             IPublisher<ScreenTransitionCompletedEvent> transitionCompletedPublisher)
         {
-            _preEnterPublisher = preEnterPublisher;
-            _postEnterPublisher = postEnterPublisher;
-            _preExitPublisher = preExitPublisher;
-            _postExitPublisher = postExitPublisher;
-            _transitionCompletedPublisher = transitionCompletedPublisher;
+            EventDispatcher.PreEnterPublisher = preEnterPublisher;
+            EventDispatcher.PostEnterPublisher = postEnterPublisher;
+            EventDispatcher.PreExitPublisher = preExitPublisher;
+            EventDispatcher.PostExitPublisher = postExitPublisher;
+            EventDispatcher.TransitionCompletedPublisher = transitionCompletedPublisher;
         }
 #endif
 
@@ -120,9 +105,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
         {
 #if VCONTAINER
             // Tìm LifetimeScope chứa ScreenManager (thường là Root của Scene Core)
-            _coreLifetimeScope = LifetimeScope.Find<RootScopeContainer>();
+            SceneCache.CoreLifetimeScope = LifetimeScope.Find<RootScopeContainer>();
 #endif
-            
+
             if (screenContainer?.screens == null || screenContainer.screens.Length == 0)
             {
                 this.LogError("ScreenManager: No valid ScreenModels found!");
@@ -139,9 +124,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 
             // Establish a stable baseline screen definition (not dependent on current Unity scene).
             // This prevents Enter() from having no 'from' reference on first transition.
-            if (_current == null && screenContainer.bootstrapScreen != null)
+            if (_nav.Base == null && screenContainer.bootstrapScreen != null)
             {
-                _current = screenContainer.bootstrapScreen;
+                _nav.Base = screenContainer.bootstrapScreen;
             }
         }
 
@@ -150,11 +135,11 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 #if !VCONTAINER
             try
             {
-                _preEnterPublisher = MessagePipeHelper.GetPublisher<PreScreenEnterEvent>();
-                _postEnterPublisher = MessagePipeHelper.GetPublisher<PostScreenEnterEvent>();
-                _preExitPublisher = MessagePipeHelper.GetPublisher<PreScreenExitEvent>();
-                _postExitPublisher = MessagePipeHelper.GetPublisher<PostScreenExitEvent>();
-                _transitionCompletedPublisher = MessagePipeHelper.GetPublisher<ScreenTransitionCompletedEvent>();
+                EventDispatcher.PreEnterPublisher = MessagePipeHelper.GetPublisher<PreScreenEnterEvent>();
+                EventDispatcher.PostEnterPublisher = MessagePipeHelper.GetPublisher<PostScreenEnterEvent>();
+                EventDispatcher.PreExitPublisher = MessagePipeHelper.GetPublisher<PreScreenExitEvent>();
+                EventDispatcher.PostExitPublisher = MessagePipeHelper.GetPublisher<PostScreenExitEvent>();
+                EventDispatcher.TransitionCompletedPublisher = MessagePipeHelper.GetPublisher<ScreenTransitionCompletedEvent>();
             }
             catch (Exception e)
             {
@@ -165,17 +150,10 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 
         protected override void DeinitializeBootstrap()
         {
-            _current = null;
-            _override = null;
-            _screenStack.Clear();
-            _previous = null;
+            _nav.Reset();
             _isTransitioning = false;
 
-            foreach (var kv in _cachedAddressableScenes)
-            {
-                Addressables.UnloadSceneAsync(kv.Value);
-            }
-            _cachedAddressableScenes.Clear();
+            SceneCache.ReleaseAll();
 
             _loading = null;
             GlobalEventRegistration = null;
@@ -192,7 +170,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
 
         public async UniTask Enter(ScreenModel target, TransitionContext context)
         {
-            this.Log($"Enter({target?.name}) called.");
+            this.Log($"Enter({(target != null ? target.name : "null")}) called.");
             if (!target)
             {
                 this.LogError("Enter called with null target!");
@@ -208,12 +186,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             _isTransitioning = true;
 
             // Capture current effective before we reset stack.
-            var from = GetEffectiveCurrent();
+            var from = _nav.EffectiveCurrent;
 
             try
             {
                 // Enter starts a NEW flow: clear override + clear stack.
-                _override = null;
+                _nav.Override = null;
 
                 // Clear stack unloads all screens in current flow (top-down).
                 await ClearStackInternal();
@@ -222,14 +200,14 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 // we must close it too. Otherwise Enter() will keep old main scene loaded (additive) forever.
                 if (from && from != target)
                 {
-                    await UnloadScreenInternal(from, nextToShow: null);
+                    await SceneCache.UnloadScreenAsync(from, nextToShow: null);
                 }
 
-                _previous = from;
+                _nav.Previous = from;
 
                 // Now set the new base + push it as the only stack item.
-                _current = target;
-                _screenStack.Push(target);
+                _nav.Base = target;
+                _nav.Push(target);
 
                 // Loading is a Transition UI concern (NOT a Screen).
                 await TransitionWithLoadingInternal(from, target, loadMainScene: true, showLoading: target.showLoadingScreen);
@@ -272,13 +250,13 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 return;
             }
 
-            if (_override)
+            if (_nav.Override)
             {
-                this.LogWarning($"Ignored Push({target.name}) because an override screen is active ({_override.name}). PopOverride first.");
+                this.LogWarning($"Ignored Push({target.name}) because an override screen is active ({_nav.Override.name}). PopOverride first.");
                 return;
             }
 
-            var from = GetEffectiveCurrent();
+            var from = _nav.EffectiveCurrent;
             if (from == target)
             {
                 this.Log($"Push ignored because {target.name} is already effective.");
@@ -288,21 +266,21 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             _isTransitioning = true;
             try
             {
-                _screenStack.Push(target);
-                _previous = from;
+                _nav.Push(target);
+                _nav.Previous = from;
 
                 await TransitionToInternal(from, target, loadMainScene: true);
             }
             catch
             {
-                if (_screenStack.Count > 0 && _screenStack.Peek() == target) _screenStack.Pop();
+                _nav.PopIfTop(target);
                 throw;
             }
             finally
             {
                 _isTransitioning = false;
             }
-            
+
             NotifyTransitionCompleted(TransitionKind.Push, from, target, context);
         }
 
@@ -319,52 +297,52 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 return;
             }
 
-            if (_override)
+            if (_nav.Override)
             {
-                this.LogWarning($"Ignored Pop() because an override screen is active ({_override.name}). PopOverride first.");
+                this.LogWarning($"Ignored Pop() because an override screen is active ({_nav.Override.name}). PopOverride first.");
                 return;
             }
 
-            if (_screenStack.Count <= 1)
+            if (_nav.StackCount <= 1)
             {
                 this.LogWarning("Pop() called but stack has no previous screen.");
                 return;
             }
 
-            var curr = _screenStack.Pop();
-            var prev = _screenStack.Peek();
+            var curr = _nav.Pop();
+            var prev = _nav.Peek();
 
             _isTransitioning = true;
             try
             {
-                _previous = curr;
+                _nav.Previous = curr;
 
                 var exitArgs = new ScreenEventArgs(curr, prev);
-                NotifyGlobalPreExit(exitArgs);
-                _localEventContainer.NotifyScreenClosing(exitArgs);
+                EventDispatcher.NotifyGlobalPreExit(exitArgs);
+                EventDispatcher.NotifyLocalClosing(exitArgs);
 
-                await UnloadScreenInternal(curr, nextToShow: prev);
-                ShowScreenInternal(prev);
+                await SceneCache.UnloadScreenAsync(curr, nextToShow: prev);
+                SceneCache.ShowScreen(prev);
 
-                NotifyGlobalPostExit(exitArgs);
+                EventDispatcher.NotifyGlobalPostExit(exitArgs);
 
                 var enterArgs = new ScreenEventArgs(curr, prev);
-                NotifyGlobalPreEnter(enterArgs);
-                _localEventContainer.NotifyScreenOpening(enterArgs);
-                NotifyGlobalPostEnter(enterArgs);
+                EventDispatcher.NotifyGlobalPreEnter(enterArgs);
+                EventDispatcher.NotifyLocalOpening(enterArgs);
+                EventDispatcher.NotifyGlobalPostEnter(enterArgs);
 
-                _current = GetBottomOfStack();
+                _nav.Base = _nav.BottomOfStack;
             }
             catch
             {
-                _screenStack.Push(curr);
+                _nav.Push(curr);
                 throw;
             }
             finally
             {
                 _isTransitioning = false;
             }
-            
+
             NotifyTransitionCompleted(TransitionKind.Pop, curr, prev, context);
         }
 
@@ -387,7 +365,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 return;
             }
 
-            var from = GetEffectiveCurrent();
+            var from = _nav.EffectiveCurrent;
             if (from == target)
             {
                 this.Log($"PushOverride ignored because {target.name} is already effective.");
@@ -395,25 +373,25 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             }
 
             _isTransitioning = true;
-            var prevOverride = _override;
+            var prevOverride = _nav.Override;
             try
             {
-                _override = target;
-                _previous = from;
+                _nav.Override = target;
+                _nav.Previous = from;
 
                 // Override may show loading, but still controlled by ScreenManager.
                 await TransitionWithLoadingInternal(from, target, loadMainScene: true, showLoading: target.showLoadingScreen);
             }
             catch
             {
-                _override = prevOverride;
+                _nav.Override = prevOverride;
                 throw;
             }
             finally
             {
                 _isTransitioning = false;
             }
-            
+
             NotifyTransitionCompleted(TransitionKind.PushOverride, from, target, context);
         }
 
@@ -430,84 +408,70 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 return;
             }
 
-            if (!_override)
+            if (!_nav.Override)
             {
                 this.LogWarning("PopOverride() called but no override is active.");
                 return;
             }
 
-            var exitingOverride = _override;
-            _override = null;
-            var to = GetEffectiveCurrent();
+            var exitingOverride = _nav.Override;
+            _nav.Override = null;
+            var to = _nav.EffectiveCurrent;
 
             _isTransitioning = true;
             try
             {
                 var exitArgs = new ScreenEventArgs(exitingOverride, to);
-                NotifyGlobalPreExit(exitArgs);
-                _localEventContainer.NotifyScreenClosing(exitArgs);
+                EventDispatcher.NotifyGlobalPreExit(exitArgs);
+                EventDispatcher.NotifyLocalClosing(exitArgs);
 
-                await UnloadScreenInternal(exitingOverride, nextToShow: to);
-                ShowScreenInternal(to);
+                await SceneCache.UnloadScreenAsync(exitingOverride, nextToShow: to);
+                SceneCache.ShowScreen(to);
 
-                NotifyGlobalPostExit(exitArgs);
+                EventDispatcher.NotifyGlobalPostExit(exitArgs);
 
                 var enterArgs = new ScreenEventArgs(exitingOverride, to);
-                NotifyGlobalPreEnter(enterArgs);
-                _localEventContainer.NotifyScreenOpening(enterArgs);
-                NotifyGlobalPostEnter(enterArgs);
+                EventDispatcher.NotifyGlobalPreEnter(enterArgs);
+                EventDispatcher.NotifyLocalOpening(enterArgs);
+                EventDispatcher.NotifyGlobalPostEnter(enterArgs);
             }
             finally
             {
                 _isTransitioning = false;
             }
-            
+
             NotifyTransitionCompleted(TransitionKind.PopOverride, exitingOverride, to, context);
         }
 
         #endregion
 
-        #region Effective helpers
-
-        private ScreenModel GetEffectiveCurrent()
-        {
-            if (_override) return _override;
-            return _screenStack.Count > 0 ? _screenStack.Peek() : _current;
-        }
-
-        private ScreenModel GetBottomOfStack()
-        {
-            var arr = _screenStack.ToArray();
-            return arr.Length > 0 ? arr[^1] : null;
-        }
+        #region Stack helpers
 
         private async UniTask ClearStackInternal()
         {
-            if (_screenStack.Count == 0) return;
+            if (_nav.StackCount == 0) return;
 
             // We'll unload everything from top to bottom.
-            // Note: Stack.ToArray() returns [top..bottom]. Perfect for closing overlays first.
-            var screens = _screenStack.ToArray();
-            _screenStack.Clear();
+            var screens = _nav.TakeAll();
 
             foreach (var t in screens)
             {
                 // Since we're clearing flow entirely, there is no next screen to keep for smart look-ahead.
-                await UnloadScreenInternal(t, nextToShow: null);
+                await SceneCache.UnloadScreenAsync(t, nextToShow: null);
             }
         }
 
         #endregion
 
-        #region Addressables load/unload
+        #region Transition / loading orchestration
 
         private async UniTask TransitionWithLoadingInternal(ScreenModel from, ScreenModel to, bool loadMainScene, bool showLoading)
         {
             if (from)
             {
                 var exitArgs = new ScreenEventArgs(from, to);
-                NotifyGlobalPreExit(exitArgs);
-                _localEventContainer.NotifyScreenClosing(exitArgs);
+                EventDispatcher.NotifyGlobalPreExit(exitArgs);
+                EventDispatcher.NotifyLocalClosing(exitArgs);
             }
 
             if (showLoading)
@@ -522,19 +486,19 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 if (to)
                 {
                     var enterArgs = new ScreenEventArgs(from, to);
-                    NotifyGlobalPreEnter(enterArgs);
+                    EventDispatcher.NotifyGlobalPreEnter(enterArgs);
                 }
 
                 await LoadScreenInternal(to, loadMainScene, showLoading);
                 if (showLoading) _loading.SetProgress(1f);
 
-                ShowScreenInternal(to);
+                SceneCache.ShowScreen(to);
 
                 if (to)
                 {
                     var enterArgs = new ScreenEventArgs(from, to);
-                    _localEventContainer.NotifyScreenOpening(enterArgs);
-                    NotifyGlobalPostEnter(enterArgs);
+                    EventDispatcher.NotifyLocalOpening(enterArgs);
+                    EventDispatcher.NotifyGlobalPostEnter(enterArgs);
                 }
             }
             finally
@@ -548,7 +512,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             if (from)
             {
                 var exitArgs = new ScreenEventArgs(from, to);
-                NotifyGlobalPostExit(exitArgs);
+                EventDispatcher.NotifyGlobalPostExit(exitArgs);
             }
         }
 
@@ -557,21 +521,21 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             if (from)
             {
                 var exitArgs = new ScreenEventArgs(from, to);
-                NotifyGlobalPreExit(exitArgs);
-                _localEventContainer.NotifyScreenClosing(exitArgs);
-                NotifyGlobalPostExit(exitArgs);
+                EventDispatcher.NotifyGlobalPreExit(exitArgs);
+                EventDispatcher.NotifyLocalClosing(exitArgs);
+                EventDispatcher.NotifyGlobalPostExit(exitArgs);
             }
 
             if (to)
             {
                 var enterArgs = new ScreenEventArgs(from, to);
-                NotifyGlobalPreEnter(enterArgs);
+                EventDispatcher.NotifyGlobalPreEnter(enterArgs);
 
                 await LoadScreenInternal(to, loadMainScene, showLoading: false);
-                ShowScreenInternal(to);
+                SceneCache.ShowScreen(to);
 
-                _localEventContainer.NotifyScreenOpening(enterArgs);
-                NotifyGlobalPostEnter(enterArgs);
+                EventDispatcher.NotifyLocalOpening(enterArgs);
+                EventDispatcher.NotifyGlobalPostEnter(enterArgs);
             }
         }
 
@@ -582,26 +546,26 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             var additiveSceneAddressableDatas = screen.additiveScene;
             var screenMainSceneRef = screen.mainSceneRef;
 
-            AbstractProgressReporter progress = showLoading ? 
-                new ProgressReporter(_loading, loadingBarSpeed) : 
+            AbstractProgressReporter progress = showLoading ?
+                new ProgressReporter(_loading, loadingBarSpeed) :
                 new NonLoadingProgressReporter(_loading);
 
             // 1) Load scenes
             Scene mainScene = default;
             var additiveScenes = new List<Scene>();
-            
+
             var totalSteps = (loadMainScene ? screenMainSceneRef != null ? 1 : 0 : 0) + (additiveSceneAddressableDatas?.Length ?? 0);
             var stepSceneLoadingProgress = 0.5f / Mathf.Max(1, totalSteps);
             var currentProgress = 0f;
 
             if (loadMainScene && screenMainSceneRef != null && screenMainSceneRef.RuntimeKeyIsValid())
             {
-                await LoadOrShowSceneInternal(screenMainSceneRef);
+                await SceneCache.LoadOrShowSceneAsync(screenMainSceneRef);
                 currentProgress += stepSceneLoadingProgress;
                 progress.Report(currentProgress);
-                mainScene = GetLoadedScene(screenMainSceneRef);
+                mainScene = SceneCache.GetLoadedScene(screenMainSceneRef);
             }
-            
+
             if (additiveSceneAddressableDatas != null)
             {
                 foreach (var additive in additiveSceneAddressableDatas)
@@ -609,12 +573,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                     if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid())
                         continue;
 
-                    await LoadOrShowSceneInternal(additive.sceneRef);
-                    
+                    await SceneCache.LoadOrShowSceneAsync(additive.sceneRef);
+
                     currentProgress += stepSceneLoadingProgress;
                     progress.Report(currentProgress);
-                    
-                    var loaded = GetLoadedScene(additive.sceneRef);
+
+                    var loaded = SceneCache.GetLoadedScene(additive.sceneRef);
                     if (loaded.IsValid()) additiveScenes.Add(loaded);
                 }
             }
@@ -672,208 +636,14 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             await progress.CompleteAsync();
         }
 
-        private Scene GetLoadedScene(AssetReference sceneRef)
-        {
-            var key = GetAssetGuid(sceneRef);
-            if (string.IsNullOrEmpty(key))
-                return default;
-
-            return _cachedAddressableScenes.TryGetValue(key, out var cached) ? cached.Scene : default;
-        }
-
-        private async UniTask UnloadScreenInternal(ScreenModel screen, ScreenModel nextToShow)
-        {
-            if (!screen) return;
-
-            if (screen.mainSceneRef != null && screen.mainSceneRef.RuntimeKeyIsValid())
-            {
-                await UnloadSceneByPolicyInternal(screen.mainSceneRef, screen, nextToShow, alwaysCheckSmartLookAhead: false);
-            }
-
-            if (screen.additiveScene == null) return;
-
-            foreach (var additive in screen.additiveScene)
-            {
-                if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid())
-                    continue;
-
-                await UnloadSceneByPolicyInternal(additive.sceneRef, screen, nextToShow, alwaysCheckSmartLookAhead: true, unloadOnClose: additive.unloadOnClose);
-            }
-        }
-
-        private async UniTask LoadOrShowSceneInternal(AssetReference sceneRef)
-        {
-            var key = GetAssetGuid(sceneRef);
-            if (string.IsNullOrEmpty(key))
-            {
-                this.LogError("Addressables sceneRef has no AssetGUID (is it an addressable scene asset?)");
-                return;
-            }
-
-            if (_cachedAddressableScenes.TryGetValue(key, out var cached))
-            {
-                if (cached.Scene.isLoaded)
-                {
-                    SetSceneRootActive(cached.Scene, true);
-                    return;
-                }
-
-                _cachedAddressableScenes.Remove(key);
-            }
-
-#if VCONTAINER
-            if (_coreLifetimeScope == null)
-            {
-                this.LogError("ScreenManager: Core LifetimeScope is null. Addressable scene loading with VContainer may fail to inject dependencies.");
-            }
-            // Đưa container của Core vào hàng đợi. 
-            // Khi Scene mới load và LifetimeScope của nó Awake, nó sẽ tự động lấy cái này làm Parent.
-            using (LifetimeScope.EnqueueParent(_coreLifetimeScope))
-            {
-#endif
-                var handle = Addressables.LoadSceneAsync(sceneRef, LoadSceneMode.Additive, activateOnLoad: true);
-                await handle.Task;
-
-                if (handle.Status != AsyncOperationStatus.Succeeded)
-                {
-                    this.LogError($"Failed to load addressable scene: {sceneRef.RuntimeKey}");
-                    return;
-                }
-
-                _cachedAddressableScenes[key] = handle.Result;
-                SetSceneRootActive(handle.Result.Scene, true);
-#if VCONTAINER
-            }
-#endif
-        }
-
-        private async UniTask UnloadSceneByPolicyInternal(
-            AssetReference sceneRef,
-            ScreenModel ownerScreen,
-            ScreenModel nextToShow,
-            bool alwaysCheckSmartLookAhead,
-            bool unloadOnClose = true)
-        {
-            var key = GetAssetGuid(sceneRef);
-            if (string.IsNullOrEmpty(key)) return;
-
-            if (ownerScreen != null && ownerScreen.softCache)
-            {
-                SetSceneRootActive(sceneRef, false);
-                return;
-            }
-
-            if (alwaysCheckSmartLookAhead && nextToShow != null)
-            {
-                if (IsSceneUsedByScreen(nextToShow, key))
-                {
-                    this.Log($"[Smart Keep] Scene {key} is used by next screen ({nextToShow.name}). Skipping unload.");
-                    return;
-                }
-            }
-
-            if (!unloadOnClose) return;
-
-            if (_cachedAddressableScenes.TryGetValue(key, out var instance))
-            {
-                await Addressables.UnloadSceneAsync(instance).Task;
-                _cachedAddressableScenes.Remove(key);
-            }
-        }
-
         #endregion
 
         #region Helpers
 
-        private void NotifyGlobalPreExit(ScreenEventArgs args)
-        {
-            PublishMessagePipeEvent(_preExitPublisher, new PreScreenExitEvent(args.FromScreen, args.ToScreen));
-            if (eventProfile == null) return;
-            foreach (var t in eventProfile)
-            {
-                t?.NotifyPreScreenExit(args);
-            }
-        }
-
-        private void NotifyGlobalPostExit(ScreenEventArgs args)
-        {
-            PublishMessagePipeEvent(_postExitPublisher, new PostScreenExitEvent(args.FromScreen, args.ToScreen));
-            if (eventProfile == null) return;
-            foreach (var t in eventProfile)
-            {
-                t?.NotifyPostScreenExit(args);
-            }
-        }
-
-        private void NotifyGlobalPreEnter(ScreenEventArgs args)
-        {
-            PublishMessagePipeEvent(_preEnterPublisher, new PreScreenEnterEvent(args.FromScreen, args.ToScreen));
-            if (eventProfile == null) return;
-            foreach (var t in eventProfile)
-            {
-                t?.NotifyPreScreenEnter(args);
-            }
-        }
-
-        private void NotifyGlobalPostEnter(ScreenEventArgs args)
-        {
-            PublishMessagePipeEvent(_postEnterPublisher, new PostScreenEnterEvent(args.FromScreen, args.ToScreen));
-            if (eventProfile == null) return;
-            foreach (var t in eventProfile)
-            {
-                t?.NotifyPostScreenEnter(args);
-            }
-        }
-
         private void NotifyTransitionCompleted(TransitionKind kind, IScreenDefinition from, IScreenDefinition to, TransitionContext context)
         {
-            PublishMessagePipeEvent(_transitionCompletedPublisher, new ScreenTransitionCompletedEvent(kind, from, to, context));
-            // Note: from/to may be null during initial bootstrap, handle gracefully
-            var fromScreen = from as ScreenModel;
-            var toScreen = to as ScreenModel;
-            OnTransitionCompleted?.Invoke(new TransitionCompletedEventArgs(kind, fromScreen, toScreen, context));
-        }
-
-        private static void PublishMessagePipeEvent<T>(IPublisher<T> publisher, T eventArgs) where T : class
-        {
-            publisher?.Publish(eventArgs);
-        }
-
-        private static string GetAssetGuid(AssetReference reference) => reference?.AssetGUID;
-
-        private static bool IsSceneUsedByScreen(ScreenModel screen, string assetGuid)
-        {
-            if (!screen) return false;
-
-            if (screen.mainSceneRef != null && screen.mainSceneRef.RuntimeKeyIsValid() && GetAssetGuid(screen.mainSceneRef) == assetGuid)
-                return true;
-
-            if (screen.additiveScene == null) return false;
-
-            return screen.additiveScene.AsValueEnumerable()
-                .Any(x => x.sceneRef != null && x.sceneRef.RuntimeKeyIsValid() && GetAssetGuid(x.sceneRef) == assetGuid);
-        }
-
-        private void SetSceneRootActive(AssetReference sceneRef, bool active)
-        {
-            var key = GetAssetGuid(sceneRef);
-            if (string.IsNullOrEmpty(key)) return;
-
-            if (_cachedAddressableScenes.TryGetValue(key, out var instance))
-            {
-                SetSceneRootActive(instance.Scene, active);
-            }
-        }
-
-        private static void SetSceneRootActive(Scene scene, bool active)
-        {
-            if (!scene.IsValid() || !scene.isLoaded) return;
-
-            var roots = scene.GetRootGameObjects();
-            foreach (var t in roots)
-            {
-                if (t) t.SetActive(active);
-            }
+            // Lambda (not the delegate value) so subscribers added during the MessagePipe publish are still invoked, as before.
+            EventDispatcher.NotifyTransitionCompleted(kind, from, to, context, args => OnTransitionCompleted?.Invoke(args));
         }
 
         private static ILoadingController ResolveLoadingController(Component candidate)
@@ -881,7 +651,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             if (!candidate) return new NullLoadingController();
 
             var behaviours = candidate.GetComponents<ILoadingController>();
-            
+
             switch (behaviours.Length)
             {
                 case 0:
@@ -912,7 +682,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 if (_profiles == null) return;
                 foreach (var t in _profiles)
                 {
-                    t?.RegisterListener(listener);
+                    if (t != null) t.RegisterListener(listener);
                 }
             }
 
@@ -921,26 +691,8 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
                 if (_profiles == null) return;
                 foreach (var t in _profiles)
                 {
-                    t?.UnregisterListener(listener);
+                    if (t != null) t.UnregisterListener(listener);
                 }
-            }
-        }
-
-        private void ShowScreenInternal(ScreenModel screen)
-        {
-            if (!screen) return;
-
-            if (screen.mainSceneRef != null && screen.mainSceneRef.RuntimeKeyIsValid())
-                SetSceneRootActive(screen.mainSceneRef, true);
-
-            if (screen.additiveScene == null) return;
-
-            foreach (var additive in screen.additiveScene)
-            {
-                if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid())
-                    continue;
-
-                SetSceneRootActive(additive.sceneRef, true);
             }
         }
 

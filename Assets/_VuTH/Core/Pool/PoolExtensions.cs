@@ -1,3 +1,4 @@
+using _VuTH.Common;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -26,9 +27,10 @@ namespace _VuTH.Core.Pool
         /// </summary>
         public static void AutoDespawnWhenInactive(this GameObject obj, float checkInterval = 0.5f)
         {
-            if (_poolManager == null) return;
+            if (!_poolManager.IsAlive()) return;
             
-            var behaviour = obj.GetComponent<AutoDespawnBehaviour>() ?? obj.AddComponent<AutoDespawnBehaviour>();
+            if (!obj.TryGetComponent<AutoDespawnBehaviour>(out var behaviour))
+                behaviour = obj.AddComponent<AutoDespawnBehaviour>();
             behaviour.Initialize(_poolManager, checkInterval);
         }
 
@@ -200,7 +202,7 @@ namespace _VuTH.Core.Pool
             
             if (!gameObject.activeInHierarchy)
             {
-                _poolManager?.Despawn(gameObject);
+                _poolManager.OrNull()?.Despawn(gameObject);
                 Destroy(this);
             }
         }
@@ -405,7 +407,7 @@ namespace _VuTH.Core.Pool
             _poolManager = FindFirstObjectByType<PoolManager>();
             
             // Warmup pool
-            _poolManager?.WarmupPool(prefab.gameObject, waveSize, waveSize * 2);
+            _poolManager.OrNull()?.WarmupPool(prefab.gameObject, waveSize, waveSize * 2);
         }
 
         public void SpawnWave()
@@ -431,7 +433,7 @@ namespace _VuTH.Core.Pool
             foreach (var obj in _activeObjects)
             {
                 if (obj != null)
-                    _poolManager?.Despawn(obj, delay);
+                    _poolManager.OrNull()?.Despawn(obj, delay);
             }
             _activeObjects.Clear();
         }

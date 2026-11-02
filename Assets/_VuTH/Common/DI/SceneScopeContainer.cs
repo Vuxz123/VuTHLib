@@ -2,7 +2,7 @@
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
-using VuTH.Common.MessagePipe;
+using _VuTH.Common.MessagePipe;
 
 namespace _VuTH.Common.DI
 {

@@ -1,100 +1,93 @@
-# VuTH Lib — Publishing Guide
+# VuTH Lib
 
-## Workflow
+Modular Unity 6 framework (`com.vuth.lib`): VContainer bootstrap, MessagePipe integration, Screen / ScreenFlow,
+Window & transitions, Pool, Audio, Camera, Save System (encrypt + migrate) and DataPackage persistence.
 
-```
-1. Open Unity project
-2. Menu: Window > VuTH > Export Package
-3. Commit + tag + push
-4. GitHub Release tự tạo
-```
+The package root is **`Assets/_VuTH`** (it contains `package.json`). Everything else in this repo is the
+development / sample project.
 
 ---
 
-## Publish (Local Build)
+## Install
 
-### Bước 1: Export Package
+### 1. Prerequisites
 
-Mở Unity → **Window → VuTH → Export Package**
+UPM packages cannot declare git or NuGet dependencies, so add these to the consuming project first.
 
-Package sẽ được export ra: `<repo-root>/VuTH.Lib.unitypackage`
+`Packages/manifest.json`:
 
-### Bước 2: Commit và Tag
-
-```bash
-git add VuTH.Lib.unitypackage
-git commit -m "Release v1.0.0"
-git tag v1.0.0
-git push origin main
-git push origin v1.0.0
+```json
+{
+  "dependencies": {
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask#73a63b7f672b88f7e9992f6917eb458a8cbb6fa9",
+    "com.cysharp.r3": "https://github.com/Cysharp/R3.git?path=src/R3.Unity/Assets/R3.Unity#24d04125d68719816e24dfb79c60dd97ca396038",
+    "com.cysharp.zlinq": "https://github.com/Cysharp/ZLinq.git?path=src/ZLinq.Unity/Assets/ZLinq.Unity#c6d15be4efecc0afca628fd194f8f62ee0b4bb15",
+    "com.cysharp.zstring": "https://github.com/Cysharp/ZString.git?path=src/ZString.Unity/Assets/Scripts/ZString#9fae2bebcf8768398905aba0e64a25f2384b4556",
+    "com.cysharp.messagepipe": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe#2b49ed40436b89e023df4cc0d39db67de2c78735",
+    "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer#94ec0872e4f9addcddc05ef4db2286b6691e82b5",
+    "jp.hadashikick.vcontainer": "https://github.com/hadashiA/VContainer.git?path=VContainer/Assets/VContainer#1.17.0",
+    "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity#34432703a177c97631a4eb1d908f086037c67969",
+    "com.kyrylokuzyk.primetween": "1.3.8"
+  },
+  "scopedRegistries": [
+    { "name": "npm", "url": "https://registry.npmjs.org", "scopes": ["com.kyrylokuzyk"] }
+  ]
+}
 ```
 
-### Bước 3: GitHub Release
+NuGet (install with NuGetForUnity — see this repo's `Assets/packages.config` for the exact versions):
+`R3`, `ZLinq`, `ZLinq.Json`, `ObservableCollections`, `ObservableCollections.R3`, `Newtonsoft.Json`, `System.Text.Json`.
 
-Sau khi push tag → **Actions** tab → workflow `Create Release` chạy → tự tạo GitHub Release với file `.unitypackage` đính kèm.
+### 2. The package
+
+Git URL (pin a tag):
+
+```json
+"com.vuth.lib": "https://github.com/Vuxz123/VuTHLib.git?path=Assets/_VuTH#v1.0.0"
+```
+
+Or download `com.vuth.lib-<version>.tgz` from GitHub Releases → Package Manager → **+** → **Add package from tarball…**
 
 ---
 
-## Consume (Project Khác)
+## Release
 
-### Cách 1: Import .unitypackage
-1. Tải `VuTH.Lib.x.x.x.unitypackage` từ GitHub Releases
-2. Unity → **Assets → Import Package → Custom Package**
-3. Chọn file → Import
+1. Bump `"version"` in `Assets/_VuTH/package.json`.
+2. Commit, then tag and push — the tag must match the version (pre-release suffixes like `-beta` are allowed):
+   ```bash
+   git tag v1.0.1
+   git push origin master v1.0.1
+   ```
+3. `.github/workflows/release.yml` checks the tag against `package.json`, checks that every script is covered by an
+   `.asmdef` (scripts outside one are silently not compiled in a UPM package), builds the tarball and creates the
+   GitHub Release.
 
-### Cách 2: Git Submodule / Clone
-```bash
-# Clone as submodule
-git submodule add https://github.com/<user>/VuTH-Lib.git Assets/VuTH-Lib
-```
-
----
-
-## File Structure
-
-```
-VuTH-Lib/
-├── Assets/_VuTH/               ← source code
-│   ├── Editor/PackageExporter.cs
-│   ├── Common/
-│   └── Core/
-├── VuTH.Lib.unitypackage       ← built artifact (committed)
-├── .github/workflows/release.yml
-└── README.md
-```
+`.unitypackage` builds are no longer committed (they are git-ignored). For a one-off `.unitypackage`, use
+**Window → VuTH → Export Package** (`Assets/Editor/PackageExporter.cs`, dev project only).
 
 ---
 
-## CI Workflow
+## Upgrading from the pre-1.0 names
 
-`.github/workflows/release.yml` chạy khi có tag `v*`:
+Assemblies and namespaces were renamed:
 
-1. Checkout code (đã có `.unitypackage` committed)
-2. Tạo GitHub Release với file `.unitypackage` đính kèm
+| Old | New |
+|---|---|
+| `VuTH.Persistant.*`, `VuTH..Persistant.SaveSystem.Editor` | `VuTH.Persistent.*` |
+| `_VuTH.Core.Persistant.*` | `_VuTH.Core.Persistent.*` |
+| `_VuTH.Core.Booststrap`, `VuTH.Boostrap.Editor`, `Boostrap*` types | `_VuTH.Core.Bootstrap`, `VuTH.Bootstrap.Editor`, `Bootstrap*` |
+| `_VuTH.Core.GameCycle.Screen.Core.A` | `_VuTH.Core.GameCycle.Screen.Core` |
+| `VuTH.Common.MessagePipe` | `_VuTH.Common.MessagePipe` |
+| `DragableGrid` / `ImGuiDragable*` | `DraggableGrid` / `ImGuiDraggable*` |
 
----
+What is handled automatically:
+- `[SerializeReference]` data (encryptors, backends, serializers, migrators) — the classes carry `[MovedFrom]`.
+- Type names stored as strings (DataPackage profile, MessagePipe `EventScopeLookup`) — resolved through
+  `LegacyTypeResolver`, so old assets keep loading. Re-scanning events in the MessagePipe settings tab rewrites
+  `EventScopeLookup` with the new names.
 
-## Troubleshooting
-
-### Không thấy menu "Window > VuTH"
-→ Đợi Unity recompile assemblies. Kiểm tra Console có lỗi không.
-
-### .unitypackage lớn quá cho git
-→ Nên dùng **Git LFS** (Large File Storage):
-
-```bash
-git lfs install
-git lfs track "*.unitypackage"
-git add .gitattributes
-```
-
-Sau đó commit như bình thường. GitHub Free đã có 2GB storage + 10GB bandwidth/month cho LFS.
-
-### Quên commit .unitypackage trước khi tag
-```bash
-# Tag đã push, quên commit package
-git add VuTH.Lib.x.x.x.unitypackage
-git commit --amend --no-edit
-git push --force origin v1.0.0
-# ⚠️ Force push tag — cẩn thận nếu đã share
-```
+What you must do in a consuming project:
+- Update `using` directives and any `.asmdef` that references the old assembly names by **name**
+  (GUID references keep working).
+- Re-generate `ScreenIds` / the MessagePipe registrar from their settings tabs.
+- The built-in screen asset and trigger were renamed `Boostrap` → `Bootstrap` (`BoostrapCompleted` → `BootstrapCompleted`).

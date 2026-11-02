@@ -1,3 +1,4 @@
+using _VuTH.Common;
 using Cysharp.Threading.Tasks;
 
 namespace _VuTH.Core.Audio
@@ -20,7 +21,7 @@ namespace _VuTH.Core.Audio
 
         public UniTask StopAsync(float fadeDuration = 0f)
         {
-            return _manager?.StopAsync(this, fadeDuration) ?? UniTask.CompletedTask;
+            return _manager.OrNull()?.StopAsync(this, fadeDuration) ?? UniTask.CompletedTask;
         }
     }
 }

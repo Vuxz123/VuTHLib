@@ -4,7 +4,7 @@ using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
     [Serializable]
     public class ScreenModelContainer
@@ -22,7 +22,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core.A
             _screens = new Dictionary<ScreenIdentifier, ScreenModel>();
             foreach (var screen in ss)
             {
-                if (screen.screenId == DefaultScreenIds.Boostrap)
+                if (screen.screenId == DefaultScreenIds.Bootstrap)
                     bootstrapScreen = screen;
                 else if (screen.screenId == DefaultScreenIds.Home)
                     homeScreen = screen;

@@ -3,7 +3,7 @@ using MessagePipe;
 using UnityEngine;
 
 // ReSharper disable once CheckNamespace
-namespace VuTH.Common.MessagePipe
+namespace _VuTH.Common.MessagePipe
 {
     /// <summary>
     /// Usage examples for MessagePipe event system.

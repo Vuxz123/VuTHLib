@@ -16,7 +16,7 @@ namespace TScript
             if (Keyboard.current[Key.I].wasPressedThisFrame)
             {
                 this.Log("Press I key detected");
-                ScreenFlowManager.Instance.Trigger("BoostrapCompleted");
+                ScreenFlowManager.Instance.Trigger("BootstrapCompleted");
             }
             if (Keyboard.current[Key.O].wasPressedThisFrame)
             {

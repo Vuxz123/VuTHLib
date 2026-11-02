@@ -7,17 +7,17 @@ This document describes the test strategy for the VuTH SaveSystem.
 Tests are organized into three Unity Test Framework assemblies:
 
 ```
-Assets/_VuTH/Core/Persistant/SaveSystem/Tests/
+Assets/_VuTH/Core/Persistent/SaveSystem/Tests/
 ├── Runtime/                    # Pure C# unit tests (no Unity dependencies)
-│   ├── VuTH.Persistant.SaveSystem.Tests.asmdef
+│   ├── VuTH.Persistent.SaveSystem.Tests.asmdef
 │   ├── SaveServiceTests.cs
 │   ├── SaveMigrationChainTests.cs
 │   └── TestDoubles.cs
 ├── EditMode/                   # EditMode integration tests
-│   ├── VuTH.Persistant.SaveSystem.Tests.EditMode.asmdef
+│   ├── VuTH.Persistent.SaveSystem.Tests.EditMode.asmdef
 │   └── JsonFileBackendIntegrationTests.cs
 ├── PlayMode/                   # PlayMode end-to-end tests
-│   ├── VuTH.Persistant.SaveSystem.Tests.PlayMode.asmdef
+│   ├── VuTH.Persistent.SaveSystem.Tests.PlayMode.asmdef
 │   └── SaveServiceManagerPlayModeTests.cs
 └── Editor/                     # Editor-only tests
     └── SaveAdapterTypeScannerTests.cs

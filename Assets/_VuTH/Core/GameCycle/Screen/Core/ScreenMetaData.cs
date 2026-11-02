@@ -3,7 +3,7 @@ using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.Screen.Events.Local;
 using UnityEngine;
 
-namespace _VuTH.Core.GameCycle.Screen.Core.A
+namespace _VuTH.Core.GameCycle.Screen.Core
 {
     public class ScreenMetaData : MonoBehaviour, IScreenMetaData
     {

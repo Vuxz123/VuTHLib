@@ -1,150 +1,90 @@
 name: Create Release
 
+# Publishes VuTH Lib as a UPM package.
+# Source of truth: Assets/_VuTH/package.json  (the package root).
+# Push a tag "v<version>" that matches package.json "version" to release.
+
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version (e.g. 1.0.0)'
-        required: false
-        type: string
 
 permissions:
   contents: write
 
+env:
+  PACKAGE_DIR: Assets/_VuTH
+
 jobs:
   release:
-    name: Create Release v${{ github.event.inputs.version || github.ref_name }}
+    name: Release ${{ github.ref_name }}
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get version
-        id: version
+      - name: Read package metadata
+        id: meta
         run: |
-          VERSION="${{ github.event.inputs.version || github.ref_name }}"
-          # Remove 'v' prefix if present
-          VERSION="${VERSION#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Find .unitypackage
-        id: find
-        run: |
-          # Look for .unitypackage in root
-          PKG=$(find . -maxdepth 1 -name "*.unitypackage" -type f | head -1)
-          if [ -z "$PKG" ]; then
-            # Try in dist or release folders
-            PKG=$(find . -maxdepth 2 -name "*.unitypackage" -type f | head -1)
+          NAME=$(jq -r .name "$PACKAGE_DIR/package.json")
+          VERSION=$(jq -r .version "$PACKAGE_DIR/package.json")
+          TAG="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG#v}"
+          # Allow pre-release suffixes on the tag (v1.2.0-beta) as long as the base matches package.json.
+          if [ "${TAG_VERSION%%-*}" != "${VERSION%%-*}" ]; then
+            echo "::error::Tag $TAG does not match $PACKAGE_DIR/package.json version $VERSION"
+            exit 1
           fi
-          if [ -z "$PKG" ]; then
-            echo "package=none" >> $GITHUB_OUTPUT
-          else
-            echo "package=$PKG" >> $GITHUB_OUTPUT
-            echo "Found: $PKG"
-            ls -la "$PKG"
-          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tarball=$NAME-$TAG_VERSION.tgz" >> "$GITHUB_OUTPUT"
 
-      - name: Set package name
-        id: pkgname
+      - name: Check every C# file is covered by an asmdef
+        # In a UPM package, scripts outside an assembly definition are silently NOT compiled.
         run: |
-          if [ "${{ steps.find.outputs.package }}" == "none" ]; then
-            echo "name=VuTH.Lib.${{ steps.version.outputs.version }}.unitypackage" >> $GITHUB_OUTPUT
-          else
-            NAME=$(basename "${{ steps.find.outputs.package }}")
-            echo "name=$NAME" >> $GITHUB_OUTPUT
-          fi
+          missing=0
+          while IFS= read -r f; do
+            d=$(dirname "$f"); found=
+            while [ "$d" != "." ] && [ "$d" != "/" ]; do
+              if ls "$d"/*.asmdef >/dev/null 2>&1; then found=1; break; fi
+              d=$(dirname "$d")
+            done
+            if [ -z "$found" ]; then echo "::error file=$f::Not covered by any .asmdef"; missing=1; fi
+          done < <(find "$PACKAGE_DIR" -name '*.cs')
+          exit $missing
 
-      - name: Upload artifact (local workflow)
-        if: github.event_name == 'workflow_dispatch' && steps.find.outputs.package == 'none'
+      - name: Build UPM tarball
+        # Same layout as `npm pack`: everything under a top-level "package/" folder.
+        # Install in Unity: Package Manager > + > Add package from tarball...
         run: |
-          echo "No .unitypackage found in repo."
-          echo "Please either:"
-          echo "1. Build the package locally using Unity: Window > VuTH > Export Package"
-          echo "2. Place the .unitypackage file in the repo root"
-          echo "3. Commit and push, then run this workflow again"
-          echo ""
-          echo "Or enable 'Build on CI' mode to have GitHub Actions build it automatically."
-          exit 1
+          mkdir -p build/package
+          cp -R "$PACKAGE_DIR"/. build/package/
+          tar -czf "${{ steps.meta.outputs.tarball }}" -C build package
+          ls -la "${{ steps.meta.outputs.tarball }}"
 
       - name: Create GitHub Release
-        if: steps.find.outputs.package != 'none'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: VuTH Lib v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: VuTH Lib v${{ steps.meta.outputs.version }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: ${{ steps.meta.outputs.tarball }}
           body: |
-            ## VuTH Lib v${{ steps.version.outputs.version }}
+            ## VuTH Lib v${{ steps.meta.outputs.version }}
 
-            ### Installation
-
-            **Option 1: Import .unitypackage**
-            1. Download `VuTH.Lib.${{ steps.version.outputs.version }}.unitypackage` below
-            2. Open Unity → Assets → Import Package → Custom Package
-            3. Select the downloaded `.unitypackage` file
-
-            **Option 2: UPM via git URL**
+            ### Install (UPM, git URL) — recommended
+            Add to `Packages/manifest.json`:
             ```json
-            {
-              "dependencies": {
-                "com.vuth.lib": "https://github.com/${{ github.repository }}.git#${{ steps.version.outputs.tag }}"
-              }
-            }
+            "${{ steps.meta.outputs.name }}": "https://github.com/${{ github.repository }}.git?path=Assets/_VuTH#${{ github.ref_name }}"
             ```
 
-          files: ${{ steps.find.outputs.package }}
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ### Install (tarball)
+            Download `${{ steps.meta.outputs.tarball }}` below → Package Manager → **+** → **Add package from tarball…**
 
-  # ──────────────────────────────────────────────────────────
-  # Optional: Build on CI if no .unitypackage is committed
-  # ──────────────────────────────────────────────────────────
-  build-ci:
-    name: Build on CI (if needed)
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: release
-
-    env:
-      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check if package exists
-        id: check
-        run: |
-          PKG=$(find . -maxdepth 2 -name "*.unitypackage" -type f | head -1)
-          if [ -n "$PKG" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Package already exists: $PKG"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Will build on CI"
-          fi
-
-      - name: Cache Unity Library
-        if: needs.release.outputs != 'true'
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: |
-            Library-
-
-      - name: Build Package
-        if: steps.check.outputs.exists == 'false'
-        run: |
-          echo "Building .unitypackage on CI..."
-          echo "Note: This requires Unity to be installed on the runner."
-          echo "Enable game-ci/unity-builder in the workflow if needed."
-          # Unity installation on Ubuntu runner would go here
-          # For now, this serves as a placeholder for CI-based builds
+            ### Prerequisites
+            UPM packages cannot declare git dependencies, so add these to the consuming project first —
+            see the README section **Install → Prerequisites** for the exact lines.
+            - UniTask, R3, ZLinq, ZString, MessagePipe (+ VContainer bridge), VContainer 1.17.0 (git URLs)
+            - PrimeTween 1.3.8 (npm scoped registry)
+            - NuGet (via NuGetForUnity): R3, ZLinq, ObservableCollections(.R3), Newtonsoft.Json, System.Text.Json

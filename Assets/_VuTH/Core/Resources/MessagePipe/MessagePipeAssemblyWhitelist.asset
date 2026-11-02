@@ -18,4 +18,4 @@ MonoBehaviour:
   - VuTH.Common
   - VuTH.Screen
   - VuTH.ScreenFlow
-  - VuTH.Core.Persistant
+  - VuTH.Core.Persistent

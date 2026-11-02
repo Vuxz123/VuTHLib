@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using _VuTH.Common;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace _VuTH.Core.GameCycle.Screen.Events.Global
@@ -51,7 +52,7 @@ namespace _VuTH.Core.GameCycle.Screen.Events.Global
             // Iterate ngược để an toàn nếu list bị sửa đổi trong lúc loop
             for (int i = _runtimeListeners.Count - 1; i >= 0; i--)
             {
-                _runtimeListeners[i]?.OnPreScreenEnter(eventArgs);
+                _runtimeListeners[i].OrNull()?.OnPreScreenEnter(eventArgs);
             }
         }
 
@@ -59,7 +60,7 @@ namespace _VuTH.Core.GameCycle.Screen.Events.Global
         {
             for (int i = _runtimeListeners.Count - 1; i >= 0; i--)
             {
-                _runtimeListeners[i]?.OnPostScreenEnter(eventArgs);
+                _runtimeListeners[i].OrNull()?.OnPostScreenEnter(eventArgs);
             }
         }
 
@@ -67,7 +68,7 @@ namespace _VuTH.Core.GameCycle.Screen.Events.Global
         {
             for (int i = _runtimeListeners.Count - 1; i >= 0; i--)
             {
-                _runtimeListeners[i]?.OnPreScreenExit(eventArgs);
+                _runtimeListeners[i].OrNull()?.OnPreScreenExit(eventArgs);
             }
         }
 
@@ -75,7 +76,7 @@ namespace _VuTH.Core.GameCycle.Screen.Events.Global
         {
             for (int i = _runtimeListeners.Count - 1; i >= 0; i--)
             {
-                _runtimeListeners[i]?.OnPostScreenExit(eventArgs);
+                _runtimeListeners[i].OrNull()?.OnPostScreenExit(eventArgs);
             }
         }
 

@@ -43,7 +43,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: aa4f9395c84e4421be07e0cdeb8784ac, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::TScript.TestBoostraperB
+  m_EditorClassIdentifier: Assembly-CSharp::TScript.TestBootstraperB
   enableSystem: 1
   customLifecycleManagement: 0
   testInt: 0

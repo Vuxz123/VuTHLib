@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using _VuTH.Core.GameCycle.Screen.Core;
-using _VuTH.Core.GameCycle.Screen.Core.A;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;

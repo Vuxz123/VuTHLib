@@ -9,7 +9,7 @@ EditorBuildSettings:
     path: Assets/Core.unity
     guid: b0192ba7e019d1a46943e0be8f97fd93
   - enabled: 0
-    path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Boostrap.unity
+    path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Bootstrap.unity
     guid: 2cd1f87b12006f04990ca9b074bd2e7e
   - enabled: 0
     path: Assets/_VuTH/Core/Resources_moved/GameCycle/Screen/Home.unity
@@ -19,3 +19,4 @@ EditorBuildSettings:
     guid: e25659144d5681c44bc0874eda467f57
   m_configObjects:
     com.unity.addressableassets: {fileID: 11400000, guid: c8c18f25aa4734948b79879eea0093ff, type: 2}
+    com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}

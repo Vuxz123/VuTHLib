@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 using VContainer;
 using VContainer.Unity;
-using VuTH.Common.MessagePipe;
+using _VuTH.Common.MessagePipe;
 using ZLinq;
 
 namespace _VuTH.Common.DI

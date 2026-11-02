@@ -27,7 +27,7 @@ Output to a markdown file in C:\Users\DPC00176\.openclaw\workspace\vuth-common-d
 Analyze and document the Bootstrap and Camera systems of the VuTH Unity framework at C:\Users\DPC00176\VuTH Lib\Assets\_VuTH\Core
 
 Document:
-1. Bootstrap System - BootstrapManagerCentral, BootstrapProfile, BootstrapProfileUtilities, BoostrapManagerCentralConst
+1. Bootstrap System - BootstrapManagerCentral, BootstrapProfile, BootstrapProfileUtilities, BootstrapManagerCentralConst
 2. Camera System - CameraManager, CameraProfile, VirtualCamera, ICameraManager
 
 For each component:
@@ -62,7 +62,7 @@ Output to C:\Users\DPC00176\.openclaw\workspace\vuth-screen-docs.md
 
 ## Task 4: Persistence & SaveSystem
 ```
-Analyze and document the Persistence and SaveSystem of the VuTH Unity framework at C:\Users\DPC00176\VuTH Lib\Assets\_VuTH\Core\Persistant
+Analyze and document the Persistence and SaveSystem of the VuTH Unity framework at C:\Users\DPC00176\VuTH Lib\Assets\_VuTH\Core\Persistent
 
 Document:
 1. DataPersistenceManager - IPersistencePackage, PersistencePackage, PersistentField, SaveLifecycleHook

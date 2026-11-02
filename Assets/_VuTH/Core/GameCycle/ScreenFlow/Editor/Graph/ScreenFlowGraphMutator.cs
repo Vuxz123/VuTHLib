@@ -1,6 +1,5 @@
 using System;
 using _VuTH.Core.GameCycle.Screen.Core;
-using _VuTH.Core.GameCycle.Screen.Core.A;
 using UnityEditor;
 using UnityEngine;
 

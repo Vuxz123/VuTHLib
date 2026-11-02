@@ -60,7 +60,7 @@ namespace _VuTH.Common.MessagePipe.Editor
             sb.AppendLine("#if VCONTAINER");
             sb.AppendLine("using VContainer;");
             sb.AppendLine("#endif");
-            sb.AppendLine("using VuTH.Common.MessagePipe;");
+            sb.AppendLine("using _VuTH.Common.MessagePipe;");
             sb.AppendLine();
             sb.AppendLine($"namespace {RegistrarNamespace}");
             sb.AppendLine("{");

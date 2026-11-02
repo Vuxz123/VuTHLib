@@ -1,6 +1,6 @@
 ﻿using System;
 using _VuTH.Common.Log;
-using _VuTH.Core.GameCycle.Screen.Core.A;
+using _VuTH.Core.GameCycle.Screen.Core;
 using _VuTH.Core.GameCycle.Screen.Identifier;
 using _VuTH.Core.GameCycle.Screen.Loading.Tasks;
 using UnityEngine;

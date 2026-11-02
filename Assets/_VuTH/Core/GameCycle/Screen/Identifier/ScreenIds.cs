@@ -4,14 +4,14 @@ namespace _VuTH.Core.GameCycle.Screen.Identifier
 {
     public static class DefaultScreenIds
     {
-        private static ScreenIdentifier _Boostrap;
-        public static ScreenIdentifier Boostrap => _Boostrap ??= Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/Boostrap");
+        private static ScreenIdentifier _Bootstrap;
+        public static ScreenIdentifier Bootstrap => _Bootstrap != null ? _Bootstrap : (_Bootstrap = Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/Bootstrap"));
 
         private static ScreenIdentifier _GamePlay;
-        public static ScreenIdentifier GamePlay => _GamePlay ??= Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/GamePlay");
+        public static ScreenIdentifier GamePlay => _GamePlay != null ? _GamePlay : (_GamePlay = Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/GamePlay"));
 
         private static ScreenIdentifier _Home;
-        public static ScreenIdentifier Home => _Home ??= Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/Home");
+        public static ScreenIdentifier Home => _Home != null ? _Home : (_Home = Resources.Load<ScreenIdentifier>("GameCycle/ScreenIdentifiers/Home"));
 
     }
 }

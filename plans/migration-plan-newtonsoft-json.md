@@ -2,14 +2,14 @@
 
 ## Overview
 
-Migration of save system serialization from [`System.Text.Json`](Assets/_VuTH/Core/Persistant/SaveSystem/Serialize/JsonSerializer.cs:1) to [`Newtonsoft.Json`](Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs:1) for the VuTH persistence layer.
+Migration of save system serialization from [`System.Text.Json`](Assets/_VuTH/Core/Persistent/SaveSystem/Serialize/JsonSerializer.cs:1) to [`Newtonsoft.Json`](Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs:1) for the VuTH persistence layer.
 
 ---
 
 ## Current State Analysis
 
 ### Active Serializer (System.Text.Json)
-**Location:** [`Assets/_VuTH/Core/Persistant/SaveSystem/Serialize/JsonSerializer.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/Serialize/JsonSerializer.cs:1)
+**Location:** [`Assets/_VuTH/Core/Persistent/SaveSystem/Serialize/JsonSerializer.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/Serialize/JsonSerializer.cs:1)
 
 **Current Settings:**
 | Setting | Value |
@@ -21,7 +21,7 @@ Migration of save system serialization from [`System.Text.Json`](Assets/_VuTH/Co
 | IncludeFields | true |
 
 ### Legacy Serializer (Newtonsoft.Json - Not Registered)
-**Location:** [`Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs:1)
+**Location:** [`Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs:1)
 
 **Current Settings:**
 | Setting | Value |
@@ -35,7 +35,7 @@ Serialize<T> → SavePayloadWrapper (schema version + payload) → Encrypt → B
 ```
 
 ### DI Registration
-**Location:** [`SaveServiceVContainerConfigurator.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/SaveServiceVContainerConfigurator.cs:35-36)
+**Location:** [`SaveServiceVContainerConfigurator.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/SaveServiceVContainerConfigurator.cs:35-36)
 
 ```csharp
 builder.Register<JsonSerializer>(Lifetime.Singleton)
@@ -47,7 +47,7 @@ builder.Register<JsonSerializer>(Lifetime.Singleton)
 ## Step 1: Package Dependency Addition
 
 ### Action Items:
-1. **Add Newtonsoft.Json Unity package** to [`VuTH.Core.Persistant.asmdef`](Assets/_VuTH/Core/Persistant/SaveSystem/VuTH.Core.Persistant.asmdef:1)
+1. **Add Newtonsoft.Json Unity package** to [`VuTH.Core.Persistent.asmdef`](Assets/_VuTH/Core/Persistent/SaveSystem/VuTH.Core.Persistent.asmdef:1)
 2. **Add reference** in Assembly Definition References section:
    ```
    "Newtonsoft.Json"
@@ -63,7 +63,7 @@ builder.Register<JsonSerializer>(Lifetime.Singleton)
 
 ### Target Settings (Match System.Text.Json Behavior)
 
-**File:** [`Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs:1)
+**File:** [`Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs:1)
 
 ```csharp
 new JsonSerializerSettings
@@ -105,7 +105,7 @@ using Newtonsoft.Json.Serialization;
 ## Step 3: DI Registration Changes
 
 ### Option A: Update Existing Registration
-**File:** [`SaveServiceVContainerConfigurator.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/SaveServiceVContainerConfigurator.cs:34-36)
+**File:** [`SaveServiceVContainerConfigurator.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/SaveServiceVContainerConfigurator.cs:34-36)
 
 **Change:**
 ```csharp
@@ -119,13 +119,13 @@ builder.Register<JsonSerializer>(Lifetime.Singleton)
 ```
 
 ### DI Registration: Option B (Approved)
-**Create:** [`Assets/_VuTH/Core/Persistant/SaveSystem/Serialize/NewtonsoftJsonSerializer.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/Serialize/NewtonsoftJsonSerializer.cs:1)
+**Create:** [`Assets/_VuTH/Core/Persistent/SaveSystem/Serialize/NewtonsoftJsonSerializer.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/Serialize/NewtonsoftJsonSerializer.cs:1)
 
 ```csharp
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
-namespace _VuTH.Core.Persistant.SaveSystem.Serialize
+namespace _VuTH.Core.Persistent.SaveSystem.Serialize
 {
     public class NewtonsoftJsonSerializer : ISerializer
     {
@@ -178,7 +178,7 @@ Existing saves are serialized with System.Text.Json format. Migration must handl
 
 ### Backward Compatibility: Schema Version Bump + Fallback (Approved)
 **Strategy:**
-**File:** [`SavePayloadWrapper.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/SavePayloadWrapper.cs:17)
+**File:** [`SavePayloadWrapper.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/SavePayloadWrapper.cs:17)
 
 ```csharp
 public SavePayloadWrapper()
@@ -188,12 +188,12 @@ public SavePayloadWrapper()
 }
 ```
 
-**Load Logic:** [`SaveService.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/SaveService.cs:97-105)
+**Load Logic:** [`SaveService.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/SaveService.cs:97-105)
 - If `SchemaVersion == 1`, use System.Text.Json for inner payload deserialization
 - If `SchemaVersion >= 2`, use Newtonsoft.Json
 
 #### Option B: Relaxed Casing (Immediate Migration)
-Use [`JsonLoadSettings`](Assets/_VuTH/Core/Persistant/SaveSystem/JsonSerializer.cs:1) with `NullValueHandling.Ignore` and handle case-insensitivity at deserialize level:
+Use [`JsonLoadSettings`](Assets/_VuTH/Core/Persistent/SaveSystem/JsonSerializer.cs:1) with `NullValueHandling.Ignore` and handle case-insensitivity at deserialize level:
 
 ```csharp
 // In legacy load path
@@ -211,7 +211,7 @@ var settings = new JsonSerializerSettings
 
 ### Migration Implementation:
 
-**File:** [`Assets/_VuTH/Core/Persistant/SaveSystem/SaveService.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/SaveService.cs:94-108)
+**File:** [`Assets/_VuTH/Core/Persistent/SaveSystem/SaveService.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/SaveService.cs:94-108)
 
 Add fallback logic in the Load method:
 
@@ -269,7 +269,7 @@ if (wrapper.SchemaVersion < _currentSchemaVersion)
 - [ ] **向后兼容**: Legacy System.Text.Json saves can be loaded (if implementing fallback)
 
 ### Integration Tests:
-- [ ] **Save/Load循环**: Full pipeline test with [`ExamplePlayerData.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/Example/ExamplePlayerData.cs:1)
+- [ ] **Save/Load循环**: Full pipeline test with [`ExamplePlayerData.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/Example/ExamplePlayerData.cs:1)
 - [ ] **迁移路径**: Load v1 save, verify schema version bump
 - [ ] **加密集成**: Verify encryption works with new JSON format
 - [ ] **后端集成**: Test with both PlayerPrefs and JsonFile backends
@@ -283,7 +283,7 @@ if (wrapper.SchemaVersion < _currentSchemaVersion)
 - [ ] **跨平台测试**: Test on target platforms (Windows, Android, iOS, etc.)
 
 ### Test Data Models to Use:
-- [`ExamplePlayerData.cs`](Assets/_VuTH/Core/Persistant/SaveSystem/Example/ExamplePlayerData.cs:1) - Contains:
+- [`ExamplePlayerData.cs`](Assets/_VuTH/Core/Persistent/SaveSystem/Example/ExamplePlayerData.cs:1) - Contains:
   - `string`, `int`, `float`, `DateTime`
   - `List<string>` collections
   - Multiple data classes for different scenarios
@@ -310,7 +310,7 @@ if (wrapper.SchemaVersion < _currentSchemaVersion)
 
 | File | Action |
 |------|--------|
-| `VuTH.Core.Persistant.asmdef` | Add Newtonsoft.Json reference |
+| `VuTH.Core.Persistent.asmdef` | Add Newtonsoft.Json reference |
 | `Serialize/NewtonsoftJsonSerializer.cs` | Create with matching settings |
 | `SaveServiceVContainerConfigurator.cs` | Update DI registration |
 | `SavePayloadWrapper.cs` | Bump SchemaVersion |

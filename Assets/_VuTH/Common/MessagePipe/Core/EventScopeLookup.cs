@@ -1,3 +1,4 @@
+using _VuTH.Common;
 using System;
 using System.Collections.Generic;
 using _VuTH.Common.MessagePipe.Attributes;
@@ -106,7 +107,7 @@ namespace _VuTH.Common.MessagePipe.Core
             if (string.IsNullOrEmpty(entry.typeFullName))
                 return null;
 
-            return Type.GetType(entry.typeFullName);
+            return LegacyTypeResolver.Resolve(entry.typeFullName);
         }
 
         private void EnsureCache()

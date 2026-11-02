@@ -14,7 +14,7 @@ using ContainerBuilderExtensions = MessagePipe.ContainerBuilderExtensions;
 #endif
 
 // ReSharper disable once CheckNamespace
-namespace VuTH.Common.MessagePipe
+namespace _VuTH.Common.MessagePipe
 {
     /// <summary>
     /// Helper class for MessagePipe registration and access.

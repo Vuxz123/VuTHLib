@@ -1,0 +1,20 @@
+{
+    "name": "VuTH.Persistent.DataPackage.Editor",
+    "rootNamespace": "",
+    "references": [
+        "VuTH.Persistent.DataPackage",
+        "VuTH.Common.Editor",
+        "VuTH.Common.Log"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
