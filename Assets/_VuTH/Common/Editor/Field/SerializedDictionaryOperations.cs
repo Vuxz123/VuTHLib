@@ -301,13 +301,8 @@ namespace _VuTH.Common.Editor.Field
 
         public static bool IsStringKey(SerializedProperty keysProp)
         {
-            if (keysProp.arraySize == 0)
-            {
-                // Try creating temp element to inspect (not ideal). We'll fallback to checking property type name.
-                return keysProp.propertyType == SerializedPropertyType.Generic && keysProp.type.Contains("String") || keysProp.type == "string";
-            }
-            var first = keysProp.GetArrayElementAtIndex(0);
-            return first.propertyType == SerializedPropertyType.String;
+            // arrayElementType works even when the array is empty.
+            return keysProp.isArray && keysProp.arrayElementType == "string";
         }
 
         public static void AddNewRow(SerializedProperty keysProp, SerializedProperty valuesProp, bool uniqueString)
@@ -346,17 +341,6 @@ namespace _VuTH.Common.Editor.Field
             if (from == to) return;
             keysProp.MoveArrayElement(from, to);
             valuesProp.MoveArrayElement(from, to);
-        }
-
-        public static void DeleteSelected(SerializedProperty keysProp, SerializedProperty valuesProp, HashSet<int> selected)
-        {
-            // Delete in descending order to preserve indices
-            var list = new List<int>(selected);
-            list.Sort();
-            for (int i = list.Count - 1; i >= 0; i--)
-            {
-                DeleteRowAt(keysProp, valuesProp, list[i]);
-            }
         }
 
         /// <summary>

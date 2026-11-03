@@ -82,75 +82,33 @@ namespace _VuTH.Common.Editor.Tests.EditMode
             Assert.IsFalse(DictionaryKeyUtility.MatchesSearch("abc", "def", "xyz"));
         }
 
-        // ---- Row selection / reorder ----
+        // ---- Duplicate keys ----
 
         [Test]
-        public void ApplySelectionClick_PlainCtrlAndShift()
+        public void FindDuplicateWinners_UniqueKeys_AreAllMinusOne()
         {
-            var selected = new HashSet<int> { 1, 2 };
-
-            DictionaryRowInteraction.ApplySelectionClick(selected, 4, ctrl: false, shift: false);
-            CollectionAssert.AreEquivalent(new[] { 4 }, selected);
-
-            DictionaryRowInteraction.ApplySelectionClick(selected, 6, ctrl: true, shift: false);
-            CollectionAssert.AreEquivalent(new[] { 4, 6 }, selected);
-
-            DictionaryRowInteraction.ApplySelectionClick(selected, 4, ctrl: true, shift: false);
-            CollectionAssert.AreEquivalent(new[] { 6 }, selected);
+            CollectionAssert.AreEqual(new[] { -1, -1, -1 }, DictionaryKeyUtility.FindDuplicateWinners(new[] { "a", "b", "c" }));
         }
 
         [Test]
-        public void ApplySelectionClick_ShiftSelectsRangeFromNearestSelected()
+        public void FindDuplicateWinners_PointsEveryDuplicateAtTheLastOccurrence()
         {
-            var selected = new HashSet<int> { 2, 9 };
-            DictionaryRowInteraction.ApplySelectionClick(selected, 5, ctrl: false, shift: true);
-            CollectionAssert.AreEquivalent(new[] { 2, 3, 4, 5 }, selected);
-
-            var empty = new HashSet<int>();
-            DictionaryRowInteraction.ApplySelectionClick(empty, 3, ctrl: false, shift: true);
-            CollectionAssert.AreEquivalent(new[] { 3 }, empty);
+            // SerializableDictionary.OnAfterDeserialize uses this[key] = value, so the last entry wins.
+            var winners = DictionaryKeyUtility.FindDuplicateWinners(new[] { "gem", "gold", "gem", "x", "gem" });
+            CollectionAssert.AreEqual(new[] { 4, -1, 4, -1, 4 }, winners);
         }
 
         [Test]
-        public void ComputePreciseInsertIndex_UsesRowCenters()
+        public void FindDuplicateWinners_IgnoresNullAndEmptyKeys()
         {
-            var rects = ThreeRows();
-            var indices = new List<int> { 0, 1, 2 };
-
-            Assert.AreEqual(0, DictionaryRowInteraction.ComputePreciseInsertIndex(rects, indices, 3, 5f));
-            Assert.AreEqual(1, DictionaryRowInteraction.ComputePreciseInsertIndex(rects, indices, 3, 25f));
-            Assert.AreEqual(3, DictionaryRowInteraction.ComputePreciseInsertIndex(rects, indices, 3, 100f));
-            Assert.AreEqual(0, DictionaryRowInteraction.ComputePreciseInsertIndex(new List<Rect>(), new List<int>(), 0, 10f));
+            var winners = DictionaryKeyUtility.FindDuplicateWinners(new[] { null, "", null, "", "k" });
+            CollectionAssert.AreEqual(new[] { -1, -1, -1, -1, -1 }, winners);
         }
 
         [Test]
-        public void ComputeInsertLineY_HandlesEmptyFirstAndBetween()
+        public void FindDuplicateWinners_Empty_ReturnsEmpty()
         {
-            var rects = ThreeRows();
-            var indices = new List<int> { 0, 1, 2 };
-
-            Assert.AreEqual(7f, DictionaryRowInteraction.ComputeInsertLineY(new List<Rect>(), new List<int>(), 0, 7f));
-            Assert.AreEqual(-2f, DictionaryRowInteraction.ComputeInsertLineY(rects, indices, 0, 7f));
-            Assert.AreEqual(20f, DictionaryRowInteraction.ComputeInsertLineY(rects, indices, 1, 7f));
-            Assert.AreEqual(62f, DictionaryRowInteraction.ComputeInsertLineY(rects, indices, 3, 7f));
-        }
-
-        [TestCase(1, 4, 5, 3)]
-        [TestCase(3, 0, 5, 0)]
-        [TestCase(0, 10, 5, 4)]
-        public void ComputeMoveTarget_AdjustsDownwardMovesAndClamps(int from, int insert, int count, int expected)
-        {
-            Assert.AreEqual(expected, DictionaryRowInteraction.ComputeMoveTarget(from, insert, count));
-        }
-
-        private static List<Rect> ThreeRows()
-        {
-            return new List<Rect>
-            {
-                new Rect(0f, 0f, 100f, 20f),
-                new Rect(0f, 20f, 100f, 20f),
-                new Rect(0f, 40f, 100f, 20f)
-            };
+            CollectionAssert.IsEmpty(DictionaryKeyUtility.FindDuplicateWinners(System.Array.Empty<string>()));
         }
     }
 }

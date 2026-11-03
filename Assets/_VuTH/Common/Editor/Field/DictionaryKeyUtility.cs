@@ -55,5 +55,33 @@ namespace _VuTH.Common.Editor.Field
             var valStr = (valueText ?? string.Empty).ToLowerInvariant();
             return keyStr.Contains(searchLower) || valStr.Contains(searchLower);
         }
+
+        /// <summary>
+        /// For each row, the index of the row whose value <c>SerializableDictionary</c> keeps at runtime for that key
+        /// (the <b>last</b> occurrence, because deserialization uses <c>this[key] = value</c>), or -1 when the key
+        /// appears only once. Null/empty key texts are not considered duplicates.
+        /// </summary>
+        public static int[] FindDuplicateWinners(IReadOnlyList<string> keyTexts)
+        {
+            var winners = new int[keyTexts.Count];
+            var lastIndex = new Dictionary<string, int>();
+            var occurrences = new Dictionary<string, int>();
+
+            for (var i = 0; i < keyTexts.Count; i++)
+            {
+                var key = keyTexts[i];
+                if (string.IsNullOrEmpty(key)) continue;
+                lastIndex[key] = i;
+                occurrences[key] = occurrences.TryGetValue(key, out var n) ? n + 1 : 1;
+            }
+
+            for (var i = 0; i < keyTexts.Count; i++)
+            {
+                var key = keyTexts[i];
+                winners[i] = !string.IsNullOrEmpty(key) && occurrences[key] > 1 ? lastIndex[key] : -1;
+            }
+
+            return winners;
+        }
     }
 }
