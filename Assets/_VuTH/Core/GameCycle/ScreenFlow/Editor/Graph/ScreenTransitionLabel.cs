@@ -84,6 +84,10 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         private static string BuildText(ScreenFlowTransition transition)
         {
             var eventName = string.IsNullOrWhiteSpace(transition.EventName) ? "<event>" : transition.EventName;
+            if (transition.Navigation != ScreenFlowNavigation.Enter)
+            {
+                eventName += " · " + transition.Navigation;
+            }
             if (!transition.Condition)
             {
                 return eventName;

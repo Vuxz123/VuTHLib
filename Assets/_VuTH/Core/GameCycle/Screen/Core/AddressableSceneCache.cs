@@ -103,6 +103,29 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         /// <summary>
         /// Activates the root GameObjects of the screen's main and additive scenes (if cached).
         /// </summary>
+        /// <summary>
+        /// Deactivates the root objects of <paramref name="screen"/>'s scenes without unloading them.
+        /// Scenes also used by <paramref name="keepVisibleFor"/> stay active.
+        /// </summary>
+        public void HideScreen(ScreenModel screen, ScreenModel keepVisibleFor)
+        {
+            if (!screen) return;
+
+            if (screen.mainSceneRef != null && screen.mainSceneRef.RuntimeKeyIsValid() &&
+                !IsSceneUsedByScreen(keepVisibleFor, GetAssetGuid(screen.mainSceneRef)))
+            {
+                SetSceneRootActive(screen.mainSceneRef, false);
+            }
+
+            if (screen.additiveScene == null) return;
+            foreach (var additive in screen.additiveScene)
+            {
+                if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid()) continue;
+                if (IsSceneUsedByScreen(keepVisibleFor, GetAssetGuid(additive.sceneRef))) continue;
+                SetSceneRootActive(additive.sceneRef, false);
+            }
+        }
+
         public void ShowScreen(ScreenModel screen)
         {
             if (!screen) return;

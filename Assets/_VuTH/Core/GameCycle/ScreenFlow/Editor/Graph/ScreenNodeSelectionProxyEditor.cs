@@ -67,7 +67,11 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                 }
             };
 
-            var startBtn = new Button(proxy.SetAsStartNode) { text = "Set as Start" };
+            var startBtn = new Button(() =>
+            {
+                proxy.SetAsStartNode();
+                startField.SetValueWithoutNotify(proxy.IsStartNode);
+            }) { text = "Set as Start" };
 
             buttonsRow.Add(pingBtn);
             buttonsRow.Add(startBtn);

@@ -18,7 +18,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         private ScreenFlowEdgeHandler _edgeHandler;
         private ScreenFlowGraph _graph;
         private bool _isRefreshing;
-        private bool _wasDraggingOverGraph; // For ScreenModel asset drag & drop
 
         public ScreenFlowGraphView(ScreenFlowGraphEditorWindow window)
         {
@@ -40,8 +39,11 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             this.AddManipulator(new EdgeLabelRefreshManipulator(
                 () => _edgeHandler?.RefreshAllEdgeLabelPositions()));
 
-            // ScreenModel drag & drop: poll DragAndDrop state for asset drops
-            EditorApplication.update += OnScreenModelsDragPoll;
+            // ScreenModel asset drag & drop onto empty graph space (nodes handle drops onto themselves).
+            this.AddManipulator(new ScreenModelDropManipulator(
+                GetDraggedScreenModels,
+                world => contentViewContainer.WorldToLocal(world),
+                OnScreenModelsDropped));
         }
 
         public void SetGraph(ScreenFlowGraph graph)
@@ -50,38 +52,28 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             _mutator = new ScreenFlowGraphMutator(_graph, () => ScreenFlowGraphEditorWindow.NotifyGraphChanged(_graph));
             _mutator.SetOnGraphChanged(() => ScreenFlowGraphEditorWindow.NotifyGraphChanged(_graph));
             _edgeHandler = new ScreenFlowEdgeHandler(_graph, _mutator);
-            _edgeHandler.SetOnSelectionChanged(OnEdgeSelectionChanged);
+
             RefreshView();
         }
 
-        private void OnEdgeSelectionChanged()
-        {
-            if (_graph == null || _isRefreshing)
-            {
-                _window.ShowSelectionInspector(null);
-                return;
-            }
 
-            var selected = selection;
-            if (selected.Count != 1) return;
-
-            if (selected[0] is Edge { userData: ScreenFlowTransition transition })
-            {
-                _window.ShowSelectionInspector(ScreenTransitionSelectionProxy.Create(_graph, transition));
-                return;
-            }
-
-            _window.ShowSelectionInspector(null);
-        }
 
         public void Cleanup()
         {
-            EditorApplication.update -= OnScreenModelsDragPoll;
+        }
+
+        public override void ClearSelection()
+        {
+            base.ClearSelection();
+            if (!_isRefreshing) _window.ShowSelectionInspector(null);
         }
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
         {
             base.BuildContextualMenu(evt);
+
+            // Only on empty canvas: nodes / edges provide their own entries.
+            if (evt.target is not GraphView) return;
 
             evt.menu.AppendAction("Add Screen Node", action => AddNodeAtMouse(action.eventInfo.mousePosition), DropdownMenuAction.AlwaysEnabled);
             evt.menu.AppendAction("Frame All", _ => FrameAll(), DropdownMenuAction.AlwaysEnabled);
@@ -263,14 +255,14 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                 return;
             }
 
-            if (_mutator.PendingSelectedTransition != null)
+            if (!string.IsNullOrEmpty(_mutator.PendingSelectedTransitionGuid))
             {
-                var edge = _edgeHandler.GetEdgeForTransition(_mutator.PendingSelectedTransition);
+                var edge = _edgeHandler.GetEdgeForTransitionGuid(_mutator.PendingSelectedTransitionGuid);
                 if (edge != null)
                 {
                     ClearSelection();
                     AddToSelection(edge);
-                    _mutator.PendingSelectedTransition = null;
+                    _mutator.PendingSelectedTransitionGuid = null;
                 }
             }
         }
@@ -341,44 +333,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             }
 
             return screens;
-        }
-
-        private void OnScreenModelsDragPoll()
-        {
-            if (_graph == null) return;
-
-            var evt = Event.current;
-            var isDragUpdated = evt?.type == EventType.DragUpdated;
-            var isDragPerform = evt?.type == EventType.DragPerform;
-            var isDragging = isDragUpdated || isDragPerform;
-            var screens = GetDraggedScreenModels();
-            var isOverGraph = worldBound.Contains(evt?.mousePosition ?? Vector2.zero);
-
-            if (isDragging && screens.Count > 0 && isOverGraph)
-            {
-                // Show valid drop indicator while hovering over graph
-                DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
-                _wasDraggingOverGraph = true;
-
-                // Update edge label positions in real-time during drag
-                _edgeHandler.RefreshAllEdgeLabelPositions();
-            }
-            else if (_wasDraggingOverGraph && isDragPerform)
-            {
-                // Drag ended while over graph → accept the drop
-                if (screens.Count > 0)
-                {
-                    DragAndDrop.AcceptDrag();
-                    var localPos = contentViewContainer.WorldToLocal(evt?.mousePosition ?? Vector2.zero);
-                    OnScreenModelsDropped(localPos, screens);
-                }
-                _wasDraggingOverGraph = false;
-            }
-            else if (!isDragging)
-            {
-                // Drag ended outside graph or cancelled
-                _wasDraggingOverGraph = false;
-            }
         }
     }
 }

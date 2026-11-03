@@ -1,6 +1,8 @@
+using System;
 using _VuTH.Core.GameCycle.ScreenFlow.Condition;
 using UnityEditor;
 using UnityEditor.UIElements;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
@@ -22,6 +24,8 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             var toProp = serializedObject.FindProperty("toGuid");
             var eventProp = serializedObject.FindProperty("eventName");
             var conditionProp = serializedObject.FindProperty("condition");
+            var navigationProp = serializedObject.FindProperty("navigation");
+            var screenBelowProp = serializedObject.FindProperty("screenBelow");
 
             var fromField = new TextField("From") { isReadOnly = true };
             fromField.SetValueWithoutNotify(fromProp.stringValue);
@@ -32,6 +36,38 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             toField.SetEnabled(false);
 
             var eventField = new TextField("Event Name") { value = eventProp.stringValue };
+            eventField.style.flexGrow = 1;
+
+            // Pick an event name already used in this graph (avoids typos / near-duplicates).
+            var eventRow = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+            var pickEventBtn = new Button(() =>
+            {
+                var graph = ((ScreenTransitionSelectionProxy)target).Graph;
+                var menu = new GenericMenu();
+                var names = Codegen.ScreenFlowEventsGenerator.CollectEvents(graph).Keys;
+                foreach (var name in names)
+                {
+                    var captured = name;
+                    menu.AddItem(new GUIContent(name), name == eventField.value, () => eventField.value = captured);
+                }
+                if (menu.GetItemCount() == 0) menu.AddDisabledItem(new GUIContent("No events in this graph yet"));
+                menu.ShowAsContext();
+            })
+            {
+                text = "▾",
+                tooltip = "Choose an event name already used in this graph"
+            };
+            eventRow.Add(eventField);
+            eventRow.Add(pickEventBtn);
+
+            var navigationField = new EnumField("Navigation", (ScreenFlowNavigation)navigationProp.intValue)
+            {
+                tooltip = "How the ScreenManager is driven when this transition fires."
+            };
+            var screenBelowField = new EnumField("Screen Below", (ScreenBelowVisibility)screenBelowProp.intValue)
+            {
+                tooltip = "Push only: hide the current screen while the target is on top (ScreenDefault = target's hideScreenBelow)."
+            };
 
             var conditionField = new ObjectField("Condition")
             {
@@ -42,6 +78,8 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 
             eventField.RegisterValueChangedCallback(_ => Apply());
             conditionField.RegisterValueChangedCallback(_ => Apply());
+            navigationField.RegisterValueChangedCallback(_ => { Apply(); RefreshNavigation(); });
+            screenBelowField.RegisterValueChangedCallback(_ => Apply());
 
             var buttonsRow = new VisualElement
             {
@@ -86,13 +124,16 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             eventField.RegisterValueChangedCallback(_ => RefreshHelp());
             conditionField.RegisterValueChangedCallback(_ => RefreshHelp());
             RefreshHelp();
+            RefreshNavigation();
 
             root.Add(fromField);
             root.Add(toField);
 
             root.Add(new VisualElement { style = { height = 6 } });
-            root.Add(eventField);
+            root.Add(eventRow);
             root.Add(conditionField);
+            root.Add(navigationField);
+            root.Add(screenBelowField);
 
             root.Add(new VisualElement { style = { height = 8 } });
             root.Add(buttonsRow);
@@ -107,9 +148,17 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                 serializedObject.Update();
                 eventProp.stringValue = eventField.value;
                 conditionProp.objectReferenceValue = conditionField.value;
+                navigationProp.intValue = Convert.ToInt32(navigationField.value);
+                screenBelowProp.intValue = Convert.ToInt32(screenBelowField.value);
                 serializedObject.ApplyModifiedProperties();
 
                 ((ScreenTransitionSelectionProxy)target).ApplyToGraph();
+            }
+
+            void RefreshNavigation()
+            {
+                var mode = (ScreenFlowNavigation)navigationField.value;
+                screenBelowField.style.display = mode == ScreenFlowNavigation.Push ? DisplayStyle.Flex : DisplayStyle.None;
             }
 
             void RefreshHelp()

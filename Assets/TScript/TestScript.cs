@@ -2,6 +2,7 @@
 using _VuTH.Common.Log;
 using _VuTH.Core.GameCycle.ScreenFlow;
 using _VuTH.Core.Window;
+using Core.Generated;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -16,7 +17,7 @@ namespace TScript
             if (Keyboard.current[Key.I].wasPressedThisFrame)
             {
                 this.Log("Press I key detected");
-                ScreenFlowManager.Instance.Trigger("BootstrapCompleted");
+                ScreenFlowManager.Instance.Trigger(ScreenFlowEvents.BootstrapCompleted);
             }
             if (Keyboard.current[Key.O].wasPressedThisFrame)
             {

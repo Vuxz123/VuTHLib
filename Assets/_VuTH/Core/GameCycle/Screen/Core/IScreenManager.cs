@@ -34,6 +34,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         UniTask Push(ScreenModel screen);
         UniTask Push(ScreenModel screen, TransitionContext context);
 
+        /// <summary>
+        /// Push with an explicit choice to hide the screen below (overrides <see cref="ScreenModel.hideScreenBelow"/>).
+        /// A hidden screen keeps its scenes loaded and is shown again when the pushed screen is popped.
+        /// </summary>
+        UniTask Push(ScreenModel screen, bool hideScreenBelow, TransitionContext context);
+
         UniTask Pop();
         UniTask Pop(TransitionContext context);
         bool CanPop { get; }

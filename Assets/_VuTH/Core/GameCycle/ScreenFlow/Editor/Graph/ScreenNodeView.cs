@@ -66,21 +66,20 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             RefreshExpandedState();
             RefreshPorts();
 
-            RegisterCallback<MouseDownEvent>(OnMouseDown);
+
             RegisterCallback<DragUpdatedEvent>(OnDragUpdated);
             RegisterCallback<DragPerformEvent>(OnDragPerform);
         }
 
-        private void OnMouseDown(MouseDownEvent evt)
+        // Uses the GraphView contextual-menu pipeline (instead of a GenericMenu on MouseDown, which swallowed the
+        // event and could show two menus).
+        public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
         {
-            if (evt.button != 1) return;
-
-            var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("Set as Start Node"), false, () => _onSetStartNode?.Invoke(Guid));
-            menu.AddItem(new GUIContent("Ping ScreenModel"), false, () => _onPingScreen?.Invoke(Guid));
-            menu.AddSeparator(string.Empty);
-            menu.AddItem(new GUIContent("Remove Node"), false, () => _onRemoveNode?.Invoke(Guid));
-            menu.ShowAsContext();
+            evt.menu.AppendAction("Set as Start Node", _ => _onSetStartNode?.Invoke(Guid));
+            evt.menu.AppendAction("Ping ScreenModel", _ => _onPingScreen?.Invoke(Guid),
+                _ => Screen ? DropdownMenuAction.Status.Normal : DropdownMenuAction.Status.Disabled);
+            evt.menu.AppendSeparator();
+            evt.menu.AppendAction("Remove Node", _ => _onRemoveNode?.Invoke(Guid));
             evt.StopPropagation();
         }
 

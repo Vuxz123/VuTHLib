@@ -47,6 +47,22 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
             AppendHistory(nextNode);
         }
 
+        /// <summary>
+        /// Node visited <paramref name="stepsBack"/> steps before the current one (1 = previous node).
+        /// <see cref="History"/> ends with the current node, so the previous one is at <c>Count - 2</c>.
+        /// </summary>
+        public bool TryGetPrevious(int stepsBack, out ScreenFlowNode node)
+        {
+            node = null;
+            if (stepsBack < 1) return false;
+
+            var index = _history.Count - 1 - stepsBack;
+            if (index < 0) return false;
+
+            node = _history[index];
+            return true;
+        }
+
         private void AppendHistory(ScreenFlowNode node)
         {
             if (_historyCapacity <= 0 || node == null) return;

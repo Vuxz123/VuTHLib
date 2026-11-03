@@ -30,11 +30,6 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         {
             builder.RegisterComponent(this).As<IScreenFlowManager>();
         }
-        
-        [Inject]
-        public void Construct()
-        {
-        }   
 #endif
         
         protected override void InitializeBootstrap()
@@ -54,7 +49,8 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
 
         protected override void DeinitializeBootstrap()
         {
-            _actor.Dispose();
+            _actor?.Dispose();
+            _actor = null;
         }
 
         private void SetupGraph()
@@ -70,8 +66,10 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
             }
             else
             {
-                this.LogError("Could not find ScreenFlowProfile asset. Creating a new ScreenFlowProfile asset.");
-                throw new Exception("Could not find ScreenFlowProfile asset.");
+                // Without a profile there is no graph to drive: fail bootstrap loudly.
+                throw new Exception(
+                    $"Could not find ScreenFlowProfile asset at Resources/{ScreenFlowConstants.ProfilePath}. " +
+                    "Create it from the ScreenFlow settings tab.");
             }
         }
 
@@ -92,14 +90,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         public bool TryGetPrevious(int stepsBack, out ScreenFlowNode node)
         {
             node = null;
-            if (stepsBack < 1) return false;
-
-            var history = _state.History;
-            var index = history.Count - stepsBack;
-            if (index < 0) return false;
-
-            node = history[index];
-            return true;
+            return _state != null && _state.TryGetPrevious(stepsBack, out node);
         }
 
         public ScreenFlowStateContainer State => _state;

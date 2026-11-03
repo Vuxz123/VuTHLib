@@ -100,8 +100,21 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Setting
                 text = "Open Graph"
             };
 
+            var generateEventsBtn = new Button(() =>
+            {
+                var currentGraph = graphField.value as ScreenFlowGraph;
+                if (currentGraph) Codegen.ScreenFlowEventsGenerator.Generate(currentGraph);
+            })
+            {
+                text = "Generate Event Constants",
+                tooltip = "Write " + Codegen.ScreenFlowEventsGenerator.OutputFolder + "/" +
+                          Codegen.ScreenFlowEventsGenerator.OutputFileName +
+                          " so code can call Trigger(ScreenFlowEvents.X) instead of a free string."
+            };
+
             buttonRow.Add(pingBtn);
             buttonRow.Add(openBtn);
+            buttonRow.Add(generateEventsBtn);
 
             section.Add(buttonRow);
             return section;

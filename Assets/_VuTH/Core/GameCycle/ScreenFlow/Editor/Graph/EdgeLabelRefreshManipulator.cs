@@ -11,6 +11,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph{
     {
         private readonly Action _refreshEdgeLabels;
         private bool _isDragging;
+        private IVisualElementScheduledItem _refreshJob;
 
         public EdgeLabelRefreshManipulator(Action refreshEdgeLabels)
         {
@@ -61,21 +62,24 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph{
             // Refresh immediately on drag start
             _refreshEdgeLabels?.Invoke();
 
-            // Schedule periodic refresh during drag
-            target.schedule.Execute(() =>
+            // One periodic job, created once and paused/resumed (previously every mouse-down added a new job that
+            // ran forever).
+            if (_refreshJob == null)
             {
-                if (_isDragging)
-                {
-                    _refreshEdgeLabels?.Invoke();
-                }
-            }).Every(16); // ~60fps
+                _refreshJob = target.schedule.Execute(() => _refreshEdgeLabels?.Invoke()).Every(16); // ~60fps
+            }
+            else
+            {
+                _refreshJob.Resume();
+            }
         }
 
         private void CancelRefresh()
         {
             if (!_isDragging) return;
             _isDragging = false;
-            target.schedule.Execute(() => { }).Until(() => !_isDragging);
+            _refreshJob?.Pause();
+            _refreshEdgeLabels?.Invoke(); // final position after the drag
         }
     }
 }

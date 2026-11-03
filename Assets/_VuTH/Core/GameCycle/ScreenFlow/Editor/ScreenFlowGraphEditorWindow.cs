@@ -10,13 +10,18 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
     public class ScreenFlowGraphEditorWindow : EditorWindow
     {
         private const float InspectorWidth = 320f;
+        private const string EmptyInspectorText = "Select a node or transition to edit.";
+
         private static readonly List<ScreenFlowGraphEditorWindow> OpenWindows = new();
 
-        private ScreenFlowGraph _graph;
+        // Serialized so the window keeps its graph across domain reloads (script recompiles).
+        [SerializeField] private ScreenFlowGraph _graph;
+
         private ScreenFlowGraphView _graphView;
         private VisualElement _inspectorRoot;
         private ObjectField _graphField;
         private UnityEditor.Editor _activeSelectionEditor;
+        private Object _activeSelectionProxy;
         private bool _refreshQueued;
 
         [MenuItem("VuTH/Core/Screen Flow/Screen Flow Graph Editor")]
@@ -51,6 +56,19 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
             {
                 OpenWindows.Add(this);
             }
+
+            Undo.undoRedoPerformed += OnUndoRedo;
+        }
+
+        private void OnDisable()
+        {
+            OpenWindows.Remove(this);
+            Undo.undoRedoPerformed -= OnUndoRedo;
+
+            _graphView?.Cleanup();
+            _graphView = null;
+
+            DestroyActiveSelection();
         }
 
         private void CreateGUI()
@@ -79,7 +97,9 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
                     paddingRight = 8,
                     paddingTop = 8,
                     paddingBottom = 8,
-                    backgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f),
+                    backgroundColor = EditorGUIUtility.isProSkin
+                        ? new Color(0.15f, 0.15f, 0.15f, 1f)
+                        : new Color(0.82f, 0.82f, 0.82f, 1f),
                 }
             };
             root.Add(_inspectorRoot);
@@ -92,31 +112,25 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
             };
             _graphField.RegisterValueChangedCallback(evt => SetGraph(evt.newValue as ScreenFlowGraph));
             _inspectorRoot.Add(_graphField);
-            _inspectorRoot.Add(new Label("Select a node or transition to edit."));
+            _inspectorRoot.Add(new Label(EmptyInspectorText));
 
             RefreshGraphView();
         }
 
         private void OnSelectionChange()
         {
-            if (Selection.activeObject is ScreenFlowGraph selected)
+            if (Selection.activeObject is ScreenFlowGraph selected && selected != _graph)
             {
                 SetGraph(selected);
             }
         }
 
-        private void OnDisable()
+        private void OnUndoRedo()
         {
-            OpenWindows.Remove(this);
-
-            _graphView?.Cleanup();
-            _graphView = null;
-
-            if (_activeSelectionEditor)
-            {
-                DestroyImmediate(_activeSelectionEditor);
-                _activeSelectionEditor = null;
-            }
+            // Undo/redo changes the graph asset behind the view's back: rebuild it and drop a possibly stale inspector.
+            if (!_graph) return;
+            ShowSelectionInspector(null);
+            QueueGraphRefresh();
         }
 
         internal void SetGraph(ScreenFlowGraph graph)
@@ -147,23 +161,30 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
 
         internal void ShowSelectionInspector(Object selection)
         {
-            if (_inspectorRoot == null) return;
+            if (_inspectorRoot == null)
+            {
+                // No UI yet: still own (and free) the proxy.
+                if (selection is ScreenNodeSelectionProxy or ScreenTransitionSelectionProxy) DestroyImmediate(selection);
+                return;
+            }
 
             while (_inspectorRoot.childCount > 1)
             {
                 _inspectorRoot.RemoveAt(1);
             }
 
-            if (_activeSelectionEditor)
-            {
-                DestroyImmediate(_activeSelectionEditor);
-                _activeSelectionEditor = null;
-            }
+            DestroyActiveSelection();
 
             if (!selection)
             {
-                _inspectorRoot.Add(new Label("Select a node or transition to edit."));
+                _inspectorRoot.Add(new Label(EmptyInspectorText));
                 return;
+            }
+
+            // Selection proxies are temporary HideAndDontSave objects owned by this window: freed on the next selection.
+            if (selection is ScreenNodeSelectionProxy or ScreenTransitionSelectionProxy)
+            {
+                _activeSelectionProxy = selection;
             }
 
             _activeSelectionEditor = UnityEditor.Editor.CreateEditor(selection);
@@ -179,6 +200,30 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor
         private void RefreshGraphView()
         {
             _graphView?.SetGraph(_graph);
+
+            // The node / transition shown in the inspector may have been deleted (or undone) meanwhile.
+            var stale = _activeSelectionProxy switch
+            {
+                ScreenNodeSelectionProxy node => !node.IsValid,
+                ScreenTransitionSelectionProxy transition => !transition.IsValid,
+                _ => false
+            };
+            if (stale) ShowSelectionInspector(null);
+        }
+
+        private void DestroyActiveSelection()
+        {
+            if (_activeSelectionEditor)
+            {
+                DestroyImmediate(_activeSelectionEditor);
+                _activeSelectionEditor = null;
+            }
+
+            if (_activeSelectionProxy)
+            {
+                DestroyImmediate(_activeSelectionProxy);
+                _activeSelectionProxy = null;
+            }
         }
     }
 }

@@ -19,6 +19,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
 
         private readonly Dictionary<string, ScreenFlowNode> _nodeByGuid = new(StringComparer.Ordinal);
         private readonly Dictionary<(string From, string Event), List<ScreenFlowTransition>> _transitionsByKey = new();
+        private readonly HashSet<string> _eventNames = new(StringComparer.Ordinal);
 
         public ScreenFlowGraphResolver(ScreenFlowGraph graph)
         {
@@ -45,6 +46,13 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
 
         public bool TryResolve(ScreenFlowNode currentNode, string eventName, out ScreenFlowNode nextNode)
         {
+            return TryResolveTransition(currentNode, eventName, out _, out nextNode);
+        }
+
+        public bool TryResolveTransition(ScreenFlowNode currentNode, string eventName,
+            out ScreenFlowTransition transition, out ScreenFlowNode nextNode)
+        {
+            transition = null;
             nextNode = null;
 
             if (currentNode == null) return false;
@@ -53,6 +61,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
             if (!_transitionsByKey.TryGetValue((currentNode.Guid, eventName), out var transitions) || transitions == null)
                 return false;
 
+            ScreenFlowTransition firstTransition = null;
             ScreenFlowNode firstMatch = null;
             bool multipleConditionsTrue = false;
 
@@ -67,6 +76,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                     if (!_nodeByGuid.TryGetValue(t.ToNodeGuid, out var toNode) || toNode == null)
                         return false;
                     firstMatch = toNode;
+                    firstTransition = t;
                 }
                 else
                 {
@@ -79,17 +89,20 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                 Debug.LogWarning($"[ScreenFlowGraphResolver] Multiple conditions evaluated to true for event '{eventName}' from node '{currentNode.Guid}'. First matching transition wins deterministically. This may indicate unintended graph configuration.");
             }
 
+            transition = firstTransition;
             nextNode = firstMatch;
             return firstMatch != null;
         }
 
+        public bool HasEvent(string eventName)
+        {
+            return !string.IsNullOrWhiteSpace(eventName) && _eventNames.Contains(eventName);
+        }
+
         private static bool Evaluate(TransitionCondition condition)
         {
-            if (!condition)
-            {
-                Debug.LogError($"[ScreenFlowGraphResolver] TransitionCondition is null. A null condition should not silently pass.");
-                return false;
-            }
+            // Contract (shared with ScreenFlowValidator and the graph editor): no condition = always true.
+            if (!condition) return true;
 
             try
             {
@@ -106,6 +119,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         {
             _nodeByGuid.Clear();
             _transitionsByKey.Clear();
+            _eventNames.Clear();
 
             if (!_graph) return;
 
@@ -136,6 +150,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
                     }
 
                     list.Add(t);
+                    _eventNames.Add(t.EventName);
                 }
 
                 DetectAmbiguousTransitions();

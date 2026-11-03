@@ -36,6 +36,10 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         [Header("Settings")]
         public bool showLoadingScreen = true;
 
+        [Tooltip("Khi Push màn này: ẩn (SetActive false root objects) màn ngay bên dưới cho tới khi Pop màn này. " +
+                 "Màn bên dưới không bị unload. Có thể ghi đè theo từng lần gọi Push(screen, hideScreenBelow, context).")]
+        public bool hideScreenBelow;
+
         [Tooltip("Nhạc nền sẽ phát khi vào màn hình này (Optional)")]
         public AudioClip backgroundMusic;
 

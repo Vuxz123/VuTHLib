@@ -131,6 +131,11 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                     nodeGuid: graph.StartNodeGuid));
             }
 
+            string NodeName(string guid) =>
+                guid != null && guidToNode.TryGetValue(guid, out var n) && n.Screen ? n.Screen.name : $"<{guid}>";
+            string Describe(ScreenFlowTransition tr) =>
+                $"'{NodeName(tr.FromNodeGuid)} --[{tr.EventName}]--> {NodeName(tr.ToNodeGuid)}'";
+
             // --- Transitions ---
             for (var i = 0; i < transitions.Count; i++)
             {
@@ -147,7 +152,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                 {
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Error,
-                        $"Transition at index {i} has empty FromNodeGuid",
+                        $"Transition {Describe(t)} has empty FromNodeGuid",
                         fromNodeGuid: t.FromNodeGuid,
                         toNodeGuid: t.ToNodeGuid,
                         eventName: t.EventName));
@@ -156,7 +161,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                 {
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Error,
-                        $"Transition at index {i} references missing FromNodeGuid '{t.FromNodeGuid}'",
+                        $"Transition {Describe(t)} references missing FromNodeGuid '{t.FromNodeGuid}'",
                         fromNodeGuid: t.FromNodeGuid,
                         toNodeGuid: t.ToNodeGuid,
                         eventName: t.EventName));
@@ -166,7 +171,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                 {
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Error,
-                        $"Transition at index {i} has empty ToNodeGuid",
+                        $"Transition {Describe(t)} has empty ToNodeGuid",
                         fromNodeGuid: t.FromNodeGuid,
                         toNodeGuid: t.ToNodeGuid,
                         eventName: t.EventName));
@@ -175,7 +180,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                 {
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Error,
-                        $"Transition at index {i} references missing ToNodeGuid '{t.ToNodeGuid}'",
+                        $"Transition {Describe(t)} references missing ToNodeGuid '{t.ToNodeGuid}'",
                         fromNodeGuid: t.FromNodeGuid,
                         toNodeGuid: t.ToNodeGuid,
                         eventName: t.EventName));
@@ -186,7 +191,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                 {
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Error,
-                        $"Transition at index {i} has empty EventName (blocking error)",
+                        $"Transition {Describe(t)} has empty EventName (blocking error)",
                         fromNodeGuid: t.FromNodeGuid,
                         toNodeGuid: t.ToNodeGuid,
                         eventName: t.EventName));
@@ -213,40 +218,100 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Validator
                     eventName: g.Key.Event));
             }
 
-            // --- Orphan nodes: nodes with no incoming or outgoing transitions ---
-            var nodesWithOutgoing = new HashSet<string>();
-            var nodesWithIncoming = new HashSet<string>();
+            // --- Event names ---
+            var eventNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var t in transitions)
+            {
+                if (t == null || string.IsNullOrWhiteSpace(t.EventName)) continue;
+                eventNames.Add(t.EventName);
+
+                if (t.EventName != t.EventName.Trim())
+                {
+                    issues.Add(new ScreenFlowValidationIssue(
+                        ScreenFlowValidationSeverity.Warning,
+                        $"Event name '{t.EventName}' has leading/trailing spaces; Trigger() matches names exactly.",
+                        fromNodeGuid: t.FromNodeGuid, toNodeGuid: t.ToNodeGuid, eventName: t.EventName));
+                }
+            }
+
+            // Different names that become the same generated constant (e.g. "open shop" / "open_shop").
+            foreach (var g in eventNames.GroupBy(Codegen.ScreenFlowEventsGenerator.ToIdentifier).Where(g => g.Count() > 1))
+            {
+                issues.Add(new ScreenFlowValidationIssue(
+                    ScreenFlowValidationSeverity.Warning,
+                    $"Events {string.Join(", ", g.Select(e => $"'{e}'"))} all map to ScreenFlowEvents.{g.Key}; " +
+                    "the generated constants get numeric suffixes. Consider unifying the names."));
+            }
+
+            // --- Navigation modes ---
+            var incomingModes = new Dictionary<string, HashSet<ScreenFlowNavigation>>(StringComparer.Ordinal);
+            foreach (var t in transitions)
+            {
+                if (t == null || string.IsNullOrWhiteSpace(t.ToNodeGuid)) continue;
+                if (!incomingModes.TryGetValue(t.ToNodeGuid, out var modes))
+                {
+                    modes = new HashSet<ScreenFlowNavigation>();
+                    incomingModes[t.ToNodeGuid] = modes;
+                }
+                modes.Add(t.Navigation);
+            }
 
             foreach (var t in transitions)
             {
-                if (t == null) continue;
-                if (!string.IsNullOrWhiteSpace(t.FromNodeGuid))
-                    nodesWithOutgoing.Add(t.FromNodeGuid);
-                if (!string.IsNullOrWhiteSpace(t.ToNodeGuid))
-                    nodesWithIncoming.Add(t.ToNodeGuid);
+                if (t == null || string.IsNullOrWhiteSpace(t.FromNodeGuid)) continue;
+
+                var required = t.Navigation switch
+                {
+                    ScreenFlowNavigation.Pop => ScreenFlowNavigation.Push,
+                    ScreenFlowNavigation.PopOverride => ScreenFlowNavigation.PushOverride,
+                    _ => (ScreenFlowNavigation?)null
+                };
+                if (required == null) continue;
+
+                var reachedBy = incomingModes.TryGetValue(t.FromNodeGuid, out var m) ? m : null;
+                if (reachedBy == null || !reachedBy.Contains(required.Value))
+                {
+                    issues.Add(new ScreenFlowValidationIssue(
+                        ScreenFlowValidationSeverity.Warning,
+                        $"Transition {Describe(t)} uses {t.Navigation}, but '{NodeName(t.FromNodeGuid)}' is never " +
+                        $"entered with {required}. At runtime it falls back to Enter.",
+                        fromNodeGuid: t.FromNodeGuid, toNodeGuid: t.ToNodeGuid, eventName: t.EventName));
+                }
             }
 
-            foreach (var node in nodes)
+            // --- Reachability from the start node (terminal nodes without outgoing transitions are fine) ---
+            if (!string.IsNullOrWhiteSpace(graph.StartNodeGuid) && guidToNode.ContainsKey(graph.StartNodeGuid))
             {
-                if (node == null || string.IsNullOrWhiteSpace(node.Guid)) continue;
-
-                bool hasOutgoing = nodesWithOutgoing.Contains(node.Guid);
-                bool hasIncoming = nodesWithIncoming.Contains(node.Guid);
-                bool isStartNode = node.Guid == graph.StartNodeGuid;
-
-                if (!hasOutgoing && !isStartNode)
+                var outgoing = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                foreach (var t in transitions)
                 {
-                    issues.Add(new ScreenFlowValidationIssue(
-                        ScreenFlowValidationSeverity.Warning,
-                        $"Orphan node '{node.Guid}' has no outgoing transitions and is not the start node.",
-                        nodeGuid: node.Guid));
+                    if (t == null || string.IsNullOrWhiteSpace(t.FromNodeGuid) || string.IsNullOrWhiteSpace(t.ToNodeGuid)) continue;
+                    if (!outgoing.TryGetValue(t.FromNodeGuid, out var list))
+                    {
+                        list = new List<string>();
+                        outgoing[t.FromNodeGuid] = list;
+                    }
+                    list.Add(t.ToNodeGuid);
                 }
 
-                if (!hasIncoming && !isStartNode)
+                var reachable = new HashSet<string>(StringComparer.Ordinal) { graph.StartNodeGuid };
+                var queue = new Queue<string>();
+                queue.Enqueue(graph.StartNodeGuid);
+                while (queue.Count > 0)
                 {
+                    if (!outgoing.TryGetValue(queue.Dequeue(), out var next)) continue;
+                    foreach (var guid in next)
+                    {
+                        if (reachable.Add(guid)) queue.Enqueue(guid);
+                    }
+                }
+
+                foreach (var node in guidToNode.Values)
+                {
+                    if (reachable.Contains(node.Guid)) continue;
                     issues.Add(new ScreenFlowValidationIssue(
                         ScreenFlowValidationSeverity.Warning,
-                        $"Unreachable node '{node.Guid}' has no incoming transitions and cannot be reached from start.",
+                        $"Node '{NodeName(node.Guid)}' cannot be reached from the start node.",
                         nodeGuid: node.Guid));
                 }
             }

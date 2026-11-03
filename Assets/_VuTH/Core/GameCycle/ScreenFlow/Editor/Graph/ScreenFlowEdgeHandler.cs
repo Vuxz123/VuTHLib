@@ -14,7 +14,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         private readonly Dictionary<ScreenFlowTransition, Edge> _edgeViewsByTransition = new();
         private readonly ScreenFlowGraphMutator _mutator;
         private readonly ScreenFlowGraph _graph;
-        private Action _onSelectionChanged;
+
 
         public ScreenFlowEdgeHandler(ScreenFlowGraph graph, ScreenFlowGraphMutator mutator)
         {
@@ -22,10 +22,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             _mutator = mutator;
         }
 
-        public void SetOnSelectionChanged(Action callback)
-        {
-            _onSelectionChanged = callback;
-        }
+
 
         public void ClearEdges()
         {
@@ -43,6 +40,16 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         public Edge GetEdgeForTransition(ScreenFlowTransition transition)
         {
             return _edgeViewsByTransition.GetValueOrDefault(transition);
+        }
+
+        public Edge GetEdgeForTransitionGuid(string transitionGuid)
+        {
+            if (string.IsNullOrEmpty(transitionGuid)) return null;
+            foreach (var pair in _edgeViewsByTransition)
+            {
+                if (pair.Key.Guid == transitionGuid) return pair.Value;
+            }
+            return null;
         }
 
         public void OnTransitionCreated(string fromNodeGuid, string toNodeGuid)
@@ -80,8 +87,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 
             var graphView = edge.GetFirstAncestorOfType<ScreenFlowGraphView>();
             graphView?.ClearSelection();
-            graphView?.AddToSelection(edge);
-            _onSelectionChanged?.Invoke();
+            graphView?.AddToSelection(edge); // AddToSelection already shows the inspector
             evt.StopPropagation();
         }
 

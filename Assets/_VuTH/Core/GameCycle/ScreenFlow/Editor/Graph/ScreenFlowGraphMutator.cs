@@ -11,7 +11,8 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         private Action _onGraphChanged;
 
         public string PendingSelectedNodeGuid { get; internal set; }
-        public ScreenFlowTransition PendingSelectedTransition { get; internal set; }
+        /// <summary>GUID (not object reference: list elements are re-created when the graph is re-serialized).</summary>
+        public string PendingSelectedTransitionGuid { get; internal set; }
 
         public ScreenFlowGraphMutator(ScreenFlowGraph graph, Action onGraphChanged)
         {
@@ -92,7 +93,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             EditorUtility.SetDirty(_graph);
 
             PendingSelectedNodeGuid = null;
-            PendingSelectedTransition = null;
+            PendingSelectedTransitionGuid = null;
             _onGraphChanged?.Invoke();
         }
 
@@ -121,19 +122,19 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
             transitionsProperty.arraySize++;
 
             var transitionProperty = transitionsProperty.GetArrayElementAtIndex(newIndex);
-            transitionProperty.FindPropertyRelative("guid").stringValue = Guid.NewGuid().ToString();
+            var newGuid = Guid.NewGuid().ToString();
+            transitionProperty.FindPropertyRelative("guid").stringValue = newGuid;
             transitionProperty.FindPropertyRelative("fromNodeGuid").stringValue = fromNodeGuid;
             transitionProperty.FindPropertyRelative("toNodeGuid").stringValue = toNodeGuid;
             transitionProperty.FindPropertyRelative("eventName").stringValue = string.Empty;
             transitionProperty.FindPropertyRelative("condition").objectReferenceValue = null;
+            transitionProperty.FindPropertyRelative("navigation").intValue = (int)ScreenFlowNavigation.Enter;
+            transitionProperty.FindPropertyRelative("screenBelow").intValue = (int)ScreenBelowVisibility.ScreenDefault;
 
             serializedGraph.ApplyModifiedProperties();
             EditorUtility.SetDirty(_graph);
 
-            if (newIndex >= 0 && newIndex < _graph.Transitions.Count)
-            {
-                PendingSelectedTransition = _graph.Transitions[newIndex];
-            }
+            PendingSelectedTransitionGuid = newGuid;
 
             _onGraphChanged?.Invoke();
         }
@@ -155,7 +156,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
                 transitionsProperty.DeleteArrayElementAtIndex(i);
                 serializedGraph.ApplyModifiedProperties();
                 EditorUtility.SetDirty(_graph);
-                PendingSelectedTransition = null;
+                PendingSelectedTransitionGuid = null;
                 _onGraphChanged?.Invoke();
                 return;
             }
@@ -202,7 +203,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
 
             serializedGraph.ApplyModifiedProperties();
             EditorUtility.SetDirty(_graph);
-            PendingSelectedTransition = null;
+            PendingSelectedTransitionGuid = null;
             _onGraphChanged?.Invoke();
             return true;
         }

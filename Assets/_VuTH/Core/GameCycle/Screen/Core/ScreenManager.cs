@@ -51,7 +51,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         [Tooltip("Optional. Assign a Component that also implements ILoadingController. Loading is NOT a Screen.")]
         [SerializeField] private Component loadingController;
 
-        private ILoadingController _loading;
+        private ILoadingController _loading = new NullLoadingController();
 
         // Base / stack / override / previous navigation state.
         private readonly ScreenNavigationState _nav = new();
@@ -124,9 +124,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             // Establish a stable baseline screen definition (not dependent on current Unity scene).
             // This prevents Enter() from having no 'from' reference on first transition.
-            if (_nav.Base == null && screenContainer.bootstrapScreen != null)
+            if (_nav.Base == null && screenContainer.BaselineScreen != null)
             {
-                _nav.Base = screenContainer.bootstrapScreen;
+                _nav.Base = screenContainer.BaselineScreen;
             }
         }
 
@@ -155,7 +155,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             SceneCache.ReleaseAll();
 
-            _loading = null;
+            _loading = new NullLoadingController();
             GlobalEventRegistration = null;
         }
 
@@ -188,29 +188,40 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             // Capture current effective before we reset stack.
             var from = _nav.EffectiveCurrent;
 
+            // Enter starts a NEW flow: snapshot everything that has to be closed (stack top-down + override),
+            // then reset navigation to [target].
+            var stackToClose = _nav.TakeAll();
+            _nav.Override = null;
+            _nav.Previous = from;
+            _nav.Base = target;
+            _nav.Push(target);
+
             try
             {
-                // Enter starts a NEW flow: clear override + clear stack.
-                _nav.Override = null;
+                // Old screens are closed INSIDE the transition: after PreExit has been raised (their listeners still
+                // exist) and after the loading UI is up (no empty frames between unload and loading screen).
+                // Shared additive scenes are kept via smart look-ahead on the target.
+                await TransitionWithLoadingInternal(from, target, showLoading: target.showLoadingScreen,
+                    closePrevious: async () =>
+                    {
+                        foreach (var screen in stackToClose)
+                        {
+                            await SceneCache.UnloadScreenAsync(screen, nextToShow: target);
+                        }
 
-                // Clear stack unloads all screens in current flow (top-down).
-                await ClearStackInternal();
-
-                // IMPORTANT: if there was a base current screen but it wasn't in stack (e.g. initial bootstrap baseline),
-                // we must close it too. Otherwise Enter() will keep old main scene loaded (additive) forever.
-                if (from && from != target)
-                {
-                    await SceneCache.UnloadScreenAsync(from, nextToShow: null);
-                }
-
-                _nav.Previous = from;
-
-                // Now set the new base + push it as the only stack item.
-                _nav.Base = target;
-                _nav.Push(target);
-
-                // Loading is a Transition UI concern (NOT a Screen).
-                await TransitionWithLoadingInternal(from, target, loadMainScene: true, showLoading: target.showLoadingScreen);
+                        // A baseline screen that was never pushed (e.g. bootstrap) or an active override.
+                        if (from && from != target && Array.IndexOf(stackToClose, from) < 0)
+                        {
+                            await SceneCache.UnloadScreenAsync(from, nextToShow: target);
+                        }
+                    });
+            }
+            catch (Exception e)
+            {
+                // Old screens may already be unloaded, so there is nothing consistent to roll back to:
+                // navigation stays on the target. Callers (e.g. ScreenFlowActor) get the exception.
+                this.LogError($"Enter({target.name}) failed: {e.Message}");
+                throw;
             }
             finally
             {
@@ -236,7 +247,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             await Push(target, TransitionContext.Default);
         }
 
-        public async UniTask Push(ScreenModel target, TransitionContext context)
+        public UniTask Push(ScreenModel target, TransitionContext context)
+        {
+            return Push(target, target && target.hideScreenBelow, context);
+        }
+
+        public async UniTask Push(ScreenModel target, bool hideScreenBelow, TransitionContext context)
         {
             if (!target)
             {
@@ -269,7 +285,14 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 _nav.Push(target);
                 _nav.Previous = from;
 
-                await TransitionToInternal(from, target, loadMainScene: true);
+                // Push never shows the loading UI and keeps the screen below loaded (stack semantics).
+                await TransitionWithLoadingInternal(from, target, showLoading: false);
+
+                // Hide only after the new screen is visible (no empty frame). Pop shows it again.
+                if (hideScreenBelow && from)
+                {
+                    SceneCache.HideScreen(from, keepVisibleFor: target);
+                }
             }
             catch
             {
@@ -374,17 +397,30 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             _isTransitioning = true;
             var prevOverride = _nav.Override;
+            var prevOverrideClosed = false;
             try
             {
                 _nav.Override = target;
                 _nav.Previous = from;
 
+                // Replacing an active override: close it, otherwise its scenes stay loaded forever
+                // (PopOverride only closes the current override).
+                Func<UniTask> closePrevious = null;
+                if (prevOverride)
+                {
+                    closePrevious = async () =>
+                    {
+                        await SceneCache.UnloadScreenAsync(prevOverride, nextToShow: target);
+                        prevOverrideClosed = true;
+                    };
+                }
+
                 // Override may show loading, but still controlled by ScreenManager.
-                await TransitionWithLoadingInternal(from, target, loadMainScene: true, showLoading: target.showLoadingScreen);
+                await TransitionWithLoadingInternal(from, target, showLoading: target.showLoadingScreen, closePrevious);
             }
             catch
             {
-                _nav.Override = prevOverride;
+                _nav.Override = prevOverrideClosed ? null : prevOverride;
                 throw;
             }
             finally
@@ -445,33 +481,23 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
         #endregion
 
-        #region Stack helpers
-
-        private async UniTask ClearStackInternal()
-        {
-            if (_nav.StackCount == 0) return;
-
-            // We'll unload everything from top to bottom.
-            var screens = _nav.TakeAll();
-
-            foreach (var t in screens)
-            {
-                // Since we're clearing flow entirely, there is no next screen to keep for smart look-ahead.
-                await SceneCache.UnloadScreenAsync(t, nextToShow: null);
-            }
-        }
-
-        #endregion
-
         #region Transition / loading orchestration
 
-        private async UniTask TransitionWithLoadingInternal(ScreenModel from, ScreenModel to, bool loadMainScene, bool showLoading)
+        /// <summary>
+        /// The single transition pipeline used by Enter / Push / PushOverride. Event order is always:
+        /// <c>PreExit(from) -> [close previous] -> PostExit(from) -> PreEnter(to) -> [load + show] -> PostEnter(to)</c>
+        /// (same order as Pop / PopOverride). With <paramref name="showLoading"/>, the loading UI is shown right after
+        /// PreExit - before anything is unloaded - and hidden at the end, even on failure.
+        /// </summary>
+        private async UniTask TransitionWithLoadingInternal(ScreenModel from, ScreenModel to, bool showLoading,
+            Func<UniTask> closePrevious = null)
         {
+            var args = new ScreenEventArgs(from, to);
+
             if (from)
             {
-                var exitArgs = new ScreenEventArgs(from, to);
-                EventDispatcher.NotifyGlobalPreExit(exitArgs);
-                EventDispatcher.NotifyLocalClosing(exitArgs);
+                EventDispatcher.NotifyGlobalPreExit(args);
+                EventDispatcher.NotifyLocalClosing(args);
             }
 
             if (showLoading)
@@ -482,24 +508,27 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             try
             {
-                // Pre-enter before any heavy work for the target.
-                if (to)
+                if (closePrevious != null)
                 {
-                    var enterArgs = new ScreenEventArgs(from, to);
-                    EventDispatcher.NotifyGlobalPreEnter(enterArgs);
+                    await closePrevious();
                 }
 
-                await LoadScreenInternal(to, loadMainScene, showLoading);
+                if (from)
+                {
+                    EventDispatcher.NotifyGlobalPostExit(args);
+                }
+
+                if (!to) return;
+
+                EventDispatcher.NotifyGlobalPreEnter(args);
+
+                await LoadScreenInternal(to, loadMainScene: true, showLoading);
                 if (showLoading) _loading.SetProgress(1f);
 
                 SceneCache.ShowScreen(to);
 
-                if (to)
-                {
-                    var enterArgs = new ScreenEventArgs(from, to);
-                    EventDispatcher.NotifyLocalOpening(enterArgs);
-                    EventDispatcher.NotifyGlobalPostEnter(enterArgs);
-                }
+                EventDispatcher.NotifyLocalOpening(args);
+                EventDispatcher.NotifyGlobalPostEnter(args);
             }
             finally
             {
@@ -507,35 +536,6 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 {
                     await _loading.Hide();
                 }
-            }
-
-            if (from)
-            {
-                var exitArgs = new ScreenEventArgs(from, to);
-                EventDispatcher.NotifyGlobalPostExit(exitArgs);
-            }
-        }
-
-        private async UniTask TransitionToInternal(ScreenModel from, ScreenModel to, bool loadMainScene)
-        {
-            if (from)
-            {
-                var exitArgs = new ScreenEventArgs(from, to);
-                EventDispatcher.NotifyGlobalPreExit(exitArgs);
-                EventDispatcher.NotifyLocalClosing(exitArgs);
-                EventDispatcher.NotifyGlobalPostExit(exitArgs);
-            }
-
-            if (to)
-            {
-                var enterArgs = new ScreenEventArgs(from, to);
-                EventDispatcher.NotifyGlobalPreEnter(enterArgs);
-
-                await LoadScreenInternal(to, loadMainScene, showLoading: false);
-                SceneCache.ShowScreen(to);
-
-                EventDispatcher.NotifyLocalOpening(enterArgs);
-                EventDispatcher.NotifyGlobalPostEnter(enterArgs);
             }
         }
 
@@ -610,21 +610,32 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
                 var handler = new LoadingHandler(progress, totalUnits, 0.5f);
 
-                // Run sequentially (safer for shared services)
-                foreach (var taskAsset in instancedPreloadTasks.AsValueEnumerable())
+                try
                 {
-                    try
+                    // Run sequentially (safer for shared services)
+                    foreach (var taskAsset in instancedPreloadTasks.AsValueEnumerable())
                     {
-                        await taskAsset.Execute(context, handler);
-                        taskAsset.Log("Execute completed successfully.");
-                    }
-                    catch (Exception e)
-                    {
-                        this.LogError($"Preloading task Execute failed on '{taskAsset.name}': {e}");
-                        Debug.LogException(e);
+                        try
+                        {
+                            await taskAsset.Execute(context, handler);
+                            taskAsset.Log("Execute completed successfully.");
+                        }
+                        catch (Exception e)
+                        {
+                            this.LogError($"Preloading task Execute failed on '{taskAsset.name}': {e}");
+                            Debug.LogException(e);
 
-                        // Prevent stuck loading bar by advancing at least 1 unit.
-                        handler.Increment();
+                            // Advance the bar; CompleteAsync below drives it to 100% regardless of unit counts.
+                            handler.Increment();
+                        }
+                    }
+                }
+                finally
+                {
+                    // Instances are per-load copies (tasks may keep per-run state) — don't leak one per transition.
+                    foreach (var taskAsset in instancedPreloadTasks)
+                    {
+                        if (taskAsset) Destroy(taskAsset);
                     }
                 }
             }

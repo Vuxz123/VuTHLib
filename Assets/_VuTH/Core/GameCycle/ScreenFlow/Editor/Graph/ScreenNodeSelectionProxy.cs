@@ -69,6 +69,20 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Editor.Graph
         }
 
         public string Guid => nodeGuid;
+
+        /// <summary>False once the node no longer exists in the graph (deleted, undone...).</summary>
+        internal bool IsValid
+        {
+            get
+            {
+                if (!graph || graph.Nodes == null) return false;
+                foreach (var n in graph.Nodes)
+                {
+                    if (n != null && n.Guid == nodeGuid) return true;
+                }
+                return false;
+            }
+        }
         public bool IsStartNode => graph != null && graph.StartNodeGuid == nodeGuid;
         public ScreenModel Screen => screen;
     }
