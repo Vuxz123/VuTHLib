@@ -2,57 +2,59 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 
 namespace _VuTH.Common.Editor.ScenePostprocessor
 {
-    public class ScenePostprocessor : AssetPostprocessor
+    /// <summary>
+    /// Runs every <see cref="ISceneImportTask"/> on a scene right BEFORE it is written to disk
+    /// (<see cref="EditorSceneManager.sceneSaving"/>), so whatever the tasks change is saved in that same save.
+    /// <para>
+    /// It used to run in <c>OnPostprocessAllAssets</c>, i.e. after the file was already written: the changes stayed in
+    /// memory until the next save and left the scene dirty after every save. Scenes that are not open in the editor are
+    /// not processed (their components cannot be inspected without opening them).
+    /// </para>
+    /// </summary>
+    [InitializeOnLoad]
+    public static class ScenePostprocessor
     {
-        // Cache danh sách các Task để không phải Reflection nhiều lần
+        // Cached once per domain: tasks are discovered through TypeCache.
         private static List<ISceneImportTask> _tasks;
 
-        private static void LoadTasks()
+        static ScenePostprocessor()
         {
-            if (_tasks != null) return;
-            
-            // Dùng Reflection tìm tất cả class implement IScreenImportTask
-            var types = TypeCache.GetTypesDerivedFrom<ISceneImportTask>()
-                .Where(t => !t.IsAbstract && !t.IsInterface)
-                .OrderBy(t => t.Name);
-
-            _tasks = new List<ISceneImportTask>();
-            foreach (var type in types)
-            {
-                _tasks.Add((ISceneImportTask)Activator.CreateInstance(type));
-            }
-            
-            // Sắp xếp theo Order
-            _tasks.Sort((a, b) => a.Order.CompareTo(b.Order));
+            EditorSceneManager.sceneSaving -= OnSceneSaving;
+            EditorSceneManager.sceneSaving += OnSceneSaving;
         }
 
-        // Hàm này được Unity gọi tự động mỗi khi có file thay đổi/thêm mới/xóa
-        static void OnPostprocessAllAssets(
-            string[] importedAssets, 
-            string[] deletedAssets, 
-            string[] movedAssets, 
-            string[] movedFromAssetPaths)
+        private static void OnSceneSaving(UnityEngine.SceneManagement.Scene scene, string path)
         {
-            // 1. Lọc ra các file Scene (.unity) vừa được import
-            var changedScenePaths = importedAssets.Where(p => p.EndsWith(".unity")).ToList();
-            
-            if (changedScenePaths.Count == 0) return;
-
-            LoadTasks();
-
-            // 2. Tìm tất cả ScreenModel trong project để đối chiếu
-            // (Cách này nhanh hơn LoadAllAssets)
-            
-            foreach (string scene in changedScenePaths)
+            foreach (var task in GetTasks())
             {
-                foreach (var task in _tasks)
-                {
-                    task.OnSceneImported(scene);
-                }
+                task.OnSceneSaving(scene, path);
             }
+        }
+
+        /// <summary>Runs all tasks for the open scene at <paramref name="scenePath"/> (also usable from tooling).</summary>
+        public static void RunTasks(string scenePath)
+        {
+            foreach (var task in GetTasks())
+            {
+                task.OnSceneImported(scenePath);
+            }
+        }
+
+        private static List<ISceneImportTask> GetTasks()
+        {
+            if (_tasks != null) return _tasks;
+
+            _tasks = TypeCache.GetTypesDerivedFrom<ISceneImportTask>()
+                .Where(t => !t.IsAbstract && !t.IsInterface && t.GetConstructor(Type.EmptyTypes) != null)
+                .Select(t => (ISceneImportTask)Activator.CreateInstance(t))
+                .OrderBy(t => t.Order)
+                .ThenBy(t => t.GetType().FullName, StringComparer.Ordinal)
+                .ToList();
+            return _tasks;
         }
     }
 }

@@ -6,7 +6,10 @@
         "UnityEditor.TestRunner",
         "VuTH.Common.Editor",
         "VuTH.Common.MessagePipe.Editor",
-        "VuTH.Common.MessagePipe"
+        "VuTH.Common.MessagePipe",
+        "VuTH.Common",
+        "UniTask",
+        "VuTH.Common.Tests.PlayMode"
     ],
     "includePlatforms": [
         "Editor"

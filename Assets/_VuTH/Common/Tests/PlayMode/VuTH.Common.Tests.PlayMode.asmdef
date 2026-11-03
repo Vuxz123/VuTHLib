@@ -6,7 +6,8 @@
         "VuTH.Common",
         "VuTH.Common.DI",
         "VuTH.Common.Log",
-        "VContainer"
+        "VContainer",
+        "UniTask"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
