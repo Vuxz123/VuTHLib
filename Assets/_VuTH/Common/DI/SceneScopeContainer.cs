@@ -43,7 +43,7 @@ namespace _VuTH.Common.DI
             base.Configure(builder);
 
             // Module installers (e.g. MessagePipe scene-scoped brokers), then the configurators.
-            ScopeInstallers.InstallScene(builder);
+            ScopeInstallers.InstallScene(builder, gameObject.scene);
 
             if (configurators == null) return;
 

@@ -82,12 +82,12 @@ Assemblies and namespaces were renamed:
 
 What is handled automatically:
 - `[SerializeReference]` data (encryptors, backends, serializers, migrators) — the classes carry `[MovedFrom]`.
-- Type names stored as strings (DataPackage profile, MessagePipe `EventScopeLookup`) — resolved through
-  `LegacyTypeResolver`, so old assets keep loading. Re-scanning events in the MessagePipe settings tab rewrites
-  `EventScopeLookup` with the new names.
+- Type names stored as strings (DataPackage profile) — resolved through `LegacyTypeResolver`, so old assets keep
+  loading.
 
 What you must do in a consuming project:
 - Update `using` directives and any `.asmdef` that references the old assembly names by **name**
   (GUID references keep working).
-- Re-generate `ScreenIds` / the MessagePipe registrar from their settings tabs.
+- Re-generate `ScreenIds` from its settings tab. Delete any generated `MessagePipeRegistrar.cs`: MessagePipe no longer
+  needs a bake step (see `Assets/VuTH_Docs/vuth-common-docs.md`, section 4).
 - The built-in screen asset and trigger were renamed `Boostrap` → `Bootstrap` (`BoostrapCompleted` → `BootstrapCompleted`).

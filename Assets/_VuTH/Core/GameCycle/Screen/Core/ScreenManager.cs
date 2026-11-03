@@ -558,29 +558,38 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             var stepSceneLoadingProgress = 0.5f / Mathf.Max(1, totalSteps);
             var currentProgress = 0f;
 
-            if (loadMainScene && screenMainSceneRef != null && screenMainSceneRef.RuntimeKeyIsValid())
+            // Scopes built while these scenes load belong to this screen (Screen-scoped MessagePipe events).
+            ScreenSceneMembership.Loading = screen;
+            try
             {
-                await SceneCache.LoadOrShowSceneAsync(screenMainSceneRef);
-                currentProgress += stepSceneLoadingProgress;
-                progress.Report(currentProgress);
-                mainScene = SceneCache.GetLoadedScene(screenMainSceneRef);
-            }
-
-            if (additiveSceneAddressableDatas != null)
-            {
-                foreach (var additive in additiveSceneAddressableDatas)
+                if (loadMainScene && screenMainSceneRef != null && screenMainSceneRef.RuntimeKeyIsValid())
                 {
-                    if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid())
-                        continue;
-
-                    await SceneCache.LoadOrShowSceneAsync(additive.sceneRef);
-
+                    await SceneCache.LoadOrShowSceneAsync(screenMainSceneRef);
                     currentProgress += stepSceneLoadingProgress;
                     progress.Report(currentProgress);
-
-                    var loaded = SceneCache.GetLoadedScene(additive.sceneRef);
-                    if (loaded.IsValid()) additiveScenes.Add(loaded);
+                    mainScene = SceneCache.GetLoadedScene(screenMainSceneRef);
                 }
+
+                if (additiveSceneAddressableDatas != null)
+                {
+                    foreach (var additive in additiveSceneAddressableDatas)
+                    {
+                        if (additive.sceneRef == null || !additive.sceneRef.RuntimeKeyIsValid())
+                            continue;
+
+                        await SceneCache.LoadOrShowSceneAsync(additive.sceneRef);
+
+                        currentProgress += stepSceneLoadingProgress;
+                        progress.Report(currentProgress);
+
+                        var loaded = SceneCache.GetLoadedScene(additive.sceneRef);
+                        if (loaded.IsValid()) additiveScenes.Add(loaded);
+                    }
+                }
+            }
+            finally
+            {
+                ScreenSceneMembership.Loading = null;
             }
 
             // 2) Run preloading tasks (new LoadingTask API: AggregateTask + LoadingContext + LoadingHandler)

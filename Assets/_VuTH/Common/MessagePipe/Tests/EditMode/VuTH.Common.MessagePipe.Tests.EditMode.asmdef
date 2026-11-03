@@ -1,0 +1,35 @@
+{
+    "name": "VuTH.Common.MessagePipe.Tests.EditMode",
+    "rootNamespace": "",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "VuTH.Common.MessagePipe",
+        "MessagePipe",
+        "MessagePipe.VContainer",
+        "VContainer",
+        "UniTask",
+        "VuTH.Common.MessagePipe.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [
+        {
+            "name": "jp.hadashikick.vcontainer",
+            "expression": "",
+            "define": "VCONTAINER"
+        }
+    ],
+    "noEngineReferences": false
+}

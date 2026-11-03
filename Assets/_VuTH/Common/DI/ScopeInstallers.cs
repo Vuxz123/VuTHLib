@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine.SceneManagement;
 using VContainer;
 
 namespace _VuTH.Common.DI
@@ -18,14 +19,15 @@ namespace _VuTH.Common.DI
     public static class ScopeInstallers
     {
         private static readonly Dictionary<string, Action<IContainerBuilder>> RootInstallers = new(StringComparer.Ordinal);
-        private static readonly Dictionary<string, Action<IContainerBuilder>> SceneInstallers = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, Action<IContainerBuilder, Scene>> SceneInstallers = new(StringComparer.Ordinal);
 
         public static void RegisterRoot(string key, Action<IContainerBuilder> install)
         {
             Register(RootInstallers, key, install);
         }
 
-        public static void RegisterScene(string key, Action<IContainerBuilder> install)
+        /// <summary>Scene installers receive the scope's OWN scene (not the active scene: screens load additively).</summary>
+        public static void RegisterScene(string key, Action<IContainerBuilder, Scene> install)
         {
             Register(SceneInstallers, key, install);
         }
@@ -40,9 +42,15 @@ namespace _VuTH.Common.DI
 
         internal static void InstallRoot(IContainerBuilder builder) => Install(RootInstallers, builder);
 
-        internal static void InstallScene(IContainerBuilder builder) => Install(SceneInstallers, builder);
+        internal static void InstallScene(IContainerBuilder builder, Scene scene)
+        {
+            foreach (var pair in SceneInstallers.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                pair.Value(builder, scene);
+            }
+        }
 
-        private static void Register(Dictionary<string, Action<IContainerBuilder>> map, string key, Action<IContainerBuilder> install)
+        private static void Register<T>(Dictionary<string, T> map, string key, T install) where T : Delegate
         {
             if (string.IsNullOrEmpty(key)) throw new ArgumentException("Installer key must not be empty.", nameof(key));
             map[key] = install ?? throw new ArgumentNullException(nameof(install));

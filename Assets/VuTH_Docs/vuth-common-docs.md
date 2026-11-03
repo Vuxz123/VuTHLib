@@ -229,107 +229,61 @@ DevLogExtensions (extension methods)
 ## 4. MessagePipe System
 
 ### Purpose
+Pub/sub messaging through Cysharp MessagePipe, wired into the VuTH DI scopes. Nothing to bake or generate:
+events are discovered at runtime.
 
-A pub/sub event system built on [MessagePipe](https://github.com/Cysharp/MessagePipe) with scope management (Global/Scene), automatic registration via source generators, and VContainer integration.
+### How it works
+- **Root scope** (`RootScopeContainer`): `RegisterMessagePipe(options)` with `MessagePipeOptionsConfig` applied.
+  With VContainer ≥ 1.14 MessagePipe registers *open-generic* brokers, so **any type** can be published/subscribed
+  globally — no attribute or registration needed.
+- **Scene scope** (`SceneScopeContainer`): every type marked `[MessagePipeEvent(EventScope.Scene)]` gets a broker
+  registered in that scope, so publishers and subscribers in one scene never see messages from another scene.
+  `[MessagePipeEvent(EventScope.Scene, "Arena")]` limits this to scopes living in the scene named `Arena`
+  (the scope's **own** scene — screens are loaded additively, the active scene is not used).
+- **Screen scope**: `[MessagePipeEvent(EventScope.Screen, ScreenIds.Names.Arena)]` binds the event to a *screen*
+  (ScreenIdentifier name) instead of a scene name: every scene scope belonging to that screen — main and additive
+  scenes — gets its own broker. Membership comes from the screen ScreenManager is loading when the scope is built,
+  and from `ScreenMetaData` on the scene's root objects (`ScreenSceneMembership`). Use the generated
+  `ScreenIds.Names.*` constants so a renamed screen is a compile error.
+- **Misuse guard**: resolving the publisher/subscriber of a Scene/Screen event from a scope that has no broker for it
+  would silently use the shared global broker. The root registers a guard that reports it — `Warn` (default, once per
+  event type), `Error` (throws) or `Ignore` — set in `MessagePipeOptionsConfig.scopedEventMisuse`.
+- **Validation**: the settings tab checks every scene name / screen id used in `[MessagePipeEvent]` against the scene
+  assets and ScreenIdentifier assets of the project (`MessagePipeTargetValidator`).
+- **Without VContainer**: `MessagePipeHelper.GetPublisher<T>() / GetSubscriber<T>()` use one `GlobalMessagePipe`
+  provider with a broker for every `[MessagePipeEvent]` type (no scene isolation).
 
 ### Key Classes
+- **`[MessagePipeEvent(scope, sceneName)]`** — marks a message type. Global marking is optional with VContainer
+  (it only lists the type in the settings tab and enables the non-VContainer fallback).
+- **`MessagePipeEventCatalog`** — runtime discovery (cached, scans only assemblies referencing
+  `VuTH.Common.MessagePipe`). `All`, `ForScene(sceneName)`, `Invalidate()`.
+- **`MessagePipeHelper`** — `RegisterGlobalEvents(builder)`, `RegisterSceneEvents(builder, scene)`,
+  `ApplyConfiguredOptions(options)`; non-VContainer `GetPublisher/GetSubscriber`.
+- **`MessagePipeScopeInstaller`** — plugs the two registrations into `ScopeInstallers` (Common.DI does not depend
+  on MessagePipe).
+- **`MessagePipeOptionsConfig`** (Resources/MessagePipe/MessagePipeOptionsConfig) — `enableCaptureStackTrace`.
+- **Settings tab "MessagePipe"** — options + read-only list of discovered events grouped by scope / scene.
 
-#### Attributes
+### Usage
+```csharp
+[MessagePipeEvent]                              // global (marking optional)
+public sealed class CoinsChanged { public int Value; }
 
-**`[MessagePipeEvent]`** (`EventScope scope, string sceneName, bool registerAsyncBroker`)
-- Marks a class/struct as a MessagePipe event
-- `Scope`: `EventScope.Global` (anywhere) or `EventScope.Scene` (specific scene)
-- `SceneName`: Required for Scene-scoped events
-- `RegisterAsyncBroker`: Whether to also register async version
+[MessagePipeEvent(EventScope.Scene)]            // one isolated broker per scene scope
+public sealed class EnemyKilled { }
 
-**`[VuTHMessagePipeEventAssembly]`** (Assembly-level Attribute)
-- Marks an assembly to be scanned for events (alternative to whitelist)
-
-#### Configuration
-
-**`MessagePipeAssemblyWhitelist`** (ScriptableObject)
-- Configurable list of assembly names to scan
-- Default: `["VuTH.Gameplay", "VuTH.Core", "VuTH.Common"]`
-- Uses HashSet cache for O(1) lookup
-
-**`MessagePipeOptionsConfig`** (ScriptableObject)
-- Runtime configuration for MessagePipe behavior
-- `enableCaptureStackTrace`: Debug stack traces
-- `preserveRegistrar`: Prevent code stripping
-
-**`MessagePipeConstants`**
-- Asset path constants for Resources folder
-
-#### Core
-
-**`EventScopeEntry`** (Serializable)
-- Stores: `typeFullName`, `scope`, `sceneName`, `registerAsyncBroker`
-
-**`EventScopeLookup`** (ScriptableObject)
-- Baked lookup asset with event metadata
-- Version, checksum, bakedAt timestamp
-- Runtime cache for fast type lookup
-- Methods: `GetScope(Type)`, `GetEntriesByScope(EventScope)`, `GetEntriesByScopeAndScene(EventScope, string)`
-
-#### Editor
-
-**`EventScanner`**
-- Scans whitelisted assemblies for `[MessagePipeEvent]` attributes
-- Uses `AppDomain.CurrentDomain.GetAssemblies()`
-- Validates Scene-scoped events have non-empty `sceneName`
-
-**`MessagePipeEventBaker`** (Menu: VuTH/MessagePipe/Bake Event Scope Lookup)
-- Bakes events to `EventScopeLookup` asset
-- Generates optimized `MessagePipeRegistrar.cs`
-- Validate Bake (checks if stale)
-- Clear Baked
-
-**`RegistrarGenerator`**
-- Generates `Core.Generated.MessagePipeRegistrar.cs`
-- Provides zero-reflection runtime registration
-
-#### Integration
-
-**`MessagePipeHelper`**
-- Runtime helper for event registration
-- `GetConfiguredOptions()` - Load config asset
-- `RegisterGlobalEvents(IContainerBuilder)` - For RootScopeContainer
-- `RegisterSceneEvents(IContainerBuilder)` - For SceneScopeContainer
-- Falls back to reflection-based lookup if generated registrar not available
-- Non-VContainer support via `InitializeGlobalBroker()`
-
-### How They Interact
-
-```
-[MessagePipeEvent] (on event class)
-    │
-    ▼
-EventScanner.ScanAssembliesForEvents() (Editor-time)
-    │
-    ▼
-MessagePipeEventBaker.Bake() → EventScopeLookup.asset
-    │
-    ▼
-RegistrarGenerator → MessagePipeRegistrar.cs (optimized)
-
-Runtime:
-MessagePipeHelper
-    │
-    ├── RootScopeContainer → RegisterGlobalEvents()
-    │       └── Uses MessagePipeRegistrar.RegisterGlobal() or fallback
-    │
-    └── SceneScopeContainer → RegisterSceneEvents()
-            └── Uses MessagePipeRegistrar.RegisterScene() or fallback
+public sealed class Hud
+{
+    [Inject] public void Construct(ISubscriber<CoinsChanged> coins) => coins.Subscribe(c => Show(c.Value));
+}
 ```
 
-### Patterns Used
+### Migrating from the bake pipeline
+The whitelist, `EventScopeLookup` asset, bake/validate menu and generated `MessagePipeRegistrar.cs` were removed.
+Delete any leftover `MessagePipeRegistrar.cs` in your project. `[assembly: VuTHMessagePipeEventAssembly]` is obsolete
+(no longer needed) and can be removed. `registerAsyncBroker` has no effect: async brokers are always registered.
 
-- **Baked Lookup**: Serialize event metadata to ScriptableObject
-- **Source Generation Alternative**: Generated code for zero-reflection performance
-- **Scope Hierarchy**: Global vs Scene-scoped events
-- **VContainer Integration**: Registers brokers directly in DI container
-
----
 
 ## 5. Scene Utilities
 

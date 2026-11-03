@@ -37,10 +37,10 @@ namespace _VuTH.Common.Tests.EditMode
         {
             var first = 0;
             var second = 0;
-            ScopeInstallers.RegisterScene(KeyA, _ => first++);
-            ScopeInstallers.RegisterScene(KeyA, _ => second++); // e.g. Enter Play Mode without domain reload
+            ScopeInstallers.RegisterScene(KeyA, (_, _) => first++);
+            ScopeInstallers.RegisterScene(KeyA, (_, _) => second++); // e.g. Enter Play Mode without domain reload
 
-            ScopeInstallers.InstallScene(new ContainerBuilder());
+            ScopeInstallers.InstallScene(new ContainerBuilder(), default);
 
             Assert.AreEqual(0, first, "the replaced installer must not run");
             Assert.AreEqual(1, second, "the latest installer runs exactly once");

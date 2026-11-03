@@ -280,7 +280,7 @@ namespace _VuTH.Core.GameCycle.Screen.Editor.Identifier
             sb.AppendLine("// </auto-generated>");
             sb.AppendLine("// ------------------------------------------------------------------------------");
             sb.AppendLine("");
-            sb.AppendLine("using Core.GameCycle.Screen;");
+            sb.AppendLine("using _VuTH.Core.GameCycle.Screen.Identifier;");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine("");
             sb.AppendLine("namespace Core.Generated"); // Namespace bạn muốn
@@ -312,6 +312,19 @@ namespace _VuTH.Core.GameCycle.Screen.Editor.Identifier
                     sb.AppendLine($"        // Warning: '{id.name}' is not in a 'Resources' folder. Cannot generate runtime static accessor.");
                 }
             }
+
+            // Compile-time constants of the ScreenIdentifier names, usable in attributes, e.g.
+            // [MessagePipeEvent(EventScope.Screen, ScreenIds.Names.Home)].
+            sb.AppendLine("        /// <summary>ScreenIdentifier names as constants (usable in attributes).</summary>");
+            sb.AppendLine("        public static class Names");
+            sb.AppendLine("        {");
+            foreach (var id in _allIds)
+            {
+                if (!id) continue;
+                var constName = id.name.Replace("ID_", "").Replace(" ", "_");
+                sb.AppendLine($"            public const string {constName} = \"{id.name}\";");
+            }
+            sb.AppendLine("        }");
 
             sb.AppendLine("    }");
             sb.AppendLine("}");

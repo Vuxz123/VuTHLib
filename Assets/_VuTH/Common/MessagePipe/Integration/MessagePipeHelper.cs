@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Reflection;
 using _VuTH.Common.Log;
-using _VuTH.Common.MessagePipe.Attributes;
 using _VuTH.Common.MessagePipe.Configuration;
 using _VuTH.Common.MessagePipe.Core;
 using MessagePipe;
@@ -10,345 +9,232 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 #if VCONTAINER
 using VContainer;
-using ContainerBuilderExtensions = MessagePipe.ContainerBuilderExtensions;
 #endif
 
 // ReSharper disable once CheckNamespace
 namespace _VuTH.Common.MessagePipe
 {
     /// <summary>
-    /// Helper class for MessagePipe registration and access.
-    /// Handles both VContainer DI and global fallback modes.
-    /// Uses generated MessagePipeRegistrar for optimized registration when available.
+    /// MessagePipe wiring for VuTH scopes.
+    /// <list type="bullet">
+    /// <item><b>Root scope</b>: <c>RegisterMessagePipe(options)</c> with <see cref="MessagePipeOptionsConfig"/> applied.
+    /// Brokers for every message type come from MessagePipe's open-generic registration (VContainer ≥ 1.14), so any
+    /// type works as a global event — no attribute, bake or registration needed.</item>
+    /// <item><b>Scene scope</b>: a scene-local broker for each <c>[MessagePipeEvent(EventScope.Scene)]</c> type that
+    /// applies to the scope's OWN scene (not the active scene: screens are loaded additively). Publishers and
+    /// subscribers in that scene are isolated from other scenes.</item>
+    /// <item><b>Without VContainer</b>: one global <see cref="GlobalMessagePipe"/> provider with a broker for every
+    /// attributed type (the builtin container has no open generics; scenes are not isolated).</item>
+    /// </list>
     /// </summary>
     public static class MessagePipeHelper
     {
-        private static EventScopeLookup _lookup;
-        private static bool _lookupLoaded;
+        private static MessagePipeOptionsConfig _config;
+        private static bool _configLoaded;
 
-        // Cached reflection to generated registrar (Core.Generated.MessagePipeRegistrar)
-        private static readonly MethodInfo RegisterGlobalMethod;
-        private static readonly MethodInfo RegisterSceneMethod;
-        private static bool _registrarChecked;
-
-#if VCONTAINER
-        // Cached reflection method for VContainer registration (fallback)
-        private static MethodInfo _registerBrokerMethod;
-#else
-        // Global broker instance for non-VContainer builds
-        private static IServiceProvider _globalProvider;
-        private static bool _globalInitialized;
-
-        // Cached reflection method for BuiltinContainerBuilder (fallback)
-        private static MethodInfo _addBrokerMethod;
-
-        // Cached reflection to generated registrar for non-VContainer
-        private static MethodInfo _registrarBuiltinMethod;
-#endif
-
-        /// <summary>
-        /// Get configured MessagePipeOptions based on the config asset.
-        /// Uses reflection to safely apply options even if the property doesn't exist in this Unity version.
-        /// Returns a new MessagePipeOptions instance with configured settings (never null).
-        /// </summary>
-        public static MessagePipeOptions GetConfiguredOptions()
+        /// <summary>Applies <paramref name="config"/> (or the Resources config when null) to <paramref name="options"/>.</summary>
+        public static MessagePipeOptions ApplyConfiguredOptions(MessagePipeOptions options, MessagePipeOptionsConfig config = null)
         {
-            // Load config from Resources
-            var config = Resources.Load<MessagePipeOptionsConfig>(MessagePipeConstants.OptionsConfigPath);
-            
-            // Create default options
-            var options = new MessagePipeOptions();
-            
-            // If no config found, return defaults
-            if (!config)
+            if (options == null) throw new ArgumentNullException(nameof(options));
+
+            config ??= LoadConfig();
+            if (config != null)
             {
-                return options;
+                options.EnableCaptureStackTrace = config.enableCaptureStackTrace;
             }
-            
-            // Use reflection to safely apply options
-            // This avoids compile errors if the property doesn't exist in the MessagePipe version
-            try
-            {
-                // Try to set EnableCaptureStackTrace if it exists
-                var enableCaptureStackTraceProperty = typeof(MessagePipeOptions).GetProperty("EnableCaptureStackTrace",
-                    BindingFlags.Public | BindingFlags.Instance);
-                
-                if (enableCaptureStackTraceProperty != null && enableCaptureStackTraceProperty.PropertyType == typeof(bool))
-                {
-                    enableCaptureStackTraceProperty.SetValue(options, config.enableCaptureStackTrace);
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log warning but don't fail - options will use defaults
-                typeof(MessagePipeHelper).LogWarning($"Failed to apply MessagePipeOptions config: {ex.Message}");
-            }
-            
+
             return options;
         }
 
-        static MessagePipeHelper()
+        private static MessagePipeOptionsConfig LoadConfig()
         {
-            var registrarType =
-                // Try to load the generated registrar via reflection
-                // This is done once at static initialization to avoid per-call overhead
-                Type.GetType("Core.Generated.MessagePipeRegistrar, Assembly-CSharp", false, false);
-
-            if (registrarType != null)
+            if (!_configLoaded)
             {
-#if VCONTAINER
-                RegisterGlobalMethod = registrarType.GetMethod("RegisterGlobal", BindingFlags.Public | BindingFlags.Static,
-                    null, new[] { typeof(IContainerBuilder) }, null);
-                RegisterSceneMethod = registrarType.GetMethod("RegisterScene", BindingFlags.Public | BindingFlags.Static,
-                    null, new[] { typeof(IContainerBuilder), typeof(string) }, null);
-#else
-                RegisterGlobalMethod = RegistrarType.GetMethod("RegisterGlobal", BindingFlags.Public | BindingFlags.Static,
-                    null, new[] { typeof(BuiltinContainerBuilder) }, null);
-#endif
+                _config = Resources.Load<MessagePipeOptionsConfig>(MessagePipeConstants.OptionsConfigPath);
+                _configLoaded = true;
             }
+
+            return _config;
         }
 
-        /// <summary>
-        /// Get the baked EventScopeLookup asset.
-        /// </summary>
-        public static EventScopeLookup Lookup
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
         {
-            get
-            {
-                if (!_lookupLoaded)
-                {
-                    _lookup = Resources.Load<EventScopeLookup>(MessagePipeConstants.EventScopeLookupPath);
-                    _lookupLoaded = true;
-
-                    if (_lookup == null)
-                    {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-                        throw new InvalidOperationException(
-                            $"EventScopeLookup not found at Resources/{MessagePipeConstants.EventScopeLookupPath}. " +
-                            "Run VuTH/MessagePipe/Bake Event Scope Lookup in Editor.");
-#else
-                        typeof(MessagePipeHelper).LogWarning(
-                            $"EventScopeLookup not found at Resources/{MessagePipeConstants.EventScopeLookupPath}. " +
-                            "Run VuTH/MessagePipe/Bake Event Scope Lookup in Editor.");
+            _config = null;
+            _configLoaded = false;
+#if !VCONTAINER
+            _globalInitialized = false;
 #endif
-                    }
-                }
-                return _lookup;
-            }
         }
 
 #if VCONTAINER
+        private static MethodInfo _registerBrokerMethod;
+        private static MethodInfo _registerGuardMethod;
+
         /// <summary>
-        /// Register all global-scoped MessagePipe events to the container builder.
-        /// Call this from RootScopeContainer.
-        /// Also registers MessagePipe core services (only once here).
-        /// Uses generated MessagePipeRegistrar for optimized registration when available.
+        /// Root scope: MessagePipe core services + open-generic brokers for every message type. Scene/Screen events get
+        /// a guard instead (see <see cref="ScopedEventMisuse"/>): the root owns no broker for them, so resolving them
+        /// anywhere outside their scopes is reported.
         /// </summary>
         public static void RegisterGlobalEvents(IContainerBuilder builder)
         {
+            var config = LoadConfig();
+            RegisterGlobalEvents(builder, config != null ? config.scopedEventMisuse : ScopedEventMisuse.Warn);
+        }
+
+        internal static void RegisterGlobalEvents(IContainerBuilder builder, ScopedEventMisuse mode)
+        {
             if (builder == null) throw new ArgumentNullException(nameof(builder));
+            builder.RegisterMessagePipe(options => ApplyConfiguredOptions(options));
 
-            // Try to use generated registrar first (zero runtime reflection overhead)
-            var callsite = typeof(MessagePipeHelper);
-            if (RegisterGlobalMethod != null)
+            if (mode == ScopedEventMisuse.Ignore) return;
+
+            foreach (var info in MessagePipeEventCatalog.All.Where(e => e.IsScoped))
             {
-                RegisterGlobalMethod.Invoke(null, new object[] { builder });
-                callsite.Log("Registered global events via generated MessagePipeRegistrar.");
-                return;
+                RegisterGuard(builder, info, mode);
             }
+        }
 
-            // Fallback: use lookup-based registration with reflection
-            var lookup = Lookup;
-
-            // Register MessagePipe core services ONCE at root scope
-            builder.RegisterMessagePipe();
-
-            if (!lookup)
-            {
-                callsite.LogWarning("No EventScopeLookup found. Skipping global event registration.");
-                return;
-            }
-
-            // Register global-scoped event brokers
-            foreach (var entry in lookup.GetEntriesByScope(EventScope.Global))
-            {
-                var type = EventScopeLookup.ResolveType(entry);
-                if (type == null)
-                {
-                    callsite.LogWarning($"Failed to resolve type: {entry.typeFullName}");
-                    continue;
-                }
-
-                RegisterMessageBroker(builder, type);
-            }
-
-            callsite.LogWarning("Using fallback lookup-based registration. " +
-                             "Consider running VuTH/MessagePipe/Bake Event Scope Lookup to generate MessagePipeRegistrar for optimized performance.");
+        /// <summary>Scene scope: isolated brokers for the Scene/Screen events owned by <paramref name="scene"/>.</summary>
+        public static void RegisterSceneEvents(IContainerBuilder builder, Scene scene)
+        {
+            RegisterSceneEvents(builder, scene.name, MessagePipeScopeContext.ResolveScreens(scene));
         }
 
         /// <summary>
-        /// Register all scene-scoped MessagePipe events to the container builder.
-        /// Call this from SceneScopeContainer.
-        /// NOTE: Does NOT call RegisterMessagePipe() - core services are inherited from parent scope.
-        /// Uses generated MessagePipeRegistrar for optimized registration when available.
+        /// Registers a scope-local broker for every Scene event matching <paramref name="sceneName"/> and every Screen
+        /// event matching one of <paramref name="screenIds"/>. Returns how many were registered.
         /// </summary>
-        public static void RegisterSceneEvents(IContainerBuilder builder)
+        public static int RegisterSceneEvents(IContainerBuilder builder, string sceneName,
+            System.Collections.Generic.IReadOnlyCollection<string> screenIds = null)
         {
             if (builder == null) throw new ArgumentNullException(nameof(builder));
 
-            // Get active scene name
-            var activeScene = SceneManager.GetActiveScene();
-            var activeSceneName = activeScene.name;
-
-            // Try to use generated registrar first (zero runtime reflection overhead)
-            if (RegisterSceneMethod != null)
+            screenIds ??= Array.Empty<string>();
+            var options = ApplyConfiguredOptions(new MessagePipeOptions());
+            var count = 0;
+            foreach (var info in MessagePipeEventCatalog.ForScope(sceneName, screenIds))
             {
-                RegisterSceneMethod.Invoke(null, new object[] { builder, activeSceneName });
-                typeof(MessagePipeHelper).Log($"Registered scene events for \"{activeSceneName}\" via generated MessagePipeRegistrar.");
-                return;
-            }
-
-            // Fallback: use lookup-based registration with reflection
-            var lookup = Lookup;
-            if (lookup == null)
-            {
-                typeof(MessagePipeHelper).LogWarning("No EventScopeLookup found. Skipping scene event registration.");
-                return;
-            }
-
-            // NOTE: Do NOT call builder.RegisterMessagePipe() here!
-            // Core services are already registered in RootScopeContainer and inherited via parent scope.
-            // Only register scene-scoped event brokers here.
-
-            var registeredCount = 0;
-            foreach (var entry in lookup.GetEntriesByScope(EventScope.Scene))
-            {
-                // Validate SceneName
-                if (string.IsNullOrEmpty(entry.sceneName))
-                {
-                    typeof(MessagePipeHelper).LogWarning(
-                        $"Skipping scene-scoped event {entry.typeFullName}: SceneName is empty. " +
-                        "Please specify a SceneName in the [MessagePipeEvent] attribute, e.g., [MessagePipeEvent(EventScope.Scene, \"MyScene\")].");
-                    continue;
-                }
-
-                if (!string.Equals(entry.sceneName, activeSceneName, StringComparison.Ordinal))
-                {
-                    typeof(MessagePipeHelper).LogWarning(
-                        $"Skipping scene-scoped event {entry.typeFullName}: SceneName \"{entry.sceneName}\" does not match active scene \"{activeSceneName}\".");
-                    continue;
-                }
-
-                var type = EventScopeLookup.ResolveType(entry);
-                if (type == null)
-                {
-                    typeof(MessagePipeHelper).LogWarning($"Failed to resolve type: {entry.typeFullName}");
-                    continue;
-                }
-
-                RegisterMessageBroker(builder, type);
-                registeredCount++;
-            }
-
-            typeof(MessagePipeHelper).Log($"Registered {registeredCount} scene MessagePipe event(s) for scene \"{activeSceneName}\".");
-            typeof(MessagePipeHelper).LogWarning("Using fallback lookup-based registration. " +
-                "Consider running VuTH/MessagePipe/Bake Event Scope Lookup to generate MessagePipeRegistrar for optimized performance.");
-        }
-
-        private static void RegisterMessageBroker(IContainerBuilder builder, Type eventType)
-        {
-            // Cache MethodInfo once (lazy init)
-            _registerBrokerMethod ??= typeof(ContainerBuilderExtensions)
-                .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .First(m =>
-                    m.Name == "RegisterMessageBroker" &&
-                    m.IsGenericMethodDefinition &&
-                    m.GetParameters().Length == 1 &&
-                    m.GetParameters()[0].ParameterType == typeof(IContainerBuilder));
-
-            _registerBrokerMethod
-                .MakeGenericMethod(eventType)
-                .Invoke(null, new object[] { builder });
-        }
-
-        private static int CountEntries(EventScopeLookup lookup, EventScope scope)
-        {
-            int count = 0;
-            foreach (var _ in lookup.GetEntriesByScope(scope))
+                RegisterBroker(builder, info.Type, options);
                 count++;
+            }
+
+            if (count > 0)
+            {
+                var screens = screenIds.Count > 0 ? $" (screens: {string.Join(", ", screenIds)})" : string.Empty;
+                typeof(MessagePipeHelper).Log($"Registered {count} scoped MessagePipe broker(s) for scene \"{sceneName}\"{screens}.");
+            }
+
             return count;
         }
-#else
-        /// <summary>
-        /// Initialize global MessagePipe broker for non-VContainer builds.
-        /// Call this once at startup (e.g., from BootstrapManagerCentral).
-        /// </summary>
-        public static void InitializeGlobalBroker()
+
+        private static void RegisterBroker(IContainerBuilder builder, Type eventType, MessagePipeOptions options)
         {
-            if (_globalInitialized)
-                return;
+            _registerBrokerMethod ??= typeof(global::MessagePipe.ContainerBuilderExtensions)
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .First(m =>
+                    m.Name == nameof(global::MessagePipe.ContainerBuilderExtensions.RegisterMessageBroker) &&
+                    m.IsGenericMethodDefinition &&
+                    m.GetGenericArguments().Length == 1 &&
+                    m.GetParameters().Length == 2 &&
+                    m.GetParameters()[1].ParameterType == typeof(MessagePipeOptions));
 
-            var builder = new BuiltinContainerBuilder();
-            builder.AddMessagePipe();
+            _registerBrokerMethod.MakeGenericMethod(eventType).Invoke(null, new object[] { builder, options });
+        }
 
-            var lookup = Lookup;
-            if (lookup != null)
-            {
-                // Cache MethodInfo once (lazy init)
-                _addBrokerMethod ??= typeof(BuiltinContainerBuilder)
-                    .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .First(m =>
-                        m.Name == "AddMessageBroker" &&
-                        m.IsGenericMethodDefinition &&
-                        m.GetParameters().Length == 0);
-
-                // Register ALL events as global (no scene scope without VContainer)
-                foreach (var entry in lookup.Entries)
-                {
-                    var type = EventScopeLookup.ResolveType(entry);
-                    if (type == null)
-                    {
-                        typeof(MessagePipeHelper).LogWarning($"Failed to resolve type: {entry.typeFullName}");
-                        continue;
-                    }
-
-                    _addBrokerMethod
-                        .MakeGenericMethod(type)
-                        .Invoke(builder, null);
-                }
-            }
-
-            _globalProvider = builder.BuildServiceProvider();
-            GlobalMessagePipe.SetProvider(_globalProvider);
-            _globalInitialized = true;
-
-            typeof(MessagePipeHelper).Log($"Initialized global MessagePipe broker (non-VContainer mode). {lookup?.Entries.Count ?? 0} event(s) registered.");
+        private static void RegisterGuard(IContainerBuilder builder, MessagePipeEventInfo info, ScopedEventMisuse mode)
+        {
+            _registerGuardMethod ??= typeof(MessagePipeHelper).GetMethod(nameof(RegisterGuardGeneric),
+                BindingFlags.NonPublic | BindingFlags.Static);
+            _registerGuardMethod!.MakeGenericMethod(info.Type).Invoke(null, new object[] { builder, info, mode });
         }
 
         /// <summary>
-        /// Get a publisher for the specified event type (non-VContainer mode).
+        /// Closed registrations that shadow the open-generic ones at the root: they report the misuse, then hand out a
+        /// broker on the shared global core — exactly what the fallback used to do silently.
         /// </summary>
+        private static void RegisterGuardGeneric<T>(IContainerBuilder builder, MessagePipeEventInfo info, ScopedEventMisuse mode)
+        {
+            var reported = false;
+
+            void Report(string contract)
+            {
+                var where = info.Scope == Attributes.EventScope.Screen
+                    ? $"screen \"{info.ScreenId}\""
+                    : info.SceneName.Length > 0 ? $"scene \"{info.SceneName}\"" : "a scene scope";
+                var message = $"{contract}<{typeof(T).Name}> was resolved outside its owning scope: {typeof(T).Name} is " +
+                              $"[MessagePipeEvent({info.Scope})] and only {where} has its own broker. Using the shared global " +
+                              "broker instead, so messages are NOT isolated. Resolve it from a scope in that scene/screen.";
+                if (mode == ScopedEventMisuse.Error) throw new InvalidOperationException(message);
+                if (reported) return;
+                reported = true;
+                typeof(MessagePipeHelper).LogWarning(message);
+            }
+
+            builder.Register<IPublisher<T>>(r =>
+            {
+                Report("IPublisher");
+                return new MessageBroker<T>(r.Resolve<MessageBrokerCore<T>>(), r.Resolve<FilterAttachedMessageHandlerFactory>());
+            }, Lifetime.Singleton);
+
+            builder.Register<ISubscriber<T>>(r =>
+            {
+                Report("ISubscriber");
+                return new MessageBroker<T>(r.Resolve<MessageBrokerCore<T>>(), r.Resolve<FilterAttachedMessageHandlerFactory>());
+            }, Lifetime.Singleton);
+
+            builder.Register<IAsyncPublisher<T>>(r =>
+            {
+                Report("IAsyncPublisher");
+                return new AsyncMessageBroker<T>(r.Resolve<AsyncMessageBrokerCore<T>>(), r.Resolve<FilterAttachedAsyncMessageHandlerFactory>());
+            }, Lifetime.Singleton);
+
+            builder.Register<IAsyncSubscriber<T>>(r =>
+            {
+                Report("IAsyncSubscriber");
+                return new AsyncMessageBroker<T>(r.Resolve<AsyncMessageBrokerCore<T>>(), r.Resolve<FilterAttachedAsyncMessageHandlerFactory>());
+            }, Lifetime.Singleton);
+        }
+#else
+        private static bool _globalInitialized;
+        private static MethodInfo _addBrokerMethod;
+
+        /// <summary>Builds the global provider once, with a broker for every attributed event type.</summary>
+        public static void InitializeGlobalBroker()
+        {
+            if (_globalInitialized) return;
+
+            var builder = new BuiltinContainerBuilder();
+            builder.AddMessagePipe(options => ApplyConfiguredOptions(options));
+
+            _addBrokerMethod ??= typeof(BuiltinContainerBuilder)
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .First(m => m.Name == nameof(BuiltinContainerBuilder.AddMessageBroker) &&
+                            m.IsGenericMethodDefinition &&
+                            m.GetGenericArguments().Length == 1 &&
+                            m.GetParameters().Length == 0);
+
+            foreach (var info in MessagePipeEventCatalog.All)
+            {
+                _addBrokerMethod.MakeGenericMethod(info.Type).Invoke(builder, null);
+            }
+
+            GlobalMessagePipe.SetProvider(builder.BuildServiceProvider());
+            _globalInitialized = true;
+            typeof(MessagePipeHelper).Log(
+                $"Initialized global MessagePipe broker (non-VContainer mode). {MessagePipeEventCatalog.All.Count} event(s) registered.");
+        }
+
         public static IPublisher<T> GetPublisher<T>()
         {
-            EnsureGlobalInitialized();
+            InitializeGlobalBroker();
             return GlobalMessagePipe.GetPublisher<T>();
         }
 
-        /// <summary>
-        /// Get a subscriber for the specified event type (non-VContainer mode).
-        /// </summary>
         public static ISubscriber<T> GetSubscriber<T>()
         {
-            EnsureGlobalInitialized();
+            InitializeGlobalBroker();
             return GlobalMessagePipe.GetSubscriber<T>();
-        }
-
-        private static void EnsureGlobalInitialized()
-        {
-            if (!_globalInitialized)
-            {
-                InitializeGlobalBroker();
-            }
         }
 #endif
     }

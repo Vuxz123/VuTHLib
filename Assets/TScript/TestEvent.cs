@@ -1,5 +1,4 @@
 ﻿using _VuTH.Common.MessagePipe.Attributes;
-[assembly: VuTHMessagePipeEventAssembly]
 namespace TScript
 {
     [MessagePipeEvent(EventScope.Scene, "Gameplay")]
