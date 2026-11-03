@@ -89,6 +89,15 @@ namespace _VuTH.Core.Audio.Tests.PlayMode
 
             Assert.That(_manager.MasterVolume, Is.EqualTo(0.5f).Within(0.001f));
             Assert.That(_manager.SfxVolume, Is.EqualTo(0.25f).Within(0.001f));
+
+            // Default Perceptual curve: cue 0.8 × sfx 0.25² × master 0.5²
+            Assert.That(source.volume, Is.EqualTo(0.8f * 0.0625f * 0.25f).Within(0.001f));
+
+            // Linear curve keeps the old multiplication: 0.8 × 0.25 × 0.5
+            SetField(_manager, "volumeCurve", AudioVolumeCurve.Linear);
+            _manager.SetSfxVolume(0.26f);
+            _manager.SetSfxVolume(0.25f); // trigger a volume refresh
+            yield return null;
             Assert.That(source.volume, Is.EqualTo(0.1f).Within(0.001f));
 
             _manager.SetMuted(true);

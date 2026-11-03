@@ -25,6 +25,15 @@ namespace _VuTH.Core.Audio
         public float BaseVolume { get; }
         public bool IsMusic { get; }
         public float FadeFactor { get; set; } = 1f;
+
+        /// <summary>Unity priority of the sound (0 = most important). Used for voice stealing.</summary>
+        public int Priority { get; internal set; } = 128;
+
+        /// <summary><c>Time.realtimeSinceStartup</c> when the playback started (voice stealing tie-break).</summary>
+        public float StartedAt { get; internal set; }
+
+        /// <summary>Duck applied while this playback is alive (from <see cref="AudioCue.DuckMusic"/>); released with it.</summary>
+        internal System.IDisposable AutoDuck { get; set; }
         public CancellationTokenSource CancellationTokenSource { get; }
     }
 }

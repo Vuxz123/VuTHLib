@@ -30,6 +30,11 @@ namespace _VuTH.Core.Audio
         [Tooltip("Optional per-screen music as AudioCue. Overrides ScreenModel.backgroundMusic for that screen.")]
         [SerializeField] private ScreenMusicEntry[] screenMusic = Array.Empty<ScreenMusicEntry>();
 
+        [Header("Volume")]
+        [Tooltip("How the master / channel sliders map to gain. Perceptual (slider²) makes the slider feel even; " +
+                 "Linear keeps the pre-1.0 behaviour.")]
+        [SerializeField] private AudioVolumeCurve volumeCurve = AudioVolumeCurve.Perceptual;
+
         [Header("One Shot Pool")]
         [SerializeField, Min(1)] private int initialOneShotSources = 8;
         [SerializeField, Min(1)] private int maxOneShotSources = 24;
@@ -56,6 +61,9 @@ namespace _VuTH.Core.Audio
         private AudioSource _activeMusicSource;
         private int _activeMusicPlaybackId;
         private CancellationTokenSource _musicTransitionCts;
+
+        private readonly AudioDuckController _ducking = new();
+        private readonly HashSet<AudioChannel> _pausedChannels = new();
 
         public float MasterVolume => Settings.Package?.MasterVolume.Value ?? defaultMasterVolume;
         public float MusicVolume => Settings.Package?.MusicVolume.Value ?? defaultMusicVolume;
@@ -94,6 +102,8 @@ namespace _VuTH.Core.Audio
         protected override void DeinitializeBootstrap()
         {
             CancelMusicTransition();
+            _ducking.Clear();
+            _pausedChannels.Clear();
             Settings.CancelRegistration();
 
             foreach (var subscription in _subscriptions)
@@ -237,6 +247,84 @@ namespace _VuTH.Core.Audio
             Settings.Package.UiVolume.Value = Mathf.Clamp01(volume);
         }
 
+        /// <inheritdoc />
+        public AudioPlaybackHandle PlaySfxAt(AudioCue cue, Vector3 position, float volumeScale = 1f)
+        {
+            return PlayOneShot(cue, AudioChannel.Sfx, volumeScale, position);
+        }
+
+        /// <inheritdoc />
+        public void SetChannelPaused(AudioChannel channel, bool paused)
+        {
+            var changed = paused ? _pausedChannels.Add(channel) : _pausedChannels.Remove(channel);
+            if (!changed) return;
+
+            foreach (var entry in _playbacks.Entries)
+            {
+                if (entry.Channel != channel || !entry.Source) continue;
+                if (paused) entry.Source.Pause();
+                else entry.Source.UnPause();
+            }
+        }
+
+        /// <inheritdoc />
+        public bool IsChannelPaused(AudioChannel channel) => _pausedChannels.Contains(channel);
+
+        /// <inheritdoc />
+        public AudioDuckHandle Duck(AudioChannel channel, float volumeFactor, float fadeDuration = 0.25f)
+        {
+            var id = _ducking.Add(channel, volumeFactor, fadeDuration);
+            ApplyDuckingNow();
+            return new AudioDuckHandle(ReleaseDuck, id, fadeDuration);
+        }
+
+        /// <inheritdoc />
+        public UniTask StopChannelAsync(AudioChannel channel, float fadeDuration = 0f)
+        {
+            if (channel == AudioChannel.Music)
+            {
+                return StopMusicAsync(fadeDuration);
+            }
+
+            var ids = new List<int>();
+            foreach (var entry in _playbacks.Entries)
+            {
+                if (entry.Channel == channel && !entry.IsMusic) ids.Add(entry.PlaybackId);
+            }
+
+            if (ids.Count == 0) return UniTask.CompletedTask;
+
+            var stops = new UniTask[ids.Count];
+            for (var i = 0; i < ids.Count; i++) stops[i] = StopPlaybackAsync(ids[i], fadeDuration);
+            return UniTask.WhenAll(stops);
+        }
+
+        private void Update()
+        {
+            if (_ducking.Tick(Time.unscaledDeltaTime))
+            {
+                RefreshAllVolumes();
+            }
+        }
+
+        private void ReleaseDuck(int id, float fadeDuration)
+        {
+            if (this == null) return; // manager destroyed before the handle was disposed
+            _ducking.Remove(id, fadeDuration);
+            ApplyDuckingNow();
+        }
+
+        /// <summary>Instant ducks (fade 0) must apply this frame, not on the next Update.</summary>
+        private void ApplyDuckingNow()
+        {
+            if (_ducking.Tick(0f)) RefreshAllVolumes();
+        }
+
+        private bool IsPlaybackPaused(int playbackId)
+        {
+            return _playbacks.TryGet(playbackId, out var entry) && _pausedChannels.Contains(entry.Channel);
+        }
+
         private AudioPlaybackHandle PlayMusicInternal(
             AudioClip clip,
             float baseVolume,
@@ -328,7 +416,7 @@ namespace _VuTH.Core.Audio
                 fadeDuration);
         }
 
-        private AudioPlaybackHandle PlayOneShot(AudioCue cue, AudioChannel channel, float volumeScale)
+        private AudioPlaybackHandle PlayOneShot(AudioCue cue, AudioChannel channel, float volumeScale, Vector3? position = null)
         {
             if (cue == null || !cue.IsValid)
             {
@@ -340,11 +428,25 @@ namespace _VuTH.Core.Audio
             var source = OneShotPool.Acquire(maxOneShotSources);
             if (!source)
             {
-                this.LogWarning("AudioManager: No available one-shot source.");
-                return AudioPlaybackHandle.Invalid;
+                // Pool exhausted: cut the least important (then oldest) one-shot, unless everything playing matters more.
+                var victim = AudioVoiceStealing.SelectVictim(_playbacks.Entries, cue.Priority);
+                if (victim == null)
+                {
+                    this.LogWarning($"AudioManager: No available one-shot source for '{cue.name}' (all active sounds have higher priority).");
+                    return AudioPlaybackHandle.Invalid;
+                }
+
+                ReleasePlaybackForSource(victim.Source, stopSource: true);
+                source = OneShotPool.Acquire(maxOneShotSources);
+                if (!source)
+                {
+                    return AudioPlaybackHandle.Invalid;
+                }
             }
 
             var entry = RegisterPlayback(source, channel, Mathf.Clamp01(cue.Volume * Mathf.Max(0f, volumeScale)), isMusic: false);
+            entry.Priority = cue.Priority;
+            entry.StartedAt = Time.realtimeSinceStartup;
             var playbackId = entry.PlaybackId;
             ConfigureSource(
                 source,
@@ -356,9 +458,28 @@ namespace _VuTH.Core.Audio
                 cue.Priority,
                 cue.IgnoreListenerPause);
 
+            if (position.HasValue)
+            {
+                source.transform.position = position.Value;
+                source.spatialBlend = cue.SpatialBlend;
+                source.minDistance = cue.MinDistance;
+                source.maxDistance = cue.MaxDistance;
+                source.rolloffMode = cue.RolloffMode;
+            }
+
             entry.FadeFactor = 1f;
             ApplyResolvedVolume(entry);
             source.Play();
+
+            if (_pausedChannels.Contains(channel))
+            {
+                source.Pause(); // resumes with the channel
+            }
+
+            if (cue.DuckMusic < 1f && channel != AudioChannel.Music)
+            {
+                entry.AutoDuck = Duck(AudioChannel.Music, cue.DuckMusic, cue.DuckFadeDuration);
+            }
 
             if (!cue.Loop)
             {
@@ -504,7 +625,8 @@ namespace _VuTH.Core.Audio
             
             return;
 
-            bool WaitUntilCondition() => !source || !source.isPlaying;
+            // A paused source also reports isPlaying == false: only treat it as finished when its channel is not paused.
+            bool WaitUntilCondition() => !source || (!source.isPlaying && !IsPlaybackPaused(playbackId));
         }
 
         /// <summary>
@@ -728,7 +850,8 @@ namespace _VuTH.Core.Audio
 
             entry.CancellationTokenSource.Cancel();
             entry.CancellationTokenSource.Dispose();
-
+            entry.AutoDuck?.Dispose();
+            entry.AutoDuck = null;
             _playbacks.Remove(playbackId, source);
 
             if (entry.IsMusic)
@@ -834,7 +957,9 @@ namespace _VuTH.Core.Audio
                 MasterVolume,
                 MusicVolume,
                 SfxVolume,
-                UiVolume);
+                UiVolume,
+                volumeCurve,
+                _ducking.GetFactor(channel));
         }
 
         private static void ConfigureSource(
@@ -881,6 +1006,11 @@ namespace _VuTH.Core.Audio
             source.pitch = 1f;
             source.priority = 128;
             source.ignoreListenerPause = false;
+            source.spatialBlend = 0f;
+            source.minDistance = 1f;
+            source.maxDistance = 500f;
+            source.rolloffMode = AudioRolloffMode.Linear;
+            source.transform.localPosition = Vector3.zero;
         }
     }
 }

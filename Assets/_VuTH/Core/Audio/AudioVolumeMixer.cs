@@ -41,8 +41,42 @@ namespace _VuTH.Core.Audio
             }
 
             var channelVolume = SelectChannelVolume(channel, musicVolume, sfxVolume, uiVolume);
-
             return Mathf.Clamp01(requestedVolume) * Mathf.Clamp01(channelVolume) * Mathf.Clamp01(masterVolume);
+        }
+
+        /// <summary>Maps a 0..1 settings slider to an output gain using <paramref name="curve"/>.</summary>
+        public static float ApplyCurve(float slider, AudioVolumeCurve curve)
+        {
+            var v = Mathf.Clamp01(slider);
+            return curve == AudioVolumeCurve.Perceptual ? v * v : v;
+        }
+
+        /// <summary>
+        /// Full resolution used at runtime: 0 when muted, otherwise
+        /// clamp01(requested) × curve(channel slider) × curve(master slider) × clamp01(duckFactor).
+        /// The curve only applies to the user-facing sliders, not to per-cue volumes.
+        /// </summary>
+        public static float Resolve(
+            AudioChannel channel,
+            float requestedVolume,
+            bool muted,
+            float masterVolume,
+            float musicVolume,
+            float sfxVolume,
+            float uiVolume,
+            AudioVolumeCurve curve,
+            float duckFactor)
+        {
+            if (muted)
+            {
+                return 0f;
+            }
+
+            var channelVolume = SelectChannelVolume(channel, musicVolume, sfxVolume, uiVolume);
+            return Mathf.Clamp01(requestedVolume) *
+                   ApplyCurve(channelVolume, curve) *
+                   ApplyCurve(masterVolume, curve) *
+                   Mathf.Clamp01(duckFactor);
         }
     }
 }

@@ -19,6 +19,18 @@ namespace _VuTH.Core.Audio
         [SerializeField] private bool randomizePitch = true;
         [SerializeField, Range(0, 256)] private int priority = 128;
 
+        [Header("3D (used by PlaySfxAt)")]
+        [Tooltip("0 = 2D, 1 = fully 3D. Only meaningful when played at a position.")]
+        [SerializeField, Range(0f, 1f)] private float spatialBlend;
+        [SerializeField, Min(0f)] private float minDistance = 1f;
+        [SerializeField, Min(0f)] private float maxDistance = 50f;
+        [SerializeField] private AudioRolloffMode rolloffMode = AudioRolloffMode.Logarithmic;
+
+        [Header("Ducking")]
+        [Tooltip("Music volume factor while this sound plays (1 = no ducking, 0.3 = duck music to 30%).")]
+        [SerializeField, Range(0f, 1f)] private float duckMusic = 1f;
+        [SerializeField, Min(0f)] private float duckFadeDuration = 0.15f;
+
         public AudioChannel Channel => channel;
         public AudioMixerGroup OutputMixerGroup => outputMixerGroup;
         public AudioClip Clip => clip;
@@ -28,6 +40,12 @@ namespace _VuTH.Core.Audio
         public Vector2 PitchRange => pitchRange;
         public bool RandomizePitch => randomizePitch;
         public int Priority => priority;
+        public float SpatialBlend => spatialBlend;
+        public float MinDistance => minDistance;
+        public float MaxDistance => maxDistance;
+        public AudioRolloffMode RolloffMode => rolloffMode;
+        public float DuckMusic => duckMusic;
+        public float DuckFadeDuration => duckFadeDuration;
 
         public bool IsValid => clip != null;
 
@@ -46,6 +64,11 @@ namespace _VuTH.Core.Audio
             if (pitchRange.y < pitchRange.x)
             {
                 pitchRange.y = pitchRange.x;
+            }
+
+            if (maxDistance < minDistance)
+            {
+                maxDistance = minDistance;
             }
         }
     }
