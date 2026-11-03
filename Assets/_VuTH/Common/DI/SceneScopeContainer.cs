@@ -2,44 +2,61 @@
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
-using _VuTH.Common.MessagePipe;
 
 namespace _VuTH.Common.DI
 {
+    /// <summary>
+    /// LifetimeScope of a screen scene. Its parent is the Core <see cref="RootScopeContainer"/>, whether the scene was
+    /// loaded by ScreenManager (which enqueues the root as parent) or any other way (SceneManager.LoadScene, opened in
+    /// the editor next to Core...). Applies the configurators referenced in <see cref="configurators"/>.
+    /// </summary>
     public class SceneScopeContainer : LifetimeScope
     {
         [Header("Configurators")]
-        [SerializeReference] private MonoBehaviour[] configurators;
+        [Tooltip("MonoBehaviours implementing IVContainerConfigurator (same scene).")]
+        // Plain object references: [SerializeReference] does not apply to UnityEngine.Object fields (the data was
+        // already stored as normal references, so switching keeps existing scenes intact).
+        [SerializeField] private MonoBehaviour[] configurators = System.Array.Empty<MonoBehaviour>();
 
         /// <summary>
-        /// Configures the container builder for the scene scope.
+        /// Default parent = the built root scope. Only used when no explicit <c>parentReference</c> object is set;
+        /// ScreenManager enqueues this same root, so both paths agree.
         /// </summary>
-        /// <param name="builder"> The container builder to configure.</param>
+        protected override LifetimeScope FindParent()
+        {
+            var root = Find<RootScopeContainer>();
+            return root != null && root != this && root.Container != null ? root : null;
+        }
+
         protected override void Configure(IContainerBuilder builder)
         {
-            // Check if Parent is assigned
             if (Parent)
             {
                 this.Log($"{gameObject.name} linked to Parent: {Parent.name}");
             }
             else
             {
-                this.LogWarning($"{gameObject.name} has NO Parent! Check ScreenManager EnqueueParent logic.");
+                this.LogWarning($"{gameObject.name} has NO parent scope: the Core scene (RootScopeContainer) is not loaded. " +
+                                "Core services will not be injectable in this scene.");
             }
-            
+
             base.Configure(builder);
-            
-            // Register scene-scoped MessagePipe events
-#if VCONTAINER
-            MessagePipeHelper.RegisterSceneEvents(builder);
-#endif
-            
-            // Apply configurators
+
+            // Module installers (e.g. MessagePipe scene-scoped brokers), then the configurators.
+            ScopeInstallers.InstallScene(builder);
+
+            if (configurators == null) return;
+
             foreach (var configurator in configurators)
             {
                 if (configurator is IVContainerConfigurator vContainerConfigurator)
                 {
                     vContainerConfigurator.Configure(builder);
+                }
+                else if (configurator != null)
+                {
+                    this.LogWarning($"{configurator.GetType().Name} on '{configurator.name}' does not implement " +
+                                    $"{nameof(IVContainerConfigurator)} and was ignored.");
                 }
             }
         }

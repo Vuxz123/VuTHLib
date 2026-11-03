@@ -6,7 +6,8 @@
         "MessagePipe",
         "MessagePipe.VContainer",
         "VContainer",
-        "ZString"
+        "ZString",
+        "VuTH.Common.DI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -15,6 +16,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "jp.hadashikick.vcontainer",
+            "expression": "",
+            "define": "VCONTAINER"
+        }
+    ],
     "noEngineReferences": false
 }

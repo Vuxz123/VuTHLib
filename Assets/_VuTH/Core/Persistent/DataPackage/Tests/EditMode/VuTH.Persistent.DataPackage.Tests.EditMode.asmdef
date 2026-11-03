@@ -7,7 +7,10 @@
         "VuTH.Persistent.DataPackage",
         "VuTH.Persistent.SaveSystem",
         "VContainer",
-        "UniTask"
+        "UniTask",
+        "VuTH.Common",
+        "VuTH.Common.Log",
+        "VuTH.Common.DI"
     ],
     "includePlatforms": [
         "Editor"
@@ -23,6 +26,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "jp.hadashikick.vcontainer",
+            "expression": "",
+            "define": "VCONTAINER"
+        }
+    ],
     "noEngineReferences": false
 }

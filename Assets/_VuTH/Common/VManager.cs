@@ -2,7 +2,7 @@
 
 namespace _VuTH.Common
 {
-    public abstract class VManager<T, TI> : VSingleton<T, TI>
+    public abstract class VManager<T, TI> : VSingleton<T, TI>, IDeferredManagerInitialization
         where T : VManager<T, TI>, TI, new() 
         where TI : ICommonManager
     {
@@ -20,10 +20,23 @@ namespace _VuTH.Common
         protected override void Awake()
         {
             base.Awake();
-            if (IsEnabledSystem && !customLifecycleManagement)
-            {
-                InitializeManager();
-            }
+
+            // A duplicate is destroyed by VSingleton at the end of the frame: never let it initialize
+            // (it used to create runtime objects / subscriptions right before being destroyed).
+            if (!IsPrimaryInstance) return;
+            if (!IsEnabledSystem || customLifecycleManagement) return;
+
+            // Created during root DI configuration: initialize after injection instead (see VManagerInitializationGate).
+            if (VManagerInitializationGate.TryDefer(this)) return;
+
+            InitializeManager();
+        }
+
+        void IDeferredManagerInitialization.RunDeferredInitialization()
+        {
+            if (!this || !IsPrimaryInstance) return;
+            if (!IsEnabledSystem || customLifecycleManagement) return;
+            InitializeManager();
         }
 
         public virtual void EnableSystem(bool enable)

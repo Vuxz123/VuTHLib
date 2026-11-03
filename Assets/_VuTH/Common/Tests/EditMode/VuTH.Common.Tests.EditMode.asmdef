@@ -5,7 +5,9 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "VuTH.Common",
-        "VuTH.Common.Log"
+        "VuTH.Common.Log",
+        "VuTH.Common.DI",
+        "VContainer"
     ],
     "includePlatforms": [
         "Editor"
@@ -20,6 +22,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "jp.hadashikick.vcontainer",
+            "expression": "",
+            "define": "VCONTAINER"
+        }
+    ],
     "noEngineReferences": false
 }

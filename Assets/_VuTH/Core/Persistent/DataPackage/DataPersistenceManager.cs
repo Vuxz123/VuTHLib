@@ -68,7 +68,18 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
 
             builder.RegisterComponent(this).AsImplementedInterfaces();
-            builder.Register<SaveLifecycleHook>(Lifetime.Singleton);
+            RegisterLifecycleHook(builder);
+        }
+
+        /// <summary>
+        /// Registers <see cref="SaveLifecycleHook"/> as an ENTRY POINT so VContainer calls its
+        /// <c>IInitializable.Initialize()</c> (subscribing to focus / pause / quit) and <c>Dispose()</c>.
+        /// A plain <c>Register&lt;SaveLifecycleHook&gt;()</c> is only resolvable as its concrete type: Initialize was
+        /// never called, so the pause / quit flushes never ran.
+        /// </summary>
+        internal static void RegisterLifecycleHook(IContainerBuilder builder)
+        {
+            builder.RegisterEntryPoint<SaveLifecycleHook>().AsSelf();
         }
 #endif
 

@@ -1,32 +1,53 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using UnityEngine;
 using VContainer;
 using VContainer.Unity;
-using _VuTH.Common.MessagePipe;
-using ZLinq;
 
 namespace _VuTH.Common.DI
 {
+    /// <summary>
+    /// Root (Core scene) LifetimeScope. Collects every <see cref="IBootstrapVContainerConfigurator"/> in the loaded
+    /// scenes and lets it register into the root container:
+    /// <list type="bullet">
+    /// <item>in a deterministic order — <see cref="IRootScopeConfigurationOrder"/>, then scene and hierarchy path;</item>
+    /// <item>skipping instances that opt out via <see cref="IRootScopeRegistrationFilter"/> (duplicate singletons).</item>
+    /// </list>
+    /// </summary>
     public class RootScopeContainer : LifetimeScope
     {
-        /// <summary>
-        /// Configure the root scope container
-        /// </summary>
-        /// <param name="builder"> The container builder</param>
         protected override void Configure(IContainerBuilder builder)
         {
-            // Register global-scoped MessagePipe events first
-#if VCONTAINER
-            MessagePipeHelper.RegisterGlobalEvents(builder);
-#endif
-            
-            // Bootstrap configurators
-            var boostrap = 
-                FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
-                .AsValueEnumerable().OfType<IBootstrapVContainerConfigurator>();
-            foreach (var b in boostrap)
+            // Module installers first (e.g. MessagePipe global brokers), then the configurators.
+            ScopeInstallers.InstallRoot(builder);
+
+            foreach (var configurator in CollectConfigurators())
             {
-                b.ConfigureRootScope(builder);
+                configurator.ConfigureRootScope(builder);
             }
+        }
+
+        private static IEnumerable<IBootstrapVContainerConfigurator> CollectConfigurators()
+        {
+            return FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude)
+                .Where(m => m is IBootstrapVContainerConfigurator)
+                .Where(m => m is not IRootScopeRegistrationFilter filter || filter.ShouldConfigureRootScope)
+                .OrderBy(m => m is IRootScopeConfigurationOrder ordered ? ordered.RootScopeConfigurationOrder : 0)
+                .ThenBy(HierarchyPath, System.StringComparer.Ordinal)
+                .Cast<IBootstrapVContainerConfigurator>()
+                .ToList();
+        }
+
+        private static string HierarchyPath(MonoBehaviour behaviour)
+        {
+            var sb = new StringBuilder();
+            for (var t = behaviour.transform; t != null; t = t.parent)
+            {
+                sb.Insert(0, $"/{t.GetSiblingIndex():D4}:{t.name}");
+            }
+
+            return behaviour.gameObject.scene.path + sb + "#" + behaviour.GetType().FullName;
         }
     }
 }

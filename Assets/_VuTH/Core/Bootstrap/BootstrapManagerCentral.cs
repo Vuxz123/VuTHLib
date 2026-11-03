@@ -3,6 +3,7 @@ using _VuTH.Common;
 using _VuTH.Common.Log;
 using _VuTH.Core.Bootstrap.Profile;
 using UnityEngine;
+using UnityEngine.Serialization;
 #if VCONTAINER
 using _VuTH.Common.DI;
 using VContainer;
@@ -12,25 +13,42 @@ namespace _VuTH.Core.Bootstrap
 {
     public class BootstrapManagerCentral : MonoBehaviour
 #if VCONTAINER
-        , IBootstrapVContainerConfigurator
+        , IBootstrapVContainerConfigurator, IRootScopeConfigurationOrder
 #endif
     {
-        [SerializeField, ReadOnlyField] private BootstrapProfile boostrapProfile;
+        [SerializeField, ReadOnlyField, FormerlySerializedAs("boostrapProfile")]
+        private BootstrapProfile bootstrapProfile;
 
         private ICommonManager[] _vBootstrapManager;
 
 #if VCONTAINER
+        /// <summary>Configured last, so the deferred-initialization callback below is the very last build callback.</summary>
+        public int RootScopeConfigurationOrder => int.MaxValue;
+
         public void ConfigureRootScope(IContainerBuilder builder)
         {
-            LoadBootstrapManagers();
+            // Managers created here would run InitializeBootstrap in Awake, before the container exists and before
+            // [Inject] Construct. Queue them and initialize once every component has been injected.
+            using (VManagerInitializationGate.BeginDeferral())
+            {
+                LoadBootstrapManagers();
+            }
 
             foreach (var manager in _vBootstrapManager)
             {
-                if (manager is IBootstrapVContainerConfigurator boostrapVContainerConfigurator)
+                if (manager is not IBootstrapVContainerConfigurator configurator) continue;
+                if (manager is IRootScopeRegistrationFilter { ShouldConfigureRootScope: false })
                 {
-                    boostrapVContainerConfigurator.ConfigureRootScope(builder);
+                    this.LogWarning($"Skipping duplicate bootstrap manager {manager.GetType().Name} (an instance already exists).");
+                    continue;
                 }
+
+                configurator.ConfigureRootScope(builder);
             }
+
+            // RegisterComponent injects through build callbacks, which run in registration order: this one runs after
+            // all of them, i.e. after every manager's [Inject] Construct.
+            builder.RegisterBuildCallback(_ => VManagerInitializationGate.FlushDeferred());
         }
 #endif
 
@@ -43,10 +61,10 @@ namespace _VuTH.Core.Bootstrap
 
         private void EnsureProfileSet()
         {
-            if (boostrapProfile) return;
+            if (bootstrapProfile) return;
             if (BootstrapProfileUtilities.TryGetProfile(out var profile))
             {
-                boostrapProfile = profile;
+                bootstrapProfile = profile;
             }
             else
             {
@@ -56,7 +74,19 @@ namespace _VuTH.Core.Bootstrap
 
         private void LoadBootstrapManagers()
         {
+            if (_vBootstrapManager != null)
+            {
+                // The root scope can be rebuilt; never instantiate the managers twice.
+                return;
+            }
+
             EnsureProfileSet();
+            if (!bootstrapProfile)
+            {
+                _vBootstrapManager = System.Array.Empty<ICommonManager>();
+                return;
+            }
+
             var orderedPrefabs = GetOrderedBootstrapPrefabs();
             this.Log("Loading " + orderedPrefabs.Count + " Bootstrap Managers from Profile");
             _vBootstrapManager = new ICommonManager[orderedPrefabs.Count];
@@ -79,12 +109,12 @@ namespace _VuTH.Core.Bootstrap
 
         private List<OrderedBootstrapPrefab> GetOrderedBootstrapPrefabs()
         {
-            var boostrapPrefabs = boostrapProfile.boostrapPrefabs;
-            var orderedPrefabs = new List<OrderedBootstrapPrefab>(boostrapPrefabs.Length);
+            var prefabs = bootstrapProfile.boostrapPrefabs ?? System.Array.Empty<GameObject>();
+            var orderedPrefabs = new List<OrderedBootstrapPrefab>(prefabs.Length);
 
-            for (var i = 0; i < boostrapPrefabs.Length; i++)
+            for (var i = 0; i < prefabs.Length; i++)
             {
-                var prefab = boostrapPrefabs[i];
+                var prefab = prefabs[i];
                 if (!prefab)
                 {
                     continue;

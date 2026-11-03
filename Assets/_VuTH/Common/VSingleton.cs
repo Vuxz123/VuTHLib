@@ -15,7 +15,7 @@ namespace _VuTH.Common
     /// <typeparam name="TI"> interface mà Singleton sẽ triển khai </typeparam>
     public abstract class VSingleton<T, TI> : MonoBehaviour
 #if VCONTAINER
-        , IBootstrapVContainerConfigurator
+        , IBootstrapVContainerConfigurator, IRootScopeRegistrationFilter
 #endif
         where T : MonoBehaviour, TI
     {
@@ -24,6 +24,12 @@ namespace _VuTH.Common
         public static TI Instance => _instance;
         
         public static bool HasInstance => _instance != null;
+
+        /// <summary>
+        /// False for a second instance (it is destroyed at the end of the frame). Duplicates must neither register
+        /// into DI nor initialize.
+        /// </summary>
+        public bool IsPrimaryInstance => ReferenceEquals(_instance, this);
         
         protected virtual void Awake()
         {
@@ -50,10 +56,13 @@ namespace _VuTH.Common
         }
 
 #if VCONTAINER
+        /// <inheritdoc />
+        public bool ShouldConfigureRootScope => IsPrimaryInstance;
+
         public virtual void ConfigureRootScope(IContainerBuilder builder)
         {
             this.Log($"Inject {typeof(T).Name} into root scope");
-            builder.RegisterInstance((T)(MonoBehaviour)this).As<TI>().AsSelf().Build();
+            builder.RegisterInstance((T)(MonoBehaviour)this).As<TI>().AsSelf();
         }
 #endif
     }
