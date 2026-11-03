@@ -11,6 +11,9 @@ using Cysharp.Threading.Tasks;
 using MessagePipe;
 using UnityEngine;
 using UnityEngine.Audio;
+#if !VCONTAINER
+using _VuTH.Common.MessagePipe;
+#endif
 
 #if VCONTAINER
 using VContainer;
@@ -23,6 +26,9 @@ namespace _VuTH.Core.Audio
     {
         [Header("Music")]
         [SerializeField, Min(0f)] private float defaultMusicFadeDuration = 0.35f;
+
+        [Tooltip("Optional per-screen music as AudioCue. Overrides ScreenModel.backgroundMusic for that screen.")]
+        [SerializeField] private ScreenMusicEntry[] screenMusic = Array.Empty<ScreenMusicEntry>();
 
         [Header("One Shot Pool")]
         [SerializeField, Min(1)] private int initialOneShotSources = 8;
@@ -80,6 +86,7 @@ namespace _VuTH.Core.Audio
         {
             EnsureRuntimeObjects();
             OneShotPool.Warm(initialOneShotSources);
+            SubscribeWithoutContainer();
             InitializeSettingsPackage();
             RefreshAllVolumes();
         }
@@ -372,7 +379,7 @@ namespace _VuTH.Core.Audio
 
             if (fadeDuration > 0f && entry.Source && entry.Source.isPlaying)
             {
-                await FadePlaybackAsync(entry, 0f, fadeDuration);
+                await FadePlaybackAsync(playbackId, entry, 0f, fadeDuration);
             }
 
             if (entry.IsMusic)
@@ -393,22 +400,25 @@ namespace _VuTH.Core.Audio
         {
             try
             {
+                // Start from where each side currently is: when a previous crossfade was interrupted, the outgoing
+                // music may be at half volume — it must keep fading down, not jump back to full.
+                var fromStart = _playbacks.TryGet(fromPlaybackId, out var fromAtStart) ? fromAtStart.FadeFactor : 0f;
+                var toStart = _playbacks.TryGet(toPlaybackId, out var toAtStart) ? toAtStart.FadeFactor : 0f;
+
                 var elapsed = 0f;
                 while (elapsed < duration)
                 {
                     transitionCts.Token.ThrowIfCancellationRequested();
                     elapsed += Time.unscaledDeltaTime;
                     var t = Mathf.Clamp01(elapsed / duration);
-
                     if (_playbacks.TryGet(fromPlaybackId, out var fromEntry))
                     {
-                        fromEntry.FadeFactor = 1f - t;
+                        fromEntry.FadeFactor = Mathf.Lerp(fromStart, 0f, t);
                         ApplyResolvedVolume(fromEntry);
                     }
-
                     if (_playbacks.TryGet(toPlaybackId, out var toEntry))
                     {
-                        toEntry.FadeFactor = t;
+                        toEntry.FadeFactor = Mathf.Lerp(toStart, 1f, t);
                         ApplyResolvedVolume(toEntry);
                     }
 
@@ -440,18 +450,16 @@ namespace _VuTH.Core.Audio
             }
         }
 
-        private async UniTask FadePlaybackAsync(AudioPlaybackEntry entry, float targetFadeFactor, float duration)
+        private async UniTask FadePlaybackAsync(int playbackId, AudioPlaybackEntry entry, float targetFadeFactor, float duration)
         {
-            var source = entry.Source;
-            if (source == null)
+            if (!entry.Source)
             {
                 return;
             }
 
             var startFade = entry.FadeFactor;
             var elapsed = 0f;
-
-            while (elapsed < duration && source != null)
+            while (elapsed < duration && IsCurrent(playbackId, entry))
             {
                 elapsed += Time.unscaledDeltaTime;
                 entry.FadeFactor = Mathf.Lerp(startFade, targetFadeFactor, Mathf.Clamp01(elapsed / duration));
@@ -459,11 +467,21 @@ namespace _VuTH.Core.Audio
                 await UniTask.Yield(PlayerLoopTiming.Update);
             }
 
-            if (source != null)
+            if (IsCurrent(playbackId, entry))
             {
                 entry.FadeFactor = targetFadeFactor;
                 ApplyResolvedVolume(entry);
             }
+        }
+
+        /// <summary>
+        /// True while <paramref name="entry"/> is still the live playback for <paramref name="playbackId"/>.
+        /// A fade must stop touching the AudioSource as soon as that source is released or reused by a new playback
+        /// (otherwise a fade-out would keep pulling the NEXT music's volume to 0).
+        /// </summary>
+        private bool IsCurrent(int playbackId, AudioPlaybackEntry entry)
+        {
+            return entry.Source && _playbacks.TryGet(playbackId, out var current) && ReferenceEquals(current, entry);
         }
 
         private async UniTask ReleaseWhenPlaybackCompletesAsync(
@@ -489,6 +507,16 @@ namespace _VuTH.Core.Audio
             bool WaitUntilCondition() => !source || !source.isPlaying;
         }
 
+        /// <summary>
+        /// Screen music rules:
+        /// <list type="number">
+        /// <item>a <see cref="ScreenMusicEntry"/> for the screen → play its AudioCue;</item>
+        /// <item>else <see cref="ScreenModel.backgroundMusic"/> → play that clip;</item>
+        /// <item>else <see cref="ScreenModel.stopMusicIfNoBackgroundMusic"/> → stop music;</item>
+        /// <item>else keep the current music (popups / pushed screens no longer cut the music, and popping back
+        /// does not restart it).</item>
+        /// </list>
+        /// </summary>
         private void HandlePostScreenEnter(PostScreenEnterEvent eventArgs)
         {
             if (eventArgs?.ToScreen is not ScreenModel screenModel)
@@ -496,14 +524,61 @@ namespace _VuTH.Core.Audio
                 return;
             }
 
+            if (TryGetScreenMusic(screenModel, out var entry))
+            {
+                PlayMusic(entry.music, entry.fadeDuration > 0f ? entry.fadeDuration : defaultMusicFadeDuration);
+                return;
+            }
+
             if (screenModel.backgroundMusic != null)
             {
                 PlayMusic(screenModel.backgroundMusic, 1f, defaultMusicFadeDuration);
+                return;
             }
-            else
+
+            if (screenModel.stopMusicIfNoBackgroundMusic)
             {
                 StopMusicAsync(defaultMusicFadeDuration).Forget();
             }
+        }
+
+        private bool TryGetScreenMusic(ScreenModel screen, out ScreenMusicEntry entry)
+        {
+            if (screenMusic != null)
+            {
+                foreach (var candidate in screenMusic)
+                {
+                    if (candidate.screen == screen && candidate.music && candidate.music.IsValid)
+                    {
+                        entry = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            entry = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Without VContainer nobody calls <c>Construct</c>, so subscribe through the global MessagePipe broker
+        /// (same fallback ScreenManager uses for publishing). Otherwise screen music and PlayAudioCueEvent silently
+        /// did nothing.
+        /// </summary>
+        private void SubscribeWithoutContainer()
+        {
+#if !VCONTAINER
+            if (_subscriptions.Count > 0) return;
+            try
+            {
+                _subscriptions.Add(MessagePipeHelper.GetSubscriber<PostScreenEnterEvent>().Subscribe(HandlePostScreenEnter));
+                _subscriptions.Add(MessagePipeHelper.GetSubscriber<PlayAudioCueEvent>().Subscribe(HandlePlayAudioCueRequest));
+            }
+            catch (Exception e)
+            {
+                this.LogWarning($"AudioManager: MessagePipe subscription failed ({e.Message}); screen music and PlayAudioCueEvent are disabled.");
+            }
+#endif
         }
 
         private void HandlePlayAudioCueRequest(PlayAudioCueEvent eventArgs)
@@ -608,12 +683,19 @@ namespace _VuTH.Core.Audio
 
         private AudioSource GetInactiveMusicSource()
         {
-            if (!_activeMusicSource)
+            if (_activeMusicSource)
             {
-                return _musicSourceA;
+                return ReferenceEquals(_activeMusicSource, _musicSourceA) ? _musicSourceB : _musicSourceA;
             }
 
-            return ReferenceEquals(_activeMusicSource, _musicSourceA) ? _musicSourceB : _musicSourceA;
+            // No active music (e.g. right after StopMusicAsync): prefer a source that is not still fading out.
+            var aBusy = _playbacks.TryGetPlaybackId(_musicSourceA, out _);
+            var bBusy = _playbacks.TryGetPlaybackId(_musicSourceB, out _);
+            if (!aBusy) return _musicSourceA;
+            if (!bBusy) return _musicSourceB;
+
+            // Both still fading out: reuse the quieter one (the replaced playback stops immediately).
+            return _musicSourceA.volume <= _musicSourceB.volume ? _musicSourceA : _musicSourceB;
         }
 
         private AudioPlaybackEntry RegisterPlayback(AudioSource source, AudioChannel channel, float baseVolume, bool isMusic)

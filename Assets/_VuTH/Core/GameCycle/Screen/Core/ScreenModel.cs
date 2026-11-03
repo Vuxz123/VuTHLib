@@ -40,8 +40,13 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                  "Màn bên dưới không bị unload. Có thể ghi đè theo từng lần gọi Push(screen, hideScreenBelow, context).")]
         public bool hideScreenBelow;
 
-        [Tooltip("Nhạc nền sẽ phát khi vào màn hình này (Optional)")]
+        [Tooltip("Nhạc nền sẽ phát khi vào màn hình này (Optional). Để trống = giữ nguyên nhạc đang phát " +
+                 "(trừ khi bật Stop Music If No Background Music). AudioManager có thể ghi đè bằng AudioCue theo màn.")]
         public AudioClip backgroundMusic;
+
+        [Tooltip("Chỉ áp dụng khi Background Music để trống: tắt nhạc đang phát khi vào màn này. " +
+                 "Mặc định tắt = giữ nhạc (phù hợp cho popup / màn được Push lên).")]
+        public bool stopMusicIfNoBackgroundMusic;
 
         [Header("Loading Logic")]
         [Tooltip("Các task logic cần chạy xong mới được tắt Loading UI. Không phải Screen trong FlowGraph.")]

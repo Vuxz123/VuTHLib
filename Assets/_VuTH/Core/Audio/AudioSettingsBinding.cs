@@ -163,7 +163,13 @@ namespace _VuTH.Core.Audio
             {
                 if (OwnsPackage)
                 {
-                    Package.SaveNowAsync().Forget();
+                    // Release usually happens while quitting / tearing down: an async save may never complete and the
+                    // package is unregistered right below (so the persistence lifecycle flush won't see it either).
+                    // Write synchronously when the save backend supports it; async only as a fallback.
+                    if (Package.IsDirty && !Package.TrySaveImmediate())
+                    {
+                        Package.SaveNowAsync().Forget();
+                    }
 
                     if (IsRegistered)
                     {

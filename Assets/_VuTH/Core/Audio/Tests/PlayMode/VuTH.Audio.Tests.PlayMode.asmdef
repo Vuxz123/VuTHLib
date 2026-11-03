@@ -3,6 +3,7 @@
     "rootNamespace": "",
     "references": [
         "VuTH.Audio",
+        "VuTH.Screen",
         "VuTH.Common",
         "UnityEngine.TestRunner",
         "UniTask"
