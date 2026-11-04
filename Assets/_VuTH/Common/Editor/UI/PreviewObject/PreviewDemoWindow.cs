@@ -8,6 +8,8 @@ namespace _VuTH.Common.Editor.UI.PreviewObject
     public class PreviewDemoWindow : EditorWindow
     {
         private const float PreviewSize = 80f;
+        private const float RowHeight = 44f;
+        private const float Spacing = 6f;
 
         private Sprite _sprite;
         private Texture2D _texture2D;
@@ -53,9 +55,17 @@ namespace _VuTH.Common.Editor.UI.PreviewObject
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
             value = (T)EditorGUILayout.ObjectField(value, typeof(T), allowSceneObjects);
 
+            // The three layouts: card (square), row (wide) and inline (single line).
             var rect = GUILayoutUtility.GetRect(PreviewSize, PreviewSize, GUILayout.ExpandWidth(true));
-            var size = Mathf.Min(rect.width, PreviewSize);
-            PreviewObjectDrawer.DrawObjectPreview(new Rect(rect.x + (rect.width - size) * 0.5f, rect.y, size, size), value);
+            var card = new Rect(rect.x, rect.y, PreviewSize, PreviewSize);
+            var right = Rect.MinMaxRect(card.xMax + Spacing, rect.y, rect.xMax, rect.yMax);
+            var row = new Rect(right.x, right.y, right.width, RowHeight);
+            var inline = new Rect(right.x, rect.yMax - EditorGUIUtility.singleLineHeight, right.width,
+                EditorGUIUtility.singleLineHeight);
+
+            PreviewObjectDrawer.DrawObjectPreview(card, value);
+            PreviewObjectDrawer.DrawObjectPreview(row, value);
+            PreviewObjectDrawer.DrawObjectPreview(inline, value);
 
             EditorGUILayout.EndVertical();
             return value;

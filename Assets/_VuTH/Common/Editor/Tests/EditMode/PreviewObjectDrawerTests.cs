@@ -99,6 +99,62 @@ namespace _VuTH.Common.Editor.Tests.EditMode
             Assert.AreEqual(area, PreviewObjectDrawer.FitToAspect(area, 0f, 10f), "degenerate content keeps the area");
         }
 
+        private static bool Inside(Rect outer, Rect inner) =>
+            inner.xMin >= outer.xMin - 0.01f && inner.yMin >= outer.yMin - 0.01f &&
+            inner.xMax <= outer.xMax + 0.01f && inner.yMax <= outer.yMax + 0.01f;
+
+        [Test]
+        public void Layout_SingleLine_IsInline_IconThenName()
+        {
+            var rect = new Rect(10f, 20f, 200f, 18f);
+            var layout = PreviewObjectDrawer.CalculateLayout(rect);
+
+            Assert.AreEqual(PreviewObjectDrawer.PreviewLayoutMode.Inline, layout.Mode);
+            Assert.IsTrue(Inside(rect, layout.Thumbnail));
+            Assert.LessOrEqual(layout.Thumbnail.width, 16f);
+            Assert.Greater(layout.Title.xMin, layout.Thumbnail.xMax, "name right of the icon");
+            Assert.IsTrue(Inside(rect, layout.Title));
+        }
+
+        [Test]
+        public void Layout_Wide_IsRow_SquareThumbnailThenNameAndType()
+        {
+            var rect = new Rect(0f, 0f, 240f, 48f);
+            var layout = PreviewObjectDrawer.CalculateLayout(rect);
+
+            Assert.AreEqual(PreviewObjectDrawer.PreviewLayoutMode.Row, layout.Mode);
+            Assert.AreEqual(layout.Thumbnail.width, layout.Thumbnail.height, "square thumbnail");
+            Assert.Greater(layout.Title.xMin, layout.Thumbnail.xMax);
+            Assert.Greater(layout.Subtitle.width, 0f, "type shown under the name");
+            Assert.AreEqual(layout.Title.yMax, layout.Subtitle.yMin);
+            Assert.IsTrue(Inside(rect, layout.Subtitle));
+        }
+
+        [Test]
+        public void Layout_Square_IsCard_WithCaptionBelow()
+        {
+            // Used to give the name no room at all for square rects.
+            var rect = new Rect(0f, 0f, 80f, 80f);
+            var layout = PreviewObjectDrawer.CalculateLayout(rect);
+
+            Assert.AreEqual(PreviewObjectDrawer.PreviewLayoutMode.Card, layout.Mode);
+            Assert.Greater(layout.Title.width, 0f, "caption visible");
+            Assert.GreaterOrEqual(layout.Title.yMin, layout.Thumbnail.yMax, "caption below the thumbnail");
+            Assert.IsTrue(Inside(rect, layout.Title));
+            Assert.IsTrue(Inside(rect, layout.Thumbnail));
+        }
+
+        [Test]
+        public void Layout_TooSmallForText_KeepsOnlyThePicture()
+        {
+            var narrowCard = PreviewObjectDrawer.CalculateLayout(new Rect(0f, 0f, 30f, 40f));
+            Assert.AreEqual(Rect.zero, narrowCard.Title);
+            Assert.Greater(narrowCard.Thumbnail.width, 0f);
+
+            var tinyInline = PreviewObjectDrawer.CalculateLayout(new Rect(0f, 0f, 30f, 18f));
+            Assert.AreEqual(Rect.zero, tinyInline.Title);
+        }
+
         [Test]
         public void SpriteUv_IsNormalized_AndSafeForEmptyTextures()
         {
