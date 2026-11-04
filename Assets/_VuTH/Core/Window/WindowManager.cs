@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using _VuTH.Common;
@@ -24,11 +24,8 @@ namespace _VuTH.Core.Window
         [SerializeField, ReadOnlyField] private WindowProfile config;
         [SerializeField] private Transform windowRoot;
 
-#if VCONTAINER
-        [Inject] public IPoolManager Pool;
-#else
-        public IPoolManager Pool;
-#endif
+        // Injected; falls back to the PoolManager singleton without DI.
+        private IPoolManager _pool;
 
         [SerializeField] private Component inputBlockerComponent;
         [SerializeField] private Component transitionFactoryComponent;
@@ -114,10 +111,11 @@ namespace _VuTH.Core.Window
         public event Action<UIViewBase> OnWindowClosed;
 
 #if VCONTAINER
-        public override void ConfigureRootScope(IContainerBuilder builder)
+        /// <summary>Stores dependencies only; they are used from <see cref="InitializeBootstrap"/> on.</summary>
+        [Inject]
+        public void Construct(IPoolManager pool)
         {
-            // Provide this manager as a service. No injection required.
-            builder.RegisterComponent(this).AsImplementedInterfaces();
+            _pool = pool;
         }
 #endif
 
@@ -133,9 +131,9 @@ namespace _VuTH.Core.Window
             if (transitionFactoryComponent)
                 _transitionFactory = transitionFactoryComponent.GetComponent<IUITransitionFactory>();
 
-            if (!Pool.IsAlive()) Pool = PoolManager.Instance;
+            if (!_pool.IsAlive()) _pool = PoolManager.HasInstance ? PoolManager.Instance : null;
 
-            if (Pool == null)
+            if (_pool == null)
                 this.LogError("PoolManager is not available. Window instantiation will fail.");
 
             if (_inputBlocker == null)
@@ -229,14 +227,14 @@ namespace _VuTH.Core.Window
 
         private TWindow SpawnWindow<TWindow>(GameObject prefab) where TWindow : UIViewBase
         {
-            if (Pool == null)
+            if (_pool == null)
             {
                 this.LogError("Cannot spawn window because PoolManager is null.");
                 return null;
             }
 
             // Use Transform component as spawn handle
-            var spawnedTransform = Pool.Spawn(prefab.transform, parent: windowRoot);
+            var spawnedTransform = _pool.Spawn(prefab.transform, parent: windowRoot);
             if (!spawnedTransform)
                 return null;
 
@@ -245,7 +243,7 @@ namespace _VuTH.Core.Window
             if (!window)
             {
                 this.LogError($"Spawned prefab '{prefab.name}' does not have component {typeof(TWindow).Name}");
-                Pool.Despawn(instance);
+                _pool.Despawn(instance);
                 return null;
             }
 
@@ -385,7 +383,7 @@ namespace _VuTH.Core.Window
                 OnWindowClosed?.Invoke(handle.Window);
                 handle.Window.OnViewHidden();
 
-                Pool.OrNull()?.Despawn(handle.Window.gameObject);
+                _pool.OrNull()?.Despawn(handle.Window.gameObject);
 
                 // Reset CloseAll mode when there are no windows left.
                 if (closeAllModeAtClose != CloseAllMode.None && _windows.Count == 0)
@@ -500,7 +498,7 @@ namespace _VuTH.Core.Window
                     OnWindowClosed?.Invoke(w);
                     w.OnViewHidden();
 
-                    Pool.OrNull()?.Despawn(w.gameObject);
+                    _pool.OrNull()?.Despawn(w.gameObject);
                 }
 
                 _windows.ClearWindows();

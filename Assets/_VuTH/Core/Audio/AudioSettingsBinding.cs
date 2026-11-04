@@ -17,15 +17,27 @@ namespace _VuTH.Core.Audio
     {
         private readonly List<IDisposable> _subscriptions = new();
         private readonly Action _onSettingsChanged;
+        private readonly Func<IDataPersistenceManager> _persistenceProvider;
 
         private CancellationTokenSource _registrationCts;
         private IDataPersistenceManager _persistenceManager;
 
         /// <param name="onSettingsChanged">Invoked whenever a setting of the bound package emits a value.</param>
-        public AudioSettingsBinding(Action onSettingsChanged)
+        /// <param name="persistenceProvider">
+        /// Returns the persistence manager to use, or null when there is none (yet). Defaults to the
+        /// <see cref="DataPersistenceManager"/> singleton, for setups without DI.
+        /// </param>
+        public AudioSettingsBinding(Action onSettingsChanged, Func<IDataPersistenceManager> persistenceProvider = null)
         {
             _onSettingsChanged = onSettingsChanged ?? throw new ArgumentNullException(nameof(onSettingsChanged));
+            _persistenceProvider = persistenceProvider ?? DefaultPersistence;
         }
+
+        private static IDataPersistenceManager DefaultPersistence() =>
+            DataPersistenceManager.HasInstance ? DataPersistenceManager.Instance : null;
+
+        /// <summary>The persistence manager currently available (alive), or null.</summary>
+        public IDataPersistenceManager ResolvePersistence() => _persistenceProvider().OrNull();
 
         /// <summary>The bound settings package, or null when none is bound.</summary>
         public AudioSettingsPackage Package { get; private set; }
@@ -78,12 +90,13 @@ namespace _VuTH.Core.Audio
         /// </summary>
         public bool TryBindRegisteredPackage()
         {
-            if (!DataPersistenceManager.HasInstance)
+            var persistence = ResolvePersistence();
+            if (persistence == null)
             {
                 return false;
             }
 
-            _persistenceManager = DataPersistenceManager.Instance;
+            _persistenceManager = persistence;
             if (!_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) || package == null)
             {
                 return false;
@@ -94,18 +107,24 @@ namespace _VuTH.Core.Audio
         }
 
         /// <summary>
-        /// Registers the owned, not yet registered package in <see cref="DataPersistenceManager"/>. If the manager already
+        /// Registers the owned, not yet registered package in the persistence manager. If the manager already
         /// holds an <see cref="AudioSettingsPackage"/>, that one is bound instead. Returns false when there is nothing to
         /// register or no persistence manager instance exists yet.
         /// </summary>
         public bool TryRegisterOwnedPackage()
         {
-            if (IsRegistered || !OwnsPackage || Package == null || !DataPersistenceManager.HasInstance)
+            if (IsRegistered || !OwnsPackage || Package == null)
             {
                 return false;
             }
 
-            _persistenceManager = DataPersistenceManager.Instance;
+            var persistence = ResolvePersistence();
+            if (persistence == null)
+            {
+                return false;
+            }
+
+            _persistenceManager = persistence;
             if (_persistenceManager.TryGetPackage<AudioSettingsPackage>(out var package) && package != null)
             {
                 Bind(package, ownsPackage: false, isRegistered: true);

@@ -165,9 +165,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow.Tests.EditMode
         public ILocalScreenEventRegistration LocalEventRegistration => null;
         public bool CanPop { get; set; }
         public bool IsOverriding { get; set; }
-        public bool IsEnabledSystem => true;
-        public void EnableSystem(bool enable) { }
-        public void ToggleSystem() { }
+        public bool IsInitialized => true;
         public UniTask Enter(ScreenModel screen) => Enter(screen, TransitionContext.Default);
         public UniTask Enter(ScreenIdentifier screenID) => UniTask.CompletedTask;
         public UniTask Enter(ScreenIdentifier screenID, TransitionContext context) => UniTask.CompletedTask;

@@ -32,6 +32,7 @@ namespace _VuTH.Core.Persistent.DataPackage
     {
         private ISaveService? _saveService;
         private SaveLifecycleHook? _lifecycleHook;
+        private IReadOnlyList<IPersistencePackage>? _injectedPackages;
 
         private readonly List<IPersistencePackage> _configuredPackages = new();
         private readonly List<IPersistencePackage> _packages = new();
@@ -46,20 +47,19 @@ namespace _VuTH.Core.Persistent.DataPackage
         #region VContainer DI
 
 #if VCONTAINER
+        /// <summary>Stores dependencies only; packages start loading in <see cref="InitializeBootstrap"/>.</summary>
         [Inject]
         public void Construct(ISaveManager saveManager, SaveLifecycleHook lifecycleHook, IReadOnlyList<IPersistencePackage> packages)
         {
             _saveService = saveManager;
             _lifecycleHook = lifecycleHook;
-            
-            if (_saveService == null)
-            {
-                Debug.LogError("[DataPersistenceManager] ISaveManager does not implement ISaveService!");
-            }
+            _injectedPackages = packages;
 
-            BeginInitializePackages(packages);
+            // Injected after initialization (manager placed in a scene rather than created by the bootstrap).
+            if (IsManagerInitialized) BeginInitializePackages(packages);
         }
-        
+
+
         public override void ConfigureRootScope(IContainerBuilder builder)
         {
             foreach (var package in GetConfiguredPackages())
@@ -67,7 +67,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                 builder.RegisterInstance(package).As<IPersistencePackage>();
             }
 
-            builder.RegisterComponent(this).AsImplementedInterfaces();
+            RegisterSelf(builder);
             RegisterLifecycleHook(builder);
         }
 
@@ -92,11 +92,15 @@ namespace _VuTH.Core.Persistent.DataPackage
             this.Log("Initializing Data Persistence Manager...");
 
 #if VCONTAINER
-            this.Log("DataPersistenceManager: VCONTAINER defined - waiting for DI Construct()");
-#else
-            this.Log("DataPersistenceManager: VCONTAINER not defined - using fallback initialization");
-            InitializeWithoutVContainer();
+            if (_saveService != null)
+            {
+                BeginInitializePackages(_injectedPackages ?? GetConfiguredPackages());
+                return;
+            }
+
+            // Not injected (not created through the root scope): fall back to the singletons.
 #endif
+            InitializeWithoutVContainer();
         }
 
         /// <summary>
@@ -136,7 +140,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             try
             {
-                if (!await WaitForSaveServiceReadyAsync(cancellationToken))
+                if (!IsSaveServiceReady())
                 {
                     return;
                 }
@@ -178,7 +182,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             return false;
         }
 
-        private async UniTask<bool> WaitForSaveServiceReadyAsync(CancellationToken cancellationToken)
+        private bool IsSaveServiceReady()
         {
             if (_saveService == null)
             {
@@ -186,28 +190,15 @@ namespace _VuTH.Core.Persistent.DataPackage
                 return false;
             }
 
-            if (_saveService is not SaveServiceManager saveServiceManager)
+            // The save manager initializes first (lower bootstrap order), so it is ready here: no polling.
+            if (_saveService is ICommonManager { IsInitialized: false })
             {
-                return true;
+                this.LogError("The save manager is not initialized. Give it a lower bootstrap order than the " +
+                              "DataPersistenceManager so it initializes first.");
+                return false;
             }
 
-            const int maxFramesToWait = 300;
-            var waitedFrames = 0;
-
-            while (!saveServiceManager.IsInitialized && waitedFrames < maxFramesToWait)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                waitedFrames++;
-                await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
-            }
-
-            if (saveServiceManager.IsInitialized)
-            {
-                return true;
-            }
-
-            this.LogError("SaveServiceManager was injected but never finished initialization before persistence packages were loaded.");
-            return false;
+            return true;
         }
 
         private async UniTask InitializePackageAsync(IPersistencePackage package, CancellationToken cancellationToken)
@@ -494,7 +485,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// This flag does not mean that every package ever registered with the manager is fully loaded.
         /// Packages added later through <see cref="RegisterPackage"/> may still be loading after this becomes true.
         /// </remarks>
-        public bool IsInitialized => _initialized;
+        public override bool IsInitialized => _initialized;
 
         /// <summary>
         /// Get the number of registered packages.

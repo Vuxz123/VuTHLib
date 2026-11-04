@@ -16,7 +16,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         UniTask SaveAllAsync();
         void LoadAll();
         UniTask LoadAllAsync();
-        bool IsInitialized { get; }
+        new bool IsInitialized { get; }
         int PackageCount { get; }
     }
 }

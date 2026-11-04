@@ -23,12 +23,16 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         
         private ScreenFlowStateContainer _state;
         private ScreenFlowActor _actor;
-        private IScreenFlowResolver _resolver;
+        private IScreenFlowResolver _graphResolver;
         
 #if VCONTAINER
-        public override void ConfigureRootScope(IContainerBuilder builder)
+        private IObjectResolver _resolver;
+
+        /// <summary>Stores the container; the screen manager is resolved when the flow navigates.</summary>
+        [Inject]
+        public void Construct(IObjectResolver resolver)
         {
-            builder.RegisterComponent(this).As<IScreenFlowManager>();
+            _resolver = resolver;
         }
 #endif
         
@@ -36,21 +40,34 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
         {
             SetupGraph();
             _state = new ScreenFlowStateContainer(historyCapacity);
-            _resolver = new ScreenFlowGraphResolver(graph);
+            _graphResolver = new ScreenFlowGraphResolver(graph);
 
             // init state
-            _state.Reset(_resolver.GetStartNode());
+            _state.Reset(_graphResolver.GetStartNode());
 
             _actor = new ScreenFlowActor(
                 _state,
-                _resolver,
-                new TransitionContext("screenflow"));
+                _graphResolver,
+                new TransitionContext("screenflow"),
+                ResolveScreenManager);
         }
 
         protected override void DeinitializeBootstrap()
         {
             _actor?.Dispose();
             _actor = null;
+        }
+
+        /// <summary>The injected screen manager when available, otherwise the singleton (setups without DI).</summary>
+        private IScreenManager ResolveScreenManager()
+        {
+#if VCONTAINER
+            if (_resolver != null && _resolver.TryResolve<IScreenManager>(out var injected) && injected.IsAlive())
+            {
+                return injected;
+            }
+#endif
+            return ScreenManager.HasInstance ? ScreenManager.Instance : null;
         }
 
         private void SetupGraph()
@@ -75,7 +92,7 @@ namespace _VuTH.Core.GameCycle.ScreenFlow
 
         public ScreenModel GetStartScreen()
         {
-            return _resolver.GetStartNode()?.Screen;
+            return _graphResolver.GetStartNode()?.Screen;
         }
 
         public void Trigger(string eventName)

@@ -94,27 +94,25 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         #region Bootstrap Lifecycle
 
+        // Injected SaveEvent publisher (null without DI: events go to a null publisher).
+        private IPublisher<SaveEvent>? _injectedEventPublisher;
+
 #if VCONTAINER
-        public override void ConfigureRootScope(IContainerBuilder builder)
-        {
-            builder.RegisterComponent(this).As<ISaveManager>();
-        }
-        
+        /// <summary>Stores the event publisher; the service is built in <see cref="InitializeBootstrap"/>.</summary>
         [Inject]
         public void Construct(IPublisher<SaveEvent> eventPublisher)
         {
-            InitializeSaveService(eventPublisher);
+            _injectedEventPublisher = eventPublisher;
+
+            // Injected after initialization (manager placed in a scene rather than created by the bootstrap):
+            // rebuild the service so it publishes SaveEvents.
+            if (IsManagerInitialized) InitializeSaveService(eventPublisher);
         }
 #endif
 
         protected override void InitializeBootstrap()
         {
             this.Log("Initializing Save Service...");
-#if VCONTAINER
-            this.Log("InitializeBootstrap: VCONTAINER defined. Waiting for DI Construct() to initialize save service.");
-#else
-            this.Log("InitializeBootstrap: VCONTAINER not defined. Will initialize save service directly.");
-#endif
 
             // Load profile from Resources
             _profile = Resources.Load<SaveServiceAdapterProfile>("SaveServiceAdapterProfile");
@@ -122,22 +120,15 @@ namespace _VuTH.Core.Persistent.SaveSystem
                 ? "InitializeBootstrap: SaveServiceAdapterProfile found."
                 : "InitializeBootstrap: SaveServiceAdapterProfile not found.");
 
-#if !VCONTAINER
-            InitializeSaveService(null);
-#else
-            // For VCONTAINER builds: if Construct() hasn't been called within a reasonable time,
-            // the test should call InitializeForTesting() method to initialize directly.
-            // This ensures the save service is initialized even when DI isn't used (e.g., in tests).
-#endif
+            InitializeSaveService(_injectedEventPublisher);
         }
 
         /// <summary>
-        /// Manual initialization for testing scenarios where VCONTAINER DI isn't used.
-        /// Call this after EnableSystem(true) in tests.
+        /// Rebuilds the save service, e.g. after a test replaced the backend (the service is first built in Awake).
         /// </summary>
         public void InitializeForTesting()
         {
-            InitializeSaveService(null);
+            InitializeSaveService(_injectedEventPublisher);
         }
 
         private void InitializeSaveService(IPublisher<SaveEvent>? eventPublisher)
@@ -318,7 +309,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
         /// <summary>
         /// Checks if the service is initialized.
         /// </summary>
-        public bool IsInitialized => _saveService != null;
+        public override bool IsInitialized => _saveService != null;
 
         #endregion
     }

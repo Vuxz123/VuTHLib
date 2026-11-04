@@ -30,8 +30,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
 
             object saveService = null;
             object backend = null;
-            object enableSystem = null;
-            object customLifecycle = null;
 
             if (manager != null)
             {
@@ -42,18 +40,11 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
                 saveService = saveServiceField?.GetValue(manager);
                 backend = backendField?.GetValue(manager);
 
-                var vManagerType = manager.GetType().BaseType?.BaseType;
-                var enableField = vManagerType?.GetField("enableSystem",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var customField = vManagerType?.GetField("customLifecycleManagement",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                enableSystem = enableField?.GetValue(manager);
-                customLifecycle = customField?.GetValue(manager);
             }
 
             Debug.Log(
                 $"[SaveServiceManagerPlayModeTests] {label} managerId={managerId} hasInstance={hasInstance} instanceId={instanceId} " +
-                $"instanceMatches={instanceMatches} enableSystem={enableSystem} customLifecycle={customLifecycle} backendNull={backend == null} " +
+                $"instanceMatches={instanceMatches} initialized={manager != null && manager.IsInitialized} backendNull={backend == null} " +
                 $"saveServiceNull={saveService == null}");
         }
 
@@ -92,15 +83,12 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
             var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
-            LogManagerState("Before EnableSystem");
+            LogManagerState("Before rebuild");
 
-            // Act - Enable system triggers InitializeManager -> InitializeBootstrap
-            _manager.EnableSystem(true);
-            
-            // For VCONTAINER builds, manually initialize since DI isn't used in tests
+            // Act - Awake already initialized the manager; rebuild the service with the temp backend
             _manager.InitializeForTesting();
             
-            LogManagerState("After EnableSystem");
+            LogManagerState("After rebuild");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");
 
@@ -121,10 +109,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
             var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
-            LogManagerState("Before EnableSystem");
-            _manager.EnableSystem(true);
-            _manager.InitializeForTesting();  // For VCONTAINER builds, manually initialize
-            LogManagerState("After EnableSystem");
+            LogManagerState("Before rebuild");
+            _manager.InitializeForTesting();  // rebuild with the temp backend
+            LogManagerState("After rebuild");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");
 
@@ -153,10 +140,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
             var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
             field?.SetValue(_manager, tempBackend);
 
-            LogManagerState("Before EnableSystem");
-            _manager.EnableSystem(true);
-            _manager.InitializeForTesting();  // For VCONTAINER builds, manually initialize
-            LogManagerState("After EnableSystem");
+            LogManagerState("Before rebuild");
+            _manager.InitializeForTesting();  // rebuild with the temp backend
+            LogManagerState("After rebuild");
             yield return new WaitForSeconds(0.5f);
             LogManagerState("After WaitForSeconds");
 

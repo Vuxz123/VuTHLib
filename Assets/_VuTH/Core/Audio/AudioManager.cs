@@ -72,21 +72,28 @@ namespace _VuTH.Core.Audio
         public bool Muted => Settings.Package?.Muted.Value ?? defaultMuted;
 
         private AudioSourcePool OneShotPool => _oneShotPool ??= new AudioSourcePool(CreateOneShotSource);
-        private AudioSettingsBinding Settings => _settings ??= new AudioSettingsBinding(RefreshAllVolumes);
+        private AudioSettingsBinding Settings => _settings ??= new AudioSettingsBinding(RefreshAllVolumes, ResolvePersistenceManager);
 
 #if VCONTAINER
+        private ISubscriber<PostScreenEnterEvent> _postScreenEnterSubscriber;
+        private ISubscriber<PlayAudioCueEvent> _playAudioCueSubscriber;
+        private IObjectResolver _resolver;
+#endif
+
+#if VCONTAINER
+        /// <summary>Stores dependencies only; they are used by <see cref="InitializeBootstrap"/>.</summary>
         [Inject]
         public void Construct(
             ISubscriber<PostScreenEnterEvent> postScreenEnterSubscriber,
-            ISubscriber<PlayAudioCueEvent> playAudioCueSubscriber)
+            ISubscriber<PlayAudioCueEvent> playAudioCueSubscriber,
+            IObjectResolver resolver)
         {
-            _subscriptions.Add(postScreenEnterSubscriber.Subscribe(HandlePostScreenEnter));
-            _subscriptions.Add(playAudioCueSubscriber.Subscribe(HandlePlayAudioCueRequest));
-        }
+            _postScreenEnterSubscriber = postScreenEnterSubscriber;
+            _playAudioCueSubscriber = playAudioCueSubscriber;
+            _resolver = resolver;
 
-        public override void ConfigureRootScope(IContainerBuilder builder)
-        {
-            builder.RegisterComponent(this).AsImplementedInterfaces();
+            // Injected after initialization (manager placed in a scene rather than created by the bootstrap).
+            if (IsManagerInitialized) SubscribeEvents();
         }
 #endif
 
@@ -94,7 +101,7 @@ namespace _VuTH.Core.Audio
         {
             EnsureRuntimeObjects();
             OneShotPool.Warm(initialOneShotSources);
-            SubscribeWithoutContainer();
+            SubscribeEvents();
             InitializeSettingsPackage();
             RefreshAllVolumes();
         }
@@ -683,14 +690,17 @@ namespace _VuTH.Core.Audio
         }
 
         /// <summary>
-        /// Without VContainer nobody calls <c>Construct</c>, so subscribe through the global MessagePipe broker
-        /// (same fallback ScreenManager uses for publishing). Otherwise screen music and PlayAudioCueEvent silently
-        /// did nothing.
+        /// Subscribes to screen-enter (per-screen music) and <see cref="PlayAudioCueEvent"/>: through the injected
+        /// subscribers, or — without VContainer — the global MessagePipe broker (same fallback ScreenManager uses).
         /// </summary>
-        private void SubscribeWithoutContainer()
+        private void SubscribeEvents()
         {
-#if !VCONTAINER
             if (_subscriptions.Count > 0) return;
+#if VCONTAINER
+            if (_postScreenEnterSubscriber == null || _playAudioCueSubscriber == null) return; // not injected (yet)
+            _subscriptions.Add(_postScreenEnterSubscriber.Subscribe(HandlePostScreenEnter));
+            _subscriptions.Add(_playAudioCueSubscriber.Subscribe(HandlePlayAudioCueRequest));
+#else
             try
             {
                 _subscriptions.Add(MessagePipeHelper.GetSubscriber<PostScreenEnterEvent>().Subscribe(HandlePostScreenEnter));
@@ -727,7 +737,7 @@ namespace _VuTH.Core.Audio
                 return;
             }
 
-            if (DataPersistenceManager.HasInstance)
+            if (ResolvePersistenceManager() != null)
             {
                 this.LogWarning("AudioManager: AudioSettingsPackage is not pre-registered in DataPersistenceManager. Falling back to self-registration.");
             }
@@ -739,6 +749,21 @@ namespace _VuTH.Core.Audio
             }
 
             Settings.StartDeferredRegistration();
+        }
+
+        /// <summary>
+        /// The persistence manager from the container when injected (it is optional: not every setup has one),
+        /// otherwise the singleton.
+        /// </summary>
+        private IDataPersistenceManager ResolvePersistenceManager()
+        {
+#if VCONTAINER
+            if (_resolver != null && _resolver.TryResolve<IDataPersistenceManager>(out var injected))
+            {
+                return injected.OrNull();
+            }
+#endif
+            return DataPersistenceManager.HasInstance ? DataPersistenceManager.Instance : null;
         }
 
         private void EnsureOwnedSettingsPackage()

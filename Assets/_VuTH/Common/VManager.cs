@@ -2,65 +2,38 @@
 
 namespace _VuTH.Common
 {
-    public abstract class VManager<T, TI> : VSingleton<T, TI>, IDeferredManagerInitialization
-        where T : VManager<T, TI>, TI, new() 
+    /// <summary>
+    /// Manager that can be switched on and off at runtime (<see cref="IToggleableManager"/>). For always-on managers
+    /// created at startup, use <see cref="VBootstrapManager{T,TI}"/>.
+    /// </summary>
+    public abstract class VManager<T, TI> : VManagerCore<T, TI>, IToggleableManager
+        where T : VManager<T, TI>, TI
         where TI : ICommonManager
     {
         [Header("Manager Settings")]
-        [SerializeField] protected bool enableSystem;
-        [SerializeField, Tooltip("If enabled, the manager's lifecycle (initialization and deinitialization) will be handled by custom Awake lifecycle management.")]
-        protected bool customLifecycleManagement = false;
+        [SerializeField, Tooltip("Whether the system is on. Enabled systems initialize in Awake.")]
+        protected bool enableSystem;
 
-        public virtual bool IsEnabledSystem
-        {
-            get => enableSystem;
-            private set => enableSystem = value;
-        }
-        
-        protected override void Awake()
-        {
-            base.Awake();
+        [SerializeField, Tooltip("If enabled, the manager does not initialize in Awake: call EnableSystem(true) yourself.")]
+        protected bool customLifecycleManagement;
 
-            // A duplicate is destroyed by VSingleton at the end of the frame: never let it initialize
-            // (it used to create runtime objects / subscriptions right before being destroyed).
-            if (!IsPrimaryInstance) return;
-            if (!IsEnabledSystem || customLifecycleManagement) return;
+        public bool IsEnabledSystem => enableSystem;
 
-            // Created during root DI configuration: initialize after injection instead (see VManagerInitializationGate).
-            if (VManagerInitializationGate.TryDefer(this)) return;
-
-            InitializeManager();
-        }
-
-        void IDeferredManagerInitialization.RunDeferredInitialization()
-        {
-            if (!this || !IsPrimaryInstance) return;
-            if (!IsEnabledSystem || customLifecycleManagement) return;
-            InitializeManager();
-        }
+        protected override bool InitializeOnAwake => enableSystem && !customLifecycleManagement;
 
         public virtual void EnableSystem(bool enable)
         {
-            if (enableSystem == enable)
-                return;
             enableSystem = enable;
-            if (enableSystem)
-            {
-                InitializeManager();
-            }
-            else
-            {
-                DeinitializeManager();
-            }
+
+            // Idempotent both ways. EnableSystem(true) also starts a manager whose flag was already set but which did
+            // not initialize yet (custom lifecycle management) — that used to be a no-op.
+            if (enable) EnsureInitialized();
+            else EnsureDeinitialized();
         }
 
         public void ToggleSystem()
         {
             EnableSystem(!enableSystem);
         }
-
-        protected abstract void InitializeManager();
-
-        protected abstract void DeinitializeManager();
     }
 }

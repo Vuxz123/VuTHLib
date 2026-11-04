@@ -27,51 +27,60 @@ Provides foundational MonoBehaviour patterns for singleton managers, bootstrap m
 #### `ICommonManager` (Interface)
 - **Purpose**: Common contract for all manager systems
 - **Key Members**:
-  - `bool IsEnabledSystem` - Whether the manager is active
-  - `void EnableSystem(bool enable)` - Enable/disable the system
-  - `void ToggleSystem()` - Toggle system state
+  - `bool IsInitialized` - True between initialization and deinitialization (or destruction)
+
+#### `IToggleableManager` (Interface)
+- **Purpose**: Managers that can be switched on and off at runtime (implemented by `VManager`, not by bootstrap managers)
+- **Key Members**:
+  - `bool IsEnabledSystem`
+  - `void EnableSystem(bool enable)` - Enabling initializes (if needed), disabling deinitializes; idempotent both ways
+  - `void ToggleSystem()`
 
 #### `VSingleton<T, TI>` (Generic MonoBehaviour Singleton)
 - **Purpose**: Generic singleton base class with interface support and optional VContainer integration
 - **Key Features**:
-  - `static TI Instance` - Access the singleton instance
-  - `static bool HasInstance` - Check if instance exists
+  - `static TI Instance` / `static bool HasInstance` - Service-locator access; prefer injecting `TI`, use these only where DI is not available
   - `protected virtual void Awake()` - Handles singleton instantiation, `DontDestroyOnLoad`
-  - Duplicate instances are automatically destroyed
+  - Duplicate instances are destroyed: the whole GameObject when it only holds the singleton, otherwise only the component
 - **VContainer Integration**: Implements `IBootstrapVContainerConfigurator` when `VCONTAINER` is defined
-  - Registers itself in root scope via `ConfigureRootScope(IContainerBuilder builder)`
-- **Pattern**: `where T : MonoBehaviour, TI` and `where TI : class`
+  - `ConfigureRootScope(builder)` calls `RegisterSelf(builder)`: `RegisterComponent` as `T`, `TI` and the interfaces `TI` extends (except `ICommonManager` / `IToggleableManager`). `RegisterComponent` injects the instance, so `[Inject]` methods run (the former `RegisterInstance` default never injected)
+  - Override `ConfigureRootScope` to register more, calling base
+- **Pattern**: `where T : MonoBehaviour, TI`
 
-#### `VManager<T, TI>` (Manager System Base)
-- **Purpose**: Extends VSingleton with enable/disable system lifecycle
+#### `VManagerCore<T, TI>` (Manager Lifecycle Base)
+- **Purpose**: Lifecycle shared by every manager
 - **Key Members**:
-  - `bool enableSystem` - Serialized field to toggle system
-  - `bool customLifecycleManagement` - Opt-out of auto Awake initialization
-  - `virtual bool IsEnabledSystem` - Property getter
-  - `virtual void EnableSystem(bool enable)` - Enable/disable with initialization callbacks
-  - `void ToggleSystem()` - Toggle between states
-  - `abstract void InitializeManager()` - Called when system is enabled
-  - `abstract void DeinitializeManager()` - Called when system is disabled
-- **Pattern**: `where T : VManager<T, TI>, TI, new()` and `where TI : ICommonManager`
+  - `abstract bool InitializeOnAwake` - Whether the manager initializes by itself in `Awake`
+  - `abstract void InitializeManager()` / `abstract void DeinitializeManager()` - Run at most once each, in pairs, only on the primary instance
+  - `protected void EnsureInitialized()` / `EnsureDeinitialized()` - Idempotent entry points
+  - `virtual bool IsInitialized`
+- **Lifecycle**:
+  - Initializes in `Awake`, or right after injection when created during root DI configuration (`VManagerInitializationGate`)
+  - Deinitializes in `OnDestroy` (scene teardown, leaving Play Mode, quitting); exceptions there are logged, not rethrown
+
+#### `VManager<T, TI>` (Toggleable Manager)
+- **Purpose**: `VManagerCore` + `IToggleableManager`
+- **Key Members**:
+  - `bool enableSystem` - Serialized: whether the system is on (enabled systems initialize in Awake)
+  - `bool customLifecycleManagement` - Serialized: no initialization in Awake; call `EnableSystem(true)` yourself
+- **Pattern**: `where T : VManager<T, TI>, TI` and `where TI : ICommonManager`
 
 #### `VBootstrapManager<T, TI>` (Bootstrap Manager)
-- **Purpose**: Specialized manager that is always enabled (bootstrap/initialization phase)
+- **Purpose**: Always-on manager created at startup by the bootstrap, ordered by `BootstrapOrder`
 - **Key Features**:
-  - `IsEnabledSystem` always returns `true` (setter does nothing)
-  - `EnableSystem(bool enable)` is overridden to do nothing
-  - Ideal for initialization systems that must run at startup
-- **Pattern**: Same generic constraints as `VManager`
+  - Always initializes in `Awake` (after injection when created by the bootstrap) and deinitializes when destroyed
+  - `InitializeBootstrap()` / `DeinitializeBootstrap()` abstract methods
+  - Initialize everything in `InitializeBootstrap()`: injected dependencies are available there. `[Inject]` methods only store dependencies (and apply them when the manager is already initialized, e.g. placed in a scene)
+  - Depend on other managers through their interfaces (injected), not through `X.Instance` (fallback only without DI)
+- **Pattern**: `where T : VBootstrapManager<T, TI>, TI` and `where TI : ICommonManager`
 
 ### How They Interact
 
 ```
-ICommonManager (interface)
-    ↑
-    ├── VSingleton<T, TI> (basic singleton)
-    │       ↑
-    │       ├── VManager<T, TI> (enable/disable system)
-    │       │       ↑
-    │       │       └── VBootstrapManager<T, TI> (always-enabled manager)
+VSingleton<T, TI>                 (singleton + default DI registration)
+    └── VManagerCore<T, TI>       (paired init / deinit, init gate)
+            ├── VManager<T, TI>           (IToggleableManager: enable / disable)
+            └── VBootstrapManager<T, TI>  (always on, BootstrapOrder)
 ```
 
 ### Patterns Used

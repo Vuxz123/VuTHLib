@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using _VuTH.Common;
@@ -66,15 +66,11 @@ namespace _VuTH.Core.Pool
         #endregion
 
 #if VCONTAINER
+        /// <summary>Stores the container used to inject spawned instances.</summary>
         [Inject]
         public void Construct(IObjectResolver container)
         {
             _container = container;
-        }
-
-        public override void ConfigureRootScope(IContainerBuilder builder)
-        {
-            builder.RegisterComponent(this).AsImplementedInterfaces();
         }
 #endif
 

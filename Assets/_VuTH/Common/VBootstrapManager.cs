@@ -1,39 +1,33 @@
 using _VuTH.Common.Log;
-using VContainer;
-using VContainer.Unity;
 
 namespace _VuTH.Common
 {
-    public abstract class VBootstrapManager<T, TI> : VManager<T, TI>, IBootstrapOrderProvider
-        where T : VBootstrapManager<T, TI>, TI, new()
+    /// <summary>
+    /// Always-on manager created at startup by the bootstrap (ordered by <see cref="BootstrapOrder"/>). It initializes
+    /// in <c>Awake</c> — after injection when created during root DI configuration — and deinitializes when destroyed.
+    /// <para>
+    /// Initialize everything in <see cref="InitializeBootstrap"/>: injected dependencies are already available there.
+    /// <c>[Inject]</c> methods should only store dependencies (and apply them when the manager is already initialized,
+    /// e.g. when it was placed in a scene instead of being created by the bootstrap).
+    /// </para>
+    /// </summary>
+    public abstract class VBootstrapManager<T, TI> : VManagerCore<T, TI>, IBootstrapOrderProvider
+        where T : VBootstrapManager<T, TI>, TI
         where TI : ICommonManager
     {
         [UnityEngine.SerializeField] private int bootstrapOrder;
 
         public int BootstrapOrder => bootstrapOrder;
 
-        public override bool IsEnabledSystem
-        {
-            get
-            {
-                // Always return true to indicate the bootstrap manager is always enabled
-                enableSystem = true;
-                return true;
-            }
-        }
+        protected sealed override bool InitializeOnAwake => true;
 
-        public override void EnableSystem(bool enable)
-        {
-            // Do nothing to ensure the bootstrap manager is always enabled
-        }
-
-        protected override void InitializeManager()
+        protected sealed override void InitializeManager()
         {
             this.Log("Bootstrap Manager Initializing...");
             InitializeBootstrap();
         }
 
-        protected override void DeinitializeManager()
+        protected sealed override void DeinitializeManager()
         {
             DeinitializeBootstrap();
         }

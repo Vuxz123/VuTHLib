@@ -273,25 +273,25 @@ VirtualCamera (MonoBehaviour)
 ```csharp
 public interface ICommonManager
 {
-    bool IsEnabledSystem { get; }
-    void EnableSystem(bool enable);
-    void ToggleSystem();
+    bool IsInitialized { get; }
 }
 ```
+Runtime on / off switching is `IToggleableManager` (implemented by `VManager`); bootstrap managers are always on.
 
 ---
 
 ### VBootstrapManager<T, TI>
 
 **Base class for all bootstrap managers:**
-- Inherits from `VManager<T, TI>`
-- Always enabled (returns true for `IsEnabledSystem`)
+- Inherits from `VManagerCore<T, TI>`
+- Always initialized: in `Awake`, or right after injection when created by `BootstrapManagerCentral`
+- `DeinitializeBootstrap()` runs when the manager is destroyed
 - Provides `InitializeBootstrap()` / `DeinitializeBootstrap()` abstract methods
 
 **Inheritance Chain:**
 ```
 VSingleton<T, TI>
-    └── VManager<T, TI>
+    └── VManagerCore<T, TI>
             └── VBootstrapManager<T, TI>
                     └── CameraManager
 ```
@@ -301,10 +301,10 @@ VSingleton<T, TI>
 ### VSingleton<T, TI>
 
 **Generic singleton base for MonoBehaviours:**
-- Implements singleton pattern with `Instance` and `HasInstance` static properties
+- Implements singleton pattern with `Instance` and `HasInstance` static properties (fallback when DI is not available)
 - `DontDestroyOnLoad` for persistent managers
 - Destroys duplicate instances
-- Optional VContainer integration via `ConfigureRootScope()`
+- Optional VContainer integration via `ConfigureRootScope()`: registered (and injected) as itself, its interface and the interfaces that interface extends
 
 ---
 
