@@ -8,8 +8,9 @@ using UnityEngine;
 namespace _VuTH.Core.Persistent.SaveSystem.Backend
 {
     /// <summary>
-    /// Backend using Unity's PlayerPrefs.
-    /// Suitable for simple local storage needs.
+    /// Backend using Unity's PlayerPrefs. The default backend (it is what shipped builds used so far).
+    /// Suited to small saves only: PlayerPrefs live in the registry on Windows and are capped at about 1 MB on WebGL.
+    /// Use <see cref="JsonFileSaveBackend"/> for larger data.
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Backend", sourceAssembly: "VuTH.Persistant.SaveSystem")]
@@ -22,7 +23,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             PlayerPrefs.Save();
         }
 
-        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken)
+        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
             
@@ -38,7 +39,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             }
         }
 
-        public async UniTask<string?> LoadRawAsync(string key, CancellationToken cancellationToken)
+        public async UniTask<string?> LoadRawAsync(string key, CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
             
@@ -50,13 +51,13 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             return PlayerPrefs.GetString(key);
         }
 
-        public async UniTask<bool> Exists(string key, CancellationToken cancellationToken)
+        public async UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
             return PlayerPrefs.HasKey(key);
         }
 
-        public async UniTask DeleteAsync(string key, CancellationToken cancellationToken)
+        public async UniTask DeleteAsync(string key, CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
             

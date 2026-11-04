@@ -22,16 +22,26 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
 
         public UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
         {
+            if (WriteError != null) throw WriteError;
             _storage[key] = data;
             return UniTask.CompletedTask;
         }
 
+        /// <summary>When set, reads throw (simulates an unreadable disk).</summary>
+        public Exception ReadError;
+
+        /// <summary>When set, writes throw.</summary>
+        public Exception WriteError;
+
         public UniTask<string?> LoadRawAsync(string key, CancellationToken cancellationToken = default)
         {
+            if (ReadError != null) throw ReadError;
             return UniTask.FromResult(_storage.TryGetValue(key, out var value) ? value : null);
         }
 
-        public UniTask<bool> Exists(string key, CancellationToken cancellationToken = default)
+        public string Raw(string key) => _storage.TryGetValue(key, out var value) ? value : null;
+
+        public UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
         {
             return UniTask.FromResult(_storage.ContainsKey(key));
         }
@@ -226,6 +236,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
             // Arrange
             _saveService = new SaveService(_backend, _serializer, new FailingEncryptor(), eventPublisher: _eventPublisher);
             await _backend.SaveRawAsync("bad_key", "some_data");
+            UnityEngine.TestTools.LogAssert.Expect(UnityEngine.LogType.Error,
+                new System.Text.RegularExpressions.Regex("Corrupted"));
 
             // Act
             var result = await _saveService.LoadAsync("bad_key", new TestData { Value = -2 });

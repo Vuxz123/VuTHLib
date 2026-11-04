@@ -7,11 +7,10 @@ using System.Linq;
 namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 {
     /// <summary>
-    /// Composite encryptor - chains multiple encryptors together.
-    /// Example: Base64 → XOR → AES for layered obfuscation + encryption.
+    /// Composite encryptor - chains multiple encryptors together (e.g. XOR then AES).
     /// Encrypts in order, decrypts in reverse order.
     /// </summary>
-    public abstract class CompositeEncryptor : IEncryptor
+    public class CompositeEncryptor : IEncryptor
     {
         private readonly IEncryptor[] _encryptors;
 

@@ -2,6 +2,9 @@ using System;
 using System.Collections;
 using System.IO;
 using _VuTH.Core.Persistent.SaveSystem.Backend;
+using _VuTH.Core.Persistent.SaveSystem.Encrypt;
+using _VuTH.Core.Persistent.SaveSystem.Profile;
+using _VuTH.Core.Persistent.SaveSystem.Serialize;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -11,42 +14,12 @@ using Object = UnityEngine.Object;
 namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
 {
     /// <summary>
-    /// PlayMode tests for SaveServiceManager lifecycle.
-    /// Tests integration with Unity scene lifecycle.
+    /// PlayMode tests for SaveServiceManager lifecycle and configuration.
     /// </summary>
     public class SaveServiceManagerPlayModeTests
     {
         private SaveServiceManager _manager;
         private string _tempDir;
-
-        private void LogManagerState(string label)
-        {
-            var manager = _manager;
-            var managerId = manager != null ? manager.GetInstanceID() : -1;
-            var hasInstance = SaveServiceManager.HasInstance;
-            var instance = SaveServiceManager.Instance as SaveServiceManager;
-            var instanceId = instance != null ? instance.GetInstanceID() : -1;
-            var instanceMatches = instance != null && manager != null && ReferenceEquals(instance, manager);
-
-            object saveService = null;
-            object backend = null;
-
-            if (manager != null)
-            {
-                var saveServiceField = typeof(SaveServiceManager).GetField("_saveService",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var backendField = typeof(SaveServiceManager).GetField("_backend",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                saveService = saveServiceField?.GetValue(manager);
-                backend = backendField?.GetValue(manager);
-
-            }
-
-            Debug.Log(
-                $"[SaveServiceManagerPlayModeTests] {label} managerId={managerId} hasInstance={hasInstance} instanceId={instanceId} " +
-                $"instanceMatches={instanceMatches} initialized={manager != null && manager.IsInitialized} backendNull={backend == null} " +
-                $"saveServiceNull={saveService == null}");
-        }
 
         [SetUp]
         public void SetUp()
@@ -70,52 +43,30 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
             }
         }
 
+        /// <summary>Awake initializes the manager; WithBackend then rebuilds the service on the temp folder.</summary>
+        private SaveServiceManager CreateManager()
+        {
+            _manager = new GameObject("SaveServiceManager").AddComponent<SaveServiceManager>();
+            _manager.WithBackend(new JsonFileSaveBackend(_tempDir));
+            return _manager;
+        }
+
         [UnityTest]
         public IEnumerator Initialize_WithDefaultConfig_CreatesService()
         {
-            // Arrange
-            var go = new GameObject("SaveServiceManager");
-            _manager = go.AddComponent<SaveServiceManager>();
+            CreateManager();
+            yield return null;
 
-            // Inject temp backend before Init
-            var field = typeof(SaveServiceManager).GetField("_backend",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
-            field?.SetValue(_manager, tempBackend);
-
-            LogManagerState("Before rebuild");
-
-            // Act - Awake already initialized the manager; rebuild the service with the temp backend
-            _manager.InitializeForTesting();
-            
-            LogManagerState("After rebuild");
-            yield return new WaitForSeconds(0.5f);
-            LogManagerState("After WaitForSeconds");
-
-            // Assert - SaveServiceManager itself is the ISaveManager
-            Assert.IsNotNull(_manager, "SaveServiceManager should implement ISaveManager");
+            Assert.IsTrue(_manager.IsInitialized, "The service is built in Awake");
+            Assert.AreEqual(SaveService.DefaultSchemaVersion, _manager.GetSchemaVersion());
         }
 
         [UnityTest]
         public IEnumerator SaveAndLoad_WithProfile_ChecksRoundTrip()
         {
-            // Arrange
-            var go = new GameObject("SaveServiceManager");
-            _manager = go.AddComponent<SaveServiceManager>();
+            CreateManager();
+            yield return null;
 
-            // Inject temp backend
-            var field = typeof(SaveServiceManager).GetField("_backend",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
-            field?.SetValue(_manager, tempBackend);
-
-            LogManagerState("Before rebuild");
-            _manager.InitializeForTesting();  // rebuild with the temp backend
-            LogManagerState("After rebuild");
-            yield return new WaitForSeconds(0.5f);
-            LogManagerState("After WaitForSeconds");
-
-            // Act
             var testData = new TestPlayData { Score = 100, Name = "Player1" };
             yield return _manager.SaveAsync("test_key", testData).ToCoroutine();
 
@@ -123,7 +74,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
             yield return _manager.LoadAsync("test_key", new TestPlayData())
                 .ContinueWith(result => loaded = result).ToCoroutine();
 
-            // Assert
             Assert.AreEqual(100, loaded.Score, "Score should match");
             Assert.AreEqual("Player1", loaded.Name, "Name should match");
         }
@@ -131,30 +81,62 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
         [UnityTest]
         public IEnumerator Load_MissingKey_ReturnsDefault()
         {
-            // Arrange
-            var go = new GameObject("SaveServiceManager");
-            _manager = go.AddComponent<SaveServiceManager>();
+            CreateManager();
+            yield return null;
 
-            var field = typeof(SaveServiceManager).GetField("_backend",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            var tempBackend = new JsonFileSaveBackend(_tempDir);  // Pass directory, not file path
-            field?.SetValue(_manager, tempBackend);
-
-            LogManagerState("Before rebuild");
-            _manager.InitializeForTesting();  // rebuild with the temp backend
-            LogManagerState("After rebuild");
-            yield return new WaitForSeconds(0.5f);
-            LogManagerState("After WaitForSeconds");
-
-            // Act
             var defaultData = new TestPlayData { Score = -1, Name = "Default" };
             var loaded = default(TestPlayData);
-            yield return _manager.LoadAsync<TestPlayData>("missing_key", defaultData)
+            yield return _manager.LoadAsync("missing_key", defaultData)
                 .ContinueWith(result => loaded = result).ToCoroutine();
 
-            // Assert
             Assert.AreEqual(-1, loaded.Score, "Should return default score");
             Assert.AreEqual("Default", loaded.Name, "Should return default name");
+        }
+
+        [Test]
+        public void ShippedProfile_DeserializesItsAdapters_AndTheyWork()
+        {
+            // The asset used to be in an older format: every adapter came back null and the defaults were used instead.
+            var profile = Resources.Load<SaveServiceAdapterProfile>(SaveServiceAdapterProfile.ResourcePath);
+
+            Assert.IsNotNull(profile, "Resources/SaveServiceAdapterProfile");
+            Assert.IsInstanceOf<XorEncryptor>(profile.Encryptor);
+            Assert.IsInstanceOf<NewtonsoftJsonSerializer>(profile.Serializer);
+            Assert.IsInstanceOf<PlayerPrefsSaveBackend>(profile.Backend);
+            Assert.AreEqual(SaveService.DefaultSchemaVersion, profile.SchemaVersion);
+
+            // SerializeReference instances must be fully constructed (e.g. the XOR key).
+            Assert.AreEqual("hello", profile.Encryptor.Decrypt(profile.Encryptor.Encrypt("hello")));
+        }
+
+        [UnityTest]
+        public IEnumerator WithEncryptor_AfterInitialization_IsApplied()
+        {
+            // With* calls were overwritten by the profile when the service was built.
+            CreateManager();
+            _manager.WithEncryptor(new NoOpEncryptor());
+            yield return null;
+
+            yield return _manager.SaveAsync("plain", new TestPlayData { Score = 7 }).ToCoroutine();
+
+            var stored = File.ReadAllText(Path.Combine(_tempDir, "plain.json"));
+            StringAssert.Contains("schemaVersion", stored, "NoOpEncryptor stores the JSON as is");
+        }
+
+        [UnityTest]
+        public IEnumerator WithSchemaVersion_NewerSave_IsNotLoaded()
+        {
+            CreateManager().WithSchemaVersion(3);
+            yield return _manager.SaveAsync("versioned", new TestPlayData { Score = 1 }).ToCoroutine();
+
+            _manager.WithSchemaVersion(2); // e.g. the game was downgraded
+            var result = default(SaveLoadResult<TestPlayData>);
+            LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("UnsupportedVersion"));
+            yield return _manager.TryLoadAsync<TestPlayData>("versioned")
+                .ContinueWith(r => result = r).ToCoroutine();
+
+            Assert.AreEqual(SaveLoadStatus.UnsupportedVersion, result.Status);
+            Assert.IsFalse(result.CanOverwrite);
         }
     }
 

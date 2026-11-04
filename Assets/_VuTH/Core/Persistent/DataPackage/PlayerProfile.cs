@@ -39,8 +39,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             Gold = new PersistentField<long>(this, 0);
             Exp = new PersistentField<long>(this, 0);
             HighScore = new PersistentField<int>(this, 0);
-            // Note: SaveLifecycleHook only saves ManualOnly/OnAppClose packages.
-            // Debounced packages auto-save via R3 throttle — no hook registration needed.
+            // Immediate: every change is saved right away (concurrent changes are coalesced into one more save).
         }
         
         // Step 2 (continued): Implement ExtractPayload - map fields to DTO
@@ -72,8 +71,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         // Example gameplay method - no need to manually save!
         public void AddGold(long amount)
         {
-            Gold.Value += amount;
-            // Debounced strategy will auto-save after 3 seconds without changes
+            Gold.Value += amount; // saved by the Immediate strategy
         }
         
         // Example gameplay method
@@ -88,7 +86,6 @@ namespace _VuTH.Core.Persistent.DataPackage
                 Level.Value++;
                 Exp.Value -= expNeeded;
             }
-            // Debounced will auto-save
         }
         
         public override void Dispose()

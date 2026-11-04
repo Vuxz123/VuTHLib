@@ -74,7 +74,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.EditMode
             CancellationToken ct = CancellationToken.None;
             await backend.SaveRawAsync("to_delete", "data", ct);
             CancellationToken ct2 = CancellationToken.None;
-            Assert.IsTrue(await backend.Exists("to_delete", ct2));
+            Assert.IsTrue(await backend.ExistsAsync("to_delete", ct2));
 
             // Act
             CancellationToken ct3 = CancellationToken.None;
@@ -82,7 +82,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.EditMode
 
             // Assert
             CancellationToken ct4 = CancellationToken.None;
-            Assert.IsFalse(await backend.Exists("to_delete", ct4), "Key should be deleted");
+            Assert.IsFalse(await backend.ExistsAsync("to_delete", ct4), "Key should be deleted");
         }
 
         [Test]
@@ -93,11 +93,11 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.EditMode
 
             // Act & Assert
             CancellationToken ct = CancellationToken.None;
-            Assert.IsFalse(await backend.Exists("new_key", ct), "Should not exist before save");
+            Assert.IsFalse(await backend.ExistsAsync("new_key", ct), "Should not exist before save");
             CancellationToken ct2 = CancellationToken.None;
             await backend.SaveRawAsync("new_key", "data", ct2);
             CancellationToken ct3 = CancellationToken.None;
-            Assert.IsTrue(await backend.Exists("new_key", ct3), "Should exist after save");
+            Assert.IsTrue(await backend.ExistsAsync("new_key", ct3), "Should exist after save");
         }
     }
 

@@ -2,25 +2,26 @@ using UnityEngine.Scripting.APIUpdating;
 #nullable enable
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
-using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using ZLinq;
 
 namespace _VuTH.Core.Persistent.SaveSystem.Backend
 {
     /// <summary>
-    /// Backend using JSON files in Application.persistentDataPath.
-    /// Suitable for larger data or when file system access is needed.
+    /// Backend storing one JSON file per key in <see cref="Application.persistentDataPath"/> (or a custom folder).
+    /// Writes go to a temporary file that is then swapped in, so a crash mid-write never leaves a truncated save.
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Backend", sourceAssembly: "VuTH.Persistant.SaveSystem")]
     public class JsonFileSaveBackend : ISaveBackend, ISyncSaveBackend
     {
+        private const string Extension = ".json";
+
         private readonly string? _basePath = null;
-        
-        private string GetBasePath => _basePath ?? Application.persistentDataPath;
+
+        private string BasePath => _basePath ?? Application.persistentDataPath;
 
         public JsonFileSaveBackend()
         {
@@ -31,34 +32,109 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             _basePath = basePath;
         }
 
-        private string GetFilePath(string key)
+        #region Paths
+
+        /// <summary>
+        /// File of a key. Keys with characters that are invalid in file names get a hash suffix, so two keys that
+        /// sanitize to the same name ("a/b" and "a_b") never share a file.
+        /// </summary>
+        internal string GetFilePath(string key)
         {
-            // Sanitize key to be a valid filename
-            key = Path.GetInvalidFileNameChars()
-                .AsValueEnumerable()
-                .Aggregate(key, (current, invalidFileNameChar) => 
-                    current.Replace(invalidFileNameChar, '_'));
-            var filePath = Path.Combine(GetBasePath, $"{key}.json");
-            this.Log($"GetFilePath key='{key}' basePath='{GetBasePath}' result='{filePath}'");
-            return filePath;
+            var sanitized = Sanitize(key);
+            var fileName = sanitized == key ? key : $"{sanitized}-{StableHash(key):x8}";
+            return Path.Combine(BasePath, fileName + Extension);
         }
 
         /// <summary>
-        /// Synchronous write used for app pause / quit flushes.
-        /// Writes to a temp file first and then swaps it in, so a kill mid-write cannot leave a truncated save.
+        /// Pre-hash file name of a key with invalid characters: read when the key has no file of its own yet, so saves
+        /// written by older versions still load. Never written or deleted.
         /// </summary>
+        private string? GetLegacyFilePath(string key)
+        {
+            var sanitized = Sanitize(key);
+            return sanitized == key ? null : Path.Combine(BasePath, sanitized + Extension);
+        }
+
+        private string? FindExistingFile(string key)
+        {
+            var path = GetFilePath(key);
+            if (File.Exists(path)) return path;
+
+            var legacy = GetLegacyFilePath(key);
+            return legacy != null && File.Exists(legacy) ? legacy : null;
+        }
+
+        private static string Sanitize(string key)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            var builder = new StringBuilder(key.Length);
+            foreach (var c in key)
+            {
+                builder.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>FNV-1a: stable across runs and platforms, unlike <see cref="string.GetHashCode()"/>.</summary>
+        private static uint StableHash(string value)
+        {
+            var hash = 2166136261u;
+            foreach (var c in value)
+            {
+                hash = (hash ^ c) * 16777619u;
+            }
+
+            return hash;
+        }
+
+        #endregion
+
+        #region Write
+
+        /// <summary>Synchronous write used for app pause / quit flushes.</summary>
         public void SaveRaw(string key, string data)
         {
             var filePath = GetFilePath(key);
-            var directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            var tempPath = PrepareTempPath(filePath);
+            try
             {
-                Directory.CreateDirectory(directory);
+                File.WriteAllText(tempPath, data);
+                SwapIn(tempPath, filePath);
             }
+            catch
+            {
+                TryDelete(tempPath);
+                throw;
+            }
+        }
 
-            var tempPath = filePath + ".tmp";
-            File.WriteAllText(tempPath, data);
+        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
+        {
+            var filePath = GetFilePath(key);
+            var tempPath = PrepareTempPath(filePath);
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, data, cancellationToken);
+                SwapIn(tempPath, filePath);
+            }
+            catch
+            {
+                TryDelete(tempPath);
+                throw;
+            }
+        }
 
+        /// <summary>Unique per write: a sync flush and an in-flight async save never share a temp file.</summary>
+        private static string PrepareTempPath(string filePath)
+        {
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            return $"{filePath}.{Guid.NewGuid():N}.tmp";
+        }
+
+        private static void SwapIn(string tempPath, string filePath)
+        {
             if (!File.Exists(filePath))
             {
                 File.Move(tempPath, filePath);
@@ -77,78 +153,55 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             }
         }
 
-        public async UniTask SaveRawAsync(string key, string? data, CancellationToken cancellationToken)
+        private static void TryDelete(string path)
         {
-            string filePath = GetFilePath(key);
-            this.Log($"SaveRawAsync key='{key}' filePath='{filePath}' dataLength={data?.Length ?? 0}");
-            
             try
             {
-                // Ensure directory exists
-                string? directory = Path.GetDirectoryName(filePath);
-                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-                {
-                    this.Log($"Creating directory: {directory}");
-                    Directory.CreateDirectory(directory);
-                }
-
-                await File.WriteAllTextAsync(filePath, data, cancellationToken);
-                this.Log($"SaveRawAsync SUCCESS for key '{key}'");
+                if (File.Exists(path)) File.Delete(path);
             }
-            catch (Exception ex)
+            catch
             {
-                this.LogError($"Save failed for key '{key}': {ex.Message}");
-                throw;
+                // Best effort: a stray temp file is harmless.
             }
         }
 
-        public async UniTask<string?> LoadRawAsync(
-            string key, CancellationToken cancellationToken)
+        #endregion
+
+        #region Read / delete
+
+        public async UniTask<string?> LoadRawAsync(string key, CancellationToken cancellationToken = default)
         {
-            var filePath = GetFilePath(key);
-            this.Log($"LoadRawAsync key='{key}' filePath='{filePath}'");
-            
+            var filePath = FindExistingFile(key);
+            if (filePath == null) return null;
+
             try
             {
-                if (!File.Exists(filePath))
-                {
-                    this.Log($"LoadRawAsync: File does not exist: {filePath}");
-                    return null;
-                }
-
-                var result = await File.ReadAllTextAsync(filePath, cancellationToken);
-                this.Log($"LoadRawAsync SUCCESS for key '{key}' length={result?.Length ?? 0}");
-                return result;
+                return await File.ReadAllTextAsync(filePath, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
-                this.LogError($"Load failed for key '{key}': {ex.Message}");
-                return null;
+                return null; // Deleted between the check and the read.
             }
         }
 
-        public async UniTask<bool> Exists(string key, CancellationToken cancellationToken)
+        public UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
         {
-            var filePath = GetFilePath(key);
-            return File.Exists(filePath);
+            cancellationToken.ThrowIfCancellationRequested();
+            return UniTask.FromResult(FindExistingFile(key) != null);
         }
 
-        public async UniTask DeleteAsync(string key, CancellationToken cancellationToken)
+        public UniTask DeleteAsync(string key, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // The legacy file is not deleted: its name is also the file of the key it sanitized to ("a/b" → "a_b"),
+            // which may hold another key's data.
             var filePath = GetFilePath(key);
-            
-            try
-            {
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
-            }
-            catch (Exception ex)
-            {
-                this.LogError($"Delete failed for key '{key}': {ex.Message}");
-                throw;
-            }
+            if (File.Exists(filePath)) File.Delete(filePath);
+
+            return UniTask.CompletedTask;
         }
+
+        #endregion
     }
 }

@@ -9,10 +9,13 @@ using UnityEngine;
 namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 {
     /// <summary>
-    /// Unity device-specific obfuscation.
-    /// Uses SystemInfo.deviceUniqueIdentifier to create device-specific encryption.
-    /// Save files encrypted on one device won't work on another device.
-    /// Good for preventing save file sharing between players.
+    /// Device-bound XOR obfuscation keyed by <see cref="SystemInfo.deviceUniqueIdentifier"/>: a save copied to another
+    /// device cannot be read. NOT encryption.
+    /// <para>
+    /// WARNING: the identifier is not guaranteed to be stable. It can change after an OS reset, and on iOS when every
+    /// app of the vendor is uninstalled; saves become unreadable then (reported as corrupted and backed up). Do not
+    /// use it for data the player cannot afford to lose, or for saves synced to the cloud.
+    /// </para>
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
@@ -59,24 +62,17 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
             if (string.IsNullOrEmpty(cipherText))
                 return cipherText;
 
-            try
-            {
-                var bytes = Convert.FromBase64String(cipherText);
-                var result = new byte[bytes.Length];
+            // Throws FormatException on invalid data: the save service reports it as corrupted.
+            var bytes = Convert.FromBase64String(cipherText);
+            var result = new byte[bytes.Length];
 
-                // XOR with device key (same operation for encrypt/decrypt)
-                for (int i = 0; i < bytes.Length; i++)
-                {
-                    result[i] = (byte)(bytes[i] ^ _deviceKey[i % _deviceKey.Length]);
-                }
-
-                return Encoding.UTF8.GetString(result);
-            }
-            catch (FormatException)
+            // XOR with device key (same operation for encrypt/decrypt)
+            for (int i = 0; i < bytes.Length; i++)
             {
-                Debug.LogWarning("[UnityObfuscation] Invalid encrypted data");
-                return cipherText;
+                result[i] = (byte)(bytes[i] ^ _deviceKey[i % _deviceKey.Length]);
             }
+
+            return Encoding.UTF8.GetString(result);
         }
     }
 }

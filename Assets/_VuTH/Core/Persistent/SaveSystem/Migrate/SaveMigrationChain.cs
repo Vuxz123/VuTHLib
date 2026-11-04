@@ -1,61 +1,86 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using _VuTH.Core.Persistent.SaveSystem.Serialize;
+﻿using System;
+using System.Collections.Generic;
 
 namespace _VuTH.Core.Persistent.SaveSystem.Migrate
 {
     /// <summary>
-    /// Manages a chain of migrators to handle version upgrades.
+    /// Ordered set of migrators that upgrades a payload from its stored schema version to the current one.
+    /// Every step must be covered: a missing migrator is an error, never a silent pass-through. When a version bump
+    /// does not change the format, register a <see cref="DefaultSaveMigrator"/> for that step.
     /// </summary>
     public class SaveMigrationChain
     {
-        private readonly List<ISaveMigrator> _migrators = new();
-        private readonly ISerializer _serializer;
+        private readonly SortedDictionary<int, ISaveMigrator> _migrators = new();
 
-        public SaveMigrationChain(ISerializer serializer)
-        {
-            _serializer = serializer;
-        }
+        public int Count => _migrators.Count;
 
+        /// <summary>Adds a migrator. Throws if it is invalid or another one already starts at its version.</summary>
         public void AddMigrator(ISaveMigrator migrator)
         {
-            _migrators.Add(migrator);
-            // Sort by FromVersion to ensure correct order
-            _migrators.Sort((a, b) => a.FromVersion.CompareTo(b.FromVersion));
+            if (migrator == null) throw new ArgumentNullException(nameof(migrator));
+
+            if (migrator.ToVersion <= migrator.FromVersion)
+            {
+                throw new ArgumentException(
+                    $"{migrator.GetType().Name} must migrate to a higher version " +
+                    $"(from {migrator.FromVersion} to {migrator.ToVersion}).", nameof(migrator));
+            }
+
+            if (_migrators.TryGetValue(migrator.FromVersion, out var existing))
+            {
+                throw new ArgumentException(
+                    $"Two migrators start at schema version {migrator.FromVersion}: " +
+                    $"{existing.GetType().Name} and {migrator.GetType().Name}.", nameof(migrator));
+            }
+
+            _migrators.Add(migrator.FromVersion, migrator);
         }
 
         /// <summary>
-        /// Migrates raw payload from its current version to the target version.
+        /// Migrates <paramref name="rawPayload"/> from <paramref name="currentVersion"/> to
+        /// <paramref name="targetVersion"/>. Throws <see cref="SaveMigrationException"/> when a step is missing.
         /// </summary>
         public string Migrate(string rawPayload, int currentVersion, int targetVersion)
         {
-            if (currentVersion == targetVersion)
+            if (currentVersion > targetVersion)
             {
-                return rawPayload;
+                throw new SaveMigrationException(
+                    $"Cannot migrate down from schema version {currentVersion} to {targetVersion}.");
             }
 
-            var migratedPayload = rawPayload;
-            var fromVersion = currentVersion;
+            var payload = rawPayload;
+            var version = currentVersion;
 
-            // Find and apply migrators in sequence
-            while (fromVersion < targetVersion)
+            while (version < targetVersion)
             {
-                var migrator = _migrators.FirstOrDefault(m => m.FromVersion == fromVersion);
-                if (migrator == null)
+                if (!_migrators.TryGetValue(version, out var migrator))
                 {
-                    // No migrator found - use default passthrough
-                    var defaultMigrator = new DefaultSaveMigrator(fromVersion, fromVersion + 1, _serializer);
-                    migratedPayload = defaultMigrator.Migrate(migratedPayload);
-                }
-                else
-                {
-                    migratedPayload = migrator.Migrate(migratedPayload);
+                    throw new SaveMigrationException(
+                        $"No migrator from schema version {version} (target {targetVersion}). Register one — " +
+                        $"a DefaultSaveMigrator({version}, {version + 1}) if the format did not change.");
                 }
 
-                fromVersion++;
+                if (migrator.ToVersion > targetVersion)
+                {
+                    throw new SaveMigrationException(
+                        $"{migrator.GetType().Name} migrates to schema version {migrator.ToVersion}, " +
+                        $"past the target {targetVersion}.");
+                }
+
+                payload = migrator.Migrate(payload) ?? throw new SaveMigrationException(
+                    $"{migrator.GetType().Name} returned no payload (from schema version {version}).");
+                version = migrator.ToVersion;
             }
 
-            return migratedPayload;
+            return payload;
+        }
+    }
+
+    /// <summary>Thrown when a save cannot be migrated to the current schema version.</summary>
+    public class SaveMigrationException : Exception
+    {
+        public SaveMigrationException(string message) : base(message)
+        {
         }
     }
 }

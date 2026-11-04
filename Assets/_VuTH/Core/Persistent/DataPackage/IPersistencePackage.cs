@@ -1,3 +1,4 @@
+using System.Threading;
 using _VuTH.Core.Persistent.SaveSystem;
 using Cysharp.Threading.Tasks;
 using R3;
@@ -31,9 +32,26 @@ namespace _VuTH.Core.Persistent.DataPackage
         Observable<bool> DirtyObservable { get; }
         
         /// <summary>
-        /// Debounce time in seconds for Debounced strategy.
+        /// Save interval in seconds for the <see cref="SaveStrategy.Debounced"/> strategy.
         /// </summary>
         float DebounceSeconds { get; }
+
+        /// <summary>
+        /// Outcome of the last load, or null before the first load completed.
+        /// </summary>
+        SaveLoadStatus? LoadStatus { get; }
+
+        /// <summary>
+        /// False when the last load could not confirm that the stored data may be overwritten (unreadable storage,
+        /// newer schema version, failed migration). Saves are then refused, so that data is not lost.
+        /// </summary>
+        bool CanSave { get; }
+
+        /// <summary>
+        /// Completes when the first load finished, whatever its outcome (see <see cref="LoadStatus"/>).
+        /// Changes made before that are overwritten by the loaded data.
+        /// </summary>
+        UniTask WaitUntilLoadedAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Set the save service used by this package.

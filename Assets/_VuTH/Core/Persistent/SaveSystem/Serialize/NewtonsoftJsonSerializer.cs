@@ -2,10 +2,8 @@ using UnityEngine.Scripting.APIUpdating;
 #nullable enable
 
 using System;
-using _VuTH.Common.Log;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
-using VContainer;
 
 namespace _VuTH.Core.Persistent.SaveSystem.Serialize
 {
@@ -81,7 +79,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Serialize
             }
             catch (Exception ex)
             {
-                this.LogError($"Serialize failed: {ex.Message}");
                 throw new InvalidOperationException($"Failed to serialize {typeof(T).Name}: {ex.Message}", ex);
             }
         }
@@ -98,7 +95,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Serialize
             }
             catch (Exception ex)
             {
-                this.LogError($"Deserialize failed: {ex.Message}");
                 throw new InvalidOperationException($"Failed to deserialize {typeof(T).Name}: {ex.Message}", ex);
             }
         }

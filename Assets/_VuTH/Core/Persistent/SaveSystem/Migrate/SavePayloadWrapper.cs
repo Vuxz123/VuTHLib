@@ -3,18 +3,18 @@
 namespace _VuTH.Core.Persistent.SaveSystem.Migrate
 {
     /// <summary>
-    /// Wrapper for save payload with schema versioning.
+    /// Stored envelope: the serialized data plus the schema version it was written with.
     /// </summary>
     public class SavePayloadWrapper
     {
+        /// <summary>0 when missing from the stored data.</summary>
         public int SchemaVersion;
-        public string Payload;
+
+        /// <summary>Null when missing from the stored data (treated as corrupted).</summary>
+        public string? Payload;
 
         public SavePayloadWrapper()
         {
-            // Schema version 2: Migrated from System.Text.Json to Newtonsoft.Json
-            SchemaVersion = 2;
-            Payload = string.Empty;
         }
 
         public SavePayloadWrapper(int version, string data)

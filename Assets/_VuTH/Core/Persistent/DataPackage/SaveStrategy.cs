@@ -13,8 +13,9 @@ namespace _VuTH.Core.Persistent.DataPackage
         Immediate,
         
         /// <summary>
-        /// Debounced save - waits for X seconds without changes before saving.
-        /// Optimizes I/O for gameplay data like Gold, Exp.
+        /// Saves at most once every <see cref="IPersistencePackage.DebounceSeconds"/>: the first change starts the timer and
+        /// the latest data is saved when it ends, so data that keeps changing is still saved regularly. Dirty data is also
+        /// flushed on app pause / quit. Optimizes I/O for gameplay data like Gold, Exp.
         /// </summary>
         Debounced,
         

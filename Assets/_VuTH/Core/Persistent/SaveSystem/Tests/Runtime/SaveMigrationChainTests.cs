@@ -22,7 +22,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
         public void Migrate_WithSpecificMigrator_AppliesTransform()
         {
             // Arrange
-            var chain = new SaveMigrationChain(_serializer);
+            var chain = new SaveMigrationChain();
             chain.AddMigrator(new VersionMigrator(1, 2, _serializer));
             var rawPayload = "v1_data";
 
@@ -34,25 +34,60 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
         }
 
         [Test]
-        public void Migrate_MissingMigrator_UsesDefaultPassthrough()
+        public void Migrate_MissingMigrator_Throws()
         {
-            // Arrange
-            var chain = new SaveMigrationChain(_serializer);
-            // No migrators added
-            var rawPayload = "unchanged_data";
+            // A missing step used to silently pass the old payload through as if it were the new format.
+            var chain = new SaveMigrationChain();
 
-            // Act
-            var result = chain.Migrate(rawPayload, 1, 2);
+            var error = Assert.Throws<SaveMigrationException>(() => chain.Migrate("unchanged_data", 1, 2));
+            StringAssert.Contains("No migrator from schema version 1", error.Message);
+        }
 
-            // Assert - DefaultSaveMigrator should pass through
-            Assert.AreEqual(rawPayload, result, "Default migrator should pass through");
+        [Test]
+        public void Migrate_DefaultSaveMigrator_PassesThrough()
+        {
+            var chain = new SaveMigrationChain();
+            chain.AddMigrator(new DefaultSaveMigrator(1, 2));
+
+            Assert.AreEqual("unchanged_data", chain.Migrate("unchanged_data", 1, 2));
+        }
+
+        [Test]
+        public void Migrate_HonorsToVersion_ForMultiVersionSteps()
+        {
+            var chain = new SaveMigrationChain();
+            chain.AddMigrator(new VersionMigrator(1, 3, _serializer));
+            chain.AddMigrator(new VersionMigrator(3, 4, _serializer));
+
+            Assert.AreEqual("migrated_from_v3_to_v4", chain.Migrate("v1", 1, 4));
+        }
+
+        [Test]
+        public void Migrate_Downgrade_Throws()
+        {
+            Assert.Throws<SaveMigrationException>(() => new SaveMigrationChain().Migrate("x", 3, 2));
+        }
+
+        [Test]
+        public void AddMigrator_DuplicateStartVersion_Throws()
+        {
+            var chain = new SaveMigrationChain();
+            chain.AddMigrator(new DefaultSaveMigrator(1, 2));
+
+            Assert.Throws<System.ArgumentException>(() => chain.AddMigrator(new VersionMigrator(1, 2, _serializer)));
+        }
+
+        [Test]
+        public void AddMigrator_NotIncreasingVersion_Throws()
+        {
+            Assert.Throws<System.ArgumentException>(() => new SaveMigrationChain().AddMigrator(new DefaultSaveMigrator(2, 2)));
         }
 
         [Test]
         public void Migrate_MultiStep_AppliesInSequence()
         {
             // Arrange
-            var chain = new SaveMigrationChain(_serializer);
+            var chain = new SaveMigrationChain();
             chain.AddMigrator(new VersionMigrator(1, 2, _serializer));
             chain.AddMigrator(new VersionMigrator(2, 3, _serializer));
             var rawPayload = "v1";

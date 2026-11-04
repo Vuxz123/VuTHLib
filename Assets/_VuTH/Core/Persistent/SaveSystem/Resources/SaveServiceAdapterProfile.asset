@@ -11,12 +11,24 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ad498cb2a77fd32498534ee7fa6bacca, type: 3}
   m_Name: SaveServiceAdapterProfile
-  m_EditorClassIdentifier: VuTH.Persistent.SaveSystem::VuTH.Core.Persistent.SaveSystem.SaveServiceAdapterProfile
-  encryptorTypeName: VuTH.Core.Persistent.SaveSystem.Encrypt.XorEncryptor, VuTH.Core.Persistent
-  serializerTypeName: VuTH.Core.Persistent.SaveSystem.Serialize.NewtonsoftJsonSerializer,
-    VuTH.Core.Persistent
-  backendTypeName: VuTH.Core.Persistent.SaveSystem.Backend.PlayerPrefsSaveBackend,
-    VuTH.Core.Persistent
-  eventPublisherTypeName: VuTH.Core.Persistent.SaveSystem.Events.NullSaveEventPublisher,
-    VuTH.Core.Persistent
-  migratorTypeNames: []
+  m_EditorClassIdentifier: VuTH.Persistent.SaveSystem::_VuTH.Core.Persistent.SaveSystem.Profile.SaveServiceAdapterProfile
+  encryptor:
+    rid: 1000
+  serializer:
+    rid: 1001
+  backend:
+    rid: 1002
+  schemaVersion: 1
+  migrators: []
+  references:
+    version: 2
+    RefIds:
+    - rid: 1000
+      type: {class: XorEncryptor, ns: _VuTH.Core.Persistent.SaveSystem.Encrypt, asm: VuTH.Persistent.SaveSystem}
+      data: 
+    - rid: 1001
+      type: {class: NewtonsoftJsonSerializer, ns: _VuTH.Core.Persistent.SaveSystem.Serialize, asm: VuTH.Persistent.SaveSystem}
+      data: 
+    - rid: 1002
+      type: {class: PlayerPrefsSaveBackend, ns: _VuTH.Core.Persistent.SaveSystem.Backend, asm: VuTH.Persistent.SaveSystem}
+      data: 

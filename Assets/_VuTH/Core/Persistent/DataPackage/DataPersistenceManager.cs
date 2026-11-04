@@ -22,11 +22,9 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// <remarks>
     /// Package initialization is started asynchronously and is not a blocking bootstrap barrier for other managers.
     /// Resolving a package instance does not guarantee that its persisted data has finished loading.
-    /// <see cref="IsInitialized"/> only becomes true after the initially configured packages have completed loading.
-    /// Packages registered later via <see cref="RegisterPackage"/> are initialized asynchronously as well and are not guaranteed
-    /// to be ready immediately after registration returns.
-    /// Consumers that require loaded persistence data must explicitly wait for a readiness signal instead of assuming that
-    /// registration, resolution, or manager construction implies load completion.
+    /// <see cref="IsInitialized"/> only becomes true after the initially configured packages have completed loading; await
+    /// <see cref="WaitUntilReadyAsync"/> for that. Packages registered later via <see cref="RegisterPackage"/> load
+    /// asynchronously as well: await their <see cref="IPersistencePackage.WaitUntilLoadedAsync"/>.
     /// </remarks>
     public class DataPersistenceManager : VBootstrapManager<DataPersistenceManager, IDataPersistenceManager>, IDataPersistenceManager
     {
@@ -40,6 +38,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         private readonly HashSet<IPersistencePackage> _initializedPackages = new();
         private readonly HashSet<IPersistencePackage> _initializingPackages = new();
         private CancellationTokenSource? _initializationCts;
+        private UniTaskCompletionSource _readySource = new();
         private bool _configuredPackagesLoaded;
         private bool _initializationStarted;
         private bool _initialized;
@@ -64,7 +63,8 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             foreach (var package in GetConfiguredPackages())
             {
-                builder.RegisterInstance(package).As<IPersistencePackage>();
+                // Also as its concrete type, so consumers can inject e.g. PlayerProfilePackage directly.
+                builder.RegisterInstance(package).AsSelf();
             }
 
             RegisterSelf(builder);
@@ -115,7 +115,9 @@ namespace _VuTH.Core.Persistent.DataPackage
             
             if (_saveService == null)
             {
-                this.LogError("Cannot find ISaveService! Make sure SaveServiceManager is initialized.");
+                const string error = "Cannot find ISaveService! Make sure SaveServiceManager is initialized.";
+                this.LogError(error);
+                _readySource.TrySetException(new InvalidOperationException(error));
                 return;
             }
 
@@ -126,8 +128,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             foreach (var package in initialPackages)
             {
-                if (_packages.Contains(package)) continue;
-                _packages.Add(package);
+                TryAddPackage(package);
             }
 
             if (_initializationStarted) return;
@@ -140,8 +141,10 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             try
             {
-                if (!IsSaveServiceReady())
+                if (!IsSaveServiceReady(out var error))
                 {
+                    this.LogError(error);
+                    _readySource.TrySetException(new InvalidOperationException(error));
                     return;
                 }
 
@@ -152,15 +155,17 @@ namespace _VuTH.Core.Persistent.DataPackage
                 }
 
                 _initialized = true;
+                _readySource.TrySetResult();
                 this.Log($"Initialized {_packages.Count} persistence packages");
             }
             catch (OperationCanceledException)
             {
+                _readySource.TrySetCanceled();
             }
             catch (Exception e)
             {
-                this.LogError($"Exception during package initialization: {e}");
-                Debug.LogException(e);
+                Debug.LogException(e, this);
+                _readySource.TrySetException(e);
             }
         }
 
@@ -182,22 +187,41 @@ namespace _VuTH.Core.Persistent.DataPackage
             return false;
         }
 
-        private bool IsSaveServiceReady()
+        private bool IsSaveServiceReady(out string error)
         {
             if (_saveService == null)
             {
-                this.LogError("Cannot initialize packages because ISaveService is missing.");
+                error = "Cannot initialize packages because ISaveService is missing.";
                 return false;
             }
 
             // The save manager initializes first (lower bootstrap order), so it is ready here: no polling.
             if (_saveService is ICommonManager { IsInitialized: false })
             {
-                this.LogError("The save manager is not initialized. Give it a lower bootstrap order than the " +
-                              "DataPersistenceManager so it initializes first.");
+                error = "The save manager is not initialized. Give it a lower bootstrap order than the " +
+                        "DataPersistenceManager so it initializes first.";
                 return false;
             }
 
+            error = string.Empty;
+            return true;
+        }
+
+        /// <summary>Adds a package unless it is already managed or its storage key is taken.</summary>
+        private bool TryAddPackage(IPersistencePackage package)
+        {
+            if (_packages.Contains(package)) return false;
+
+            foreach (var existing in _packages)
+            {
+                if (existing.StorageKey != package.StorageKey) continue;
+
+                this.LogError($"Package {package.GetType().Name} uses the storage key '{package.StorageKey}' of " +
+                              $"{existing.GetType().Name}; it is not registered, as they would overwrite each other's save.");
+                return false;
+            }
+
+            _packages.Add(package);
             return true;
         }
 
@@ -359,6 +383,10 @@ namespace _VuTH.Core.Persistent.DataPackage
             _packageTypeCache.Clear();
             _initializationStarted = false;
             _initialized = false;
+
+            // Anyone still waiting is released; the next initialization gets a new signal.
+            _readySource.TrySetCanceled();
+            _readySource = new UniTaskCompletionSource();
             this.Log("DataPersistenceManager deinitialized.");
         }
 
@@ -385,13 +413,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// </remarks>
         public void RegisterPackage(IPersistencePackage package)
         {
-            if (_packages.Contains(package))
-            {
-                this.Log($"Skipped duplicate package registration: {package.StorageKey}");
-                return;
-            }
-
-            _packages.Add(package);
+            if (!TryAddPackage(package)) return;
             this.Log($"Registered package: {package.StorageKey}");
 
             if (!_initializationStarted)
@@ -448,34 +470,53 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public async UniTask SaveAllAsync()
         {
-            foreach (var package in _packages.AsValueEnumerable().Where(package => package.IsDirty))
+            // Copy: a save may cause (un)registration.
+            foreach (var package in new List<IPersistencePackage>(_packages))
             {
-                await package.SaveNowAsync();
+                if (package.IsDirty) await package.SaveNowAsync();
             }
-
-            this.Log("Saved all dirty packages");
         }
 
         /// <summary>
-        /// Load all packages from storage.
+        /// Reload all packages from storage.
         /// </summary>
         /// <remarks>
         /// This method triggers <see cref="LoadAllAsync"/> via <c>Forget()</c> and returns immediately.
         /// Use <see cref="LoadAllAsync"/> when the caller must await completion.
         /// </remarks>
-        public void LoadAll()
+        public void LoadAll(bool discardUnsavedChanges = false)
         {
-            LoadAllAsync().Forget();
+            LoadAllAsync(discardUnsavedChanges).Forget();
         }
 
-        public async UniTask LoadAllAsync()
+        /// <summary>
+        /// Reloads every package. Packages with unsaved changes are skipped (with a warning) unless
+        /// <paramref name="discardUnsavedChanges"/> is true.
+        /// </summary>
+        public async UniTask LoadAllAsync(bool discardUnsavedChanges = false)
         {
-            foreach (var package in _packages)
+            // Copy: a load may cause (un)registration.
+            foreach (var package in new List<IPersistencePackage>(_packages))
             {
+                if (package.IsDirty && !discardUnsavedChanges)
+                {
+                    this.LogWarning($"Skipped reloading '{package.StorageKey}': it has unsaved changes.");
+                    continue;
+                }
+
                 await package.LoadAsync();
             }
+        }
 
-            this.Log("Loaded all packages");
+        /// <summary>
+        /// Completes when the initially configured packages finished loading. Throws if the initialization failed
+        /// (e.g. no save service), and is canceled if the manager is torn down first.
+        /// </summary>
+        public UniTask WaitUntilReadyAsync(CancellationToken cancellationToken = default)
+        {
+            return cancellationToken.CanBeCanceled
+                ? _readySource.Task.AttachExternalCancellation(cancellationToken)
+                : _readySource.Task;
         }
 
         /// <summary>
@@ -513,7 +554,9 @@ namespace _VuTH.Core.Persistent.DataPackage
                 }
             }
 
-            var package = _packages.AsValueEnumerable().FirstOrDefault(p => p.GetType() == type);
+            // Exact type first, then the first package assignable to T (base class or interface).
+            var package = _packages.AsValueEnumerable().FirstOrDefault(p => p.GetType() == type)
+                          ?? _packages.AsValueEnumerable().FirstOrDefault(p => p is T);
             if (package != null)
             {
                 _packageTypeCache[type] = package;

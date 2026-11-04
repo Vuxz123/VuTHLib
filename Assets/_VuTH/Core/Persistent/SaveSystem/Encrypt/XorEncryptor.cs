@@ -5,10 +5,8 @@ using System.Text;
 namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 {
     /// <summary>
-    /// Simple XOR-based encryptor for demonstration.
-    /// WARNING: This is NOT secure encryption - suitable for basic obfuscation only.
-    /// For production, use AES or other strong encryption.
-    /// Pluggable implementation of IEncryptor.
+    /// XOR + Base64 obfuscation (the default encryptor). NOT encryption: it only keeps save files from being
+    /// readable or editable at a glance.
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
@@ -64,23 +62,16 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
                 return encryptedText;
             }
 
-            try
-            {
-                byte[] inputBytes = System.Convert.FromBase64String(encryptedText);
-                byte[] outputBytes = new byte[inputBytes.Length];
+            // Throws FormatException on invalid data: the save service reports it as corrupted.
+            byte[] inputBytes = System.Convert.FromBase64String(encryptedText);
+            byte[] outputBytes = new byte[inputBytes.Length];
 
-                for (int i = 0; i < inputBytes.Length; i++)
-                {
-                    outputBytes[i] = (byte)(inputBytes[i] ^ _key[i % _key.Length]);
-                }
-
-                return Encoding.UTF8.GetString(outputBytes);
-            }
-            catch
+            for (int i = 0; i < inputBytes.Length; i++)
             {
-                // Return original if decryption fails (not base64 or invalid)
-                return encryptedText;
+                outputBytes[i] = (byte)(inputBytes[i] ^ _key[i % _key.Length]);
             }
+
+            return Encoding.UTF8.GetString(outputBytes);
         }
     }
 }

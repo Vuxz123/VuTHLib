@@ -92,7 +92,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.EditMode
             var saved = service.TrySaveImmediate("profile", new Dto { Name = "x" });
 
             Assert.IsFalse(saved);
-            Assert.IsFalse(await backend.Exists("profile"));
+            Assert.IsFalse(await backend.ExistsAsync("profile"));
         }
 
         [Test]

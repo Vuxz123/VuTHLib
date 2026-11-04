@@ -35,7 +35,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
         private DropdownField _encryptorDropdown;
         private DropdownField _serializerDropdown;
         private DropdownField _backendDropdown;
-        private ListView _migratorListView;
 
         public VisualElement CreateView()
         {
@@ -85,7 +84,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
             container.Add(adapterSection);
             container.Add(CreateSpacer(6));
 
-            var migratorSection = new SettingSection("Migrators");
+            var migratorSection = new SettingSection("Versioning & Migrators");
             migratorSection.Add(CreateMigratorsSection());
             container.Add(migratorSection);
             container.Add(CreateSpacer(4));
@@ -95,7 +94,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
 
         private bool TryGetOrCreateProfile(out SaveServiceAdapterProfile profile)
         {
-            profile = Resources.Load<SaveServiceAdapterProfile>("SaveServiceAdapterProfile");
+            profile = Resources.Load<SaveServiceAdapterProfile>(SaveServiceAdapterProfile.ResourcePath);
             if (profile != null)
                 return true;
 
@@ -161,7 +160,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
                 if (EditorUtility.DisplayDialog("Reset to Defaults", "Reset all adapter selections to defaults?",
                         "Reset", "Cancel"))
                 {
+                    Undo.RecordObject(_profile, "Reset Save Profile");
                     _profile.ResetToDefaults();
+                    EditorUtility.SetDirty(_profile);
                     _serializedProfile.Update();
                     RefreshAvailableTypes();
                     UpdateAllDropdowns();
@@ -286,37 +287,60 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
         {
             var container = new VisualElement { style = { marginTop = 4 } };
 
-            container.Add(new Label("Configure migration chain (ordered list).")
-                { style = { fontSize = 12, color = new Color(0.6f, 0.6f, 0.6f), marginBottom = 2 } });
+            container.Add(new Label(
+                    "Bump the schema version when the saved data format changes, and add one migrator per version " +
+                    "step (a DefaultSaveMigrator when the format did not change). Saves from a version without a " +
+                    "migrator are reported as MigrationFailed and left untouched.")
+                {
+                    style =
+                    {
+                        fontSize = 11, color = new Color(0.6f, 0.6f, 0.6f), marginBottom = 4,
+                        whiteSpace = WhiteSpace.Normal
+                    }
+                });
+
+            var versionField = new PropertyField(_serializedProfile.FindProperty("schemaVersion"), "Schema Version");
+            versionField.Bind(_serializedProfile);
+            container.Add(versionField);
+
+            var migratorsField = new PropertyField(_serializedProfile.FindProperty("migrators"), "Migrators");
+            migratorsField.Bind(_serializedProfile);
+            container.Add(migratorsField);
             container.Add(CreateSpacer(4));
 
             if (_migratorItems == null || _migratorItems.Count == 0)
             {
-                container.Add(new HelpBox("No ISaveMigrator implementations found.", HelpBoxMessageType.Info));
+                container.Add(new HelpBox(
+                    "No ISaveMigrator implementation with [Serializable] and a public parameterless constructor found.",
+                    HelpBoxMessageType.Info));
                 return container;
             }
 
-            _migratorListView = new ListView
+            var addRow = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center } };
+            var typeDropdown = new DropdownField
             {
-                itemsSource = _migratorItems,
-                makeItem = () => new Label { style = { paddingLeft = 6, paddingRight = 6, paddingTop = 2, paddingBottom = 2 } },
-                bindItem = (element, i) => { ((Label)element).text = _migratorItems[i].DisplayName; },
-                style =
-                {
-                    height = 120,
-                    borderBottomWidth = 1,
-                    borderTopWidth = 1,
-                    borderLeftWidth = 1,
-                    borderRightWidth = 1,
-                    borderBottomColor = new Color(0, 0, 0, 0.25f),
-                    borderTopColor = new Color(0, 0, 0, 0.25f),
-                    borderLeftColor = new Color(0, 0, 0, 0.25f),
-                    borderRightColor = new Color(0, 0, 0, 0.25f)
-                }
+                style = { flexGrow = 1 },
+                choices = _migratorItems.Select(i => i.DisplayName).ToList(),
+                index = 0
             };
+            var addButton = new Button(() => AddMigrator(typeDropdown.index)) { text = "Add Migrator", style = { width = 110 } };
+            addRow.Add(typeDropdown);
+            addRow.Add(CreateHSpacer(6));
+            addRow.Add(addButton);
+            container.Add(addRow);
 
-            container.Add(_migratorListView);
             return container;
+        }
+
+        private void AddMigrator(int itemIndex)
+        {
+            if (itemIndex < 0 || itemIndex >= _migratorItems.Count) return;
+
+            var instance = (ISaveMigrator)Activator.CreateInstance(_migratorItems[itemIndex].Type);
+            Undo.RecordObject(_profile, "Add Save Migrator");
+            _profile.SetMigrators(new List<ISaveMigrator>(_profile.Migrators) { instance });
+            EditorUtility.SetDirty(_profile);
+            _serializedProfile.Update();
         }
 
         private static VisualElement CreateSpacer(float height)
@@ -336,7 +360,6 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
             _backendItems = SaveAdapterTypeScanner.GetAdapterItems(typeof(ISaveBackend));
             _migratorItems = SaveAdapterTypeScanner.GetAdapterItems(typeof(ISaveMigrator));
 
-            Debug.Log($"[SaveServiceSettingsTab] Scanned types.");
         }
 
         private void UpdateAllDropdowns()
@@ -381,9 +404,10 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
             if (selectedItem != null)
             {
                 var instance = (IEncryptor)Activator.CreateInstance(selectedItem.Type);
+                Undo.RecordObject(_profile, "Change Save Encryptor");
                 _profile.SetEncryptor(instance);
+                EditorUtility.SetDirty(_profile);
                 _serializedProfile.Update();
-                _serializedProfile.ApplyModifiedProperties();
             }
         }
 
@@ -393,9 +417,10 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
             if (selectedItem != null)
             {
                 var instance = (ISerializer)Activator.CreateInstance(selectedItem.Type);
+                Undo.RecordObject(_profile, "Change Save Serializer");
                 _profile.SetSerializer(instance);
+                EditorUtility.SetDirty(_profile);
                 _serializedProfile.Update();
-                _serializedProfile.ApplyModifiedProperties();
             }
         }
 
@@ -405,9 +430,10 @@ namespace _VuTH.Core.Persistent.SaveSystem.Editor
             if (selectedItem != null)
             {
                 var instance = (ISaveBackend)Activator.CreateInstance(selectedItem.Type);
+                Undo.RecordObject(_profile, "Change Save Backend");
                 _profile.SetBackend(instance);
+                EditorUtility.SetDirty(_profile);
                 _serializedProfile.Update();
-                _serializedProfile.ApplyModifiedProperties();
             }
         }
     }

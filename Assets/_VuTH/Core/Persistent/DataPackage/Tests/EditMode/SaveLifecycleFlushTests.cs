@@ -43,6 +43,9 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
                 return UniTask.CompletedTask;
             }
 
+            public UniTask<SaveLoadResult<T>> TryLoadAsync<T>(string key, CancellationToken cancellationToken = default)
+                => UniTask.FromResult(SaveLoadResult<T>.NotFound());
+
             public UniTask<T> LoadAsync<T>(string key, T defaultValue, CancellationToken cancellationToken = default)
                 => UniTask.FromResult(defaultValue);
 

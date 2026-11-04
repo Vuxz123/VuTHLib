@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using _VuTH.Common;
 using _VuTH.Common.Log;
@@ -12,7 +13,6 @@ using _VuTH.Core.Persistent.SaveSystem.Serialize;
 using Cysharp.Threading.Tasks;
 using MessagePipe;
 using UnityEngine;
-using VContainer.Unity;
 
 #if VCONTAINER
 using VContainer;
@@ -21,68 +21,48 @@ using VContainer;
 namespace _VuTH.Core.Persistent.SaveSystem
 {
     /// <summary>
-    /// SaveServiceManager - BootstrapManager that wraps SaveService core logic.
-    /// Implements ISaveManager and provides lifecycle management.
-    /// Loads adapters from SaveServiceAdapterProfile (Resources) if available.
-    /// Falls back to defaults if profile not found or adapters are null.
+    /// Bootstrap manager exposing the save pipeline (<see cref="ISaveManager"/>).
+    /// <para>
+    /// Configuration, highest priority first: values set in code (<c>With*</c>), then the
+    /// <see cref="SaveServiceAdapterProfile"/> in Resources, then the defaults. <c>With*</c> calls can be made at any
+    /// time: an initialized manager rebuilds its service right away.
+    /// </para>
     /// </summary>
-    public class SaveServiceManager : VBootstrapManager<SaveServiceManager, ISaveManager>, ISaveManager, ISyncSaveService
+    public class SaveServiceManager : VBootstrapManager<SaveServiceManager, ISaveManager>, ISaveManager
     {
-        // Core components
-        private ISaveBackend? _backend;
-        private ISerializer? _serializer;
-        private IEncryptor? _encryptor;
-        private ISaveEventPublisher? _eventPublisher;
-        private SaveMigrationChain? _migrationChain;
-        private int _currentSchemaVersion = 1;
+        // Values set in code; they take precedence over the profile.
+        private ISaveBackend? _backendOverride;
+        private ISerializer? _serializerOverride;
+        private IEncryptor? _encryptorOverride;
+        private ISaveEventPublisher? _eventPublisherOverride;
+        private int? _schemaVersionOverride;
+        private readonly List<ISaveMigrator> _additionalMigrators = new();
 
-        // Profile reference
+        // Injected SaveEvent publisher (null without DI: events go to a null publisher).
+        private IPublisher<SaveEvent>? _injectedEventPublisher;
+
         private SaveServiceAdapterProfile? _profile;
-
-        // Internal save service for delegation
         private SaveService? _saveService;
 
         #region ISaveService Implementation
 
-        public async UniTask SaveAsync<T>(string key, T data, CancellationToken cancellationToken = default)
-        {
-            if (_saveService == null)
-            {
-                throw new InvalidOperationException("SaveServiceManager not initialized. Call InitializeBootstrap first.");
-            }
+        private SaveService Service => _saveService ?? throw new InvalidOperationException(
+            "SaveServiceManager is not initialized yet. Give it a lower bootstrap order than the managers using it.");
 
-            await _saveService.SaveAsync(key, data, cancellationToken);
-        }
+        public UniTask SaveAsync<T>(string key, T data, CancellationToken cancellationToken = default) =>
+            Service.SaveAsync(key, data, cancellationToken);
 
-        public async UniTask<T> LoadAsync<T>(string key, T defaultValue, CancellationToken cancellationToken = default)
-        {
-            if (_saveService == null)
-            {
-                throw new InvalidOperationException("SaveServiceManager not initialized. Call InitializeBootstrap first.");
-            }
+        public UniTask<SaveLoadResult<T>> TryLoadAsync<T>(string key, CancellationToken cancellationToken = default) =>
+            Service.TryLoadAsync<T>(key, cancellationToken);
 
-            return await _saveService.LoadAsync(key, defaultValue, cancellationToken);
-        }
+        public UniTask<T> LoadAsync<T>(string key, T defaultValue, CancellationToken cancellationToken = default) =>
+            Service.LoadAsync(key, defaultValue, cancellationToken);
 
-        public async UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
-        {
-            if (_saveService == null)
-            {
-                throw new InvalidOperationException("SaveServiceManager not initialized. Call InitializeBootstrap first.");
-            }
+        public UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) =>
+            Service.ExistsAsync(key, cancellationToken);
 
-            return await _saveService.ExistsAsync(key, cancellationToken);
-        }
-
-        public async UniTask DeleteAsync(string key, CancellationToken cancellationToken = default)
-        {
-            if (_saveService == null)
-            {
-                throw new InvalidOperationException("SaveServiceManager not initialized. Call InitializeBootstrap first.");
-            }
-
-            await _saveService.DeleteAsync(key, cancellationToken);
-        }
+        public UniTask DeleteAsync(string key, CancellationToken cancellationToken = default) =>
+            Service.DeleteAsync(key, cancellationToken);
 
         /// <inheritdoc />
         public bool TrySaveImmediate<T>(string key, T data)
@@ -94,9 +74,6 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         #region Bootstrap Lifecycle
 
-        // Injected SaveEvent publisher (null without DI: events go to a null publisher).
-        private IPublisher<SaveEvent>? _injectedEventPublisher;
-
 #if VCONTAINER
         /// <summary>Stores the event publisher; the service is built in <see cref="InitializeBootstrap"/>.</summary>
         [Inject]
@@ -106,209 +83,148 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
             // Injected after initialization (manager placed in a scene rather than created by the bootstrap):
             // rebuild the service so it publishes SaveEvents.
-            if (IsManagerInitialized) InitializeSaveService(eventPublisher);
+            if (IsManagerInitialized) BuildService();
         }
 #endif
 
         protected override void InitializeBootstrap()
         {
-            this.Log("Initializing Save Service...");
-
-            // Load profile from Resources
-            _profile = Resources.Load<SaveServiceAdapterProfile>("SaveServiceAdapterProfile");
-            this.Log(_profile != null
-                ? "InitializeBootstrap: SaveServiceAdapterProfile found."
-                : "InitializeBootstrap: SaveServiceAdapterProfile not found.");
-
-            InitializeSaveService(_injectedEventPublisher);
-        }
-
-        /// <summary>
-        /// Rebuilds the save service, e.g. after a test replaced the backend (the service is first built in Awake).
-        /// </summary>
-        public void InitializeForTesting()
-        {
-            InitializeSaveService(_injectedEventPublisher);
-        }
-
-        private void InitializeSaveService(IPublisher<SaveEvent>? eventPublisher)
-        {
-            this.Log($"InitializeSaveService: called. eventPublisherNull={eventPublisher == null}");
-
-            if (_profile != null)
+            _profile = Resources.Load<SaveServiceAdapterProfile>(SaveServiceAdapterProfile.ResourcePath);
+            if (_profile == null)
             {
-                this.Log("SaveServiceAdapterProfile loaded successfully.");
-                InitializeFromProfile(eventPublisher);
-            }
-            else
-            {
-                this.Log("No SaveServiceAdapterProfile found. Using default configuration.");
-                InitializeWithDefaults(eventPublisher);
+                this.Log($"No SaveServiceAdapterProfile in Resources/{SaveServiceAdapterProfile.ResourcePath}: using defaults.");
             }
 
-            // Add migrators from profile if available
-            if (_profile && _migrationChain != null)
-            {
-                foreach (var migrator in _profile.Migrators)
-                {
-                    _migrationChain.AddMigrator(migrator);
-                }
-            }
-
-            // Create the internal save service
-            _saveService = new SaveService(
-                _backend!,
-                _serializer!,
-                _encryptor!,
-                _currentSchemaVersion,
-                _migrationChain,
-                _eventPublisher
-            );
-
-            this.Log("Save Service initialized successfully.");
-        }
-
-        private void InitializeFromProfile(IPublisher<SaveEvent>? eventPublisher)
-        {
-            // Use profile adapters if available, otherwise fall back to defaults
-            _encryptor = _profile!.Encryptor;
-            _serializer = _profile.Serializer;
-            _eventPublisher = eventPublisher != null
-                ? new MessagePipeSaveEventPublisher(eventPublisher)
-                : new NullSaveEventPublisher();
-
-            // Only use profile backend if _backend wasn't manually set (e.g., by tests)
-            if (_backend == null)
-            {
-                if (_profile.Backend != null)
-                {
-                    _backend = _profile.Backend;
-                }
-                else
-                {
-                    // Fallback backend based on environment
-#if UNITY_EDITOR
-                    _backend = new JsonFileSaveBackend();
-#else
-                    _backend = new PlayerPrefsSaveBackend();
-#endif
-                }
-            }
-            else
-            {
-                this.Log("InitializeFromProfile: Using manually set backend (e.g., from test).");
-            }
-
-            // Initialize migration chain with serializer from profile
-            _migrationChain = new SaveMigrationChain(_serializer!);
-        }
-
-        private void InitializeWithDefaults(IPublisher<SaveEvent>? eventPublisher)
-        {
-            // Only initialize backend if not manually set (e.g., by tests)
-            if (_backend == null)
-            {
-#if UNITY_EDITOR
-                _backend = new JsonFileSaveBackend();
-#else
-                _backend = new PlayerPrefsSaveBackend();
-#endif
-            }
-            else
-            {
-                this.Log("InitializeWithDefaults: Using manually set backend (e.g., from test).");
-            }
-
-            _serializer = new NewtonsoftJsonSerializer();
-            _encryptor = new XorEncryptor();
-            _eventPublisher = eventPublisher != null
-                ? new MessagePipeSaveEventPublisher(eventPublisher)
-                : new NullSaveEventPublisher();
-            _migrationChain = new SaveMigrationChain(_serializer!);
+            BuildService();
         }
 
         protected override void DeinitializeBootstrap()
         {
-            this.Log("Deinitializing Save Service...");
-
             _saveService = null;
-            _backend = null;
-            _serializer = null;
-            _encryptor = null;
-            _eventPublisher = null;
-            _migrationChain = null;
             _profile = null;
+        }
 
-            this.Log("Save Service deinitialized.");
+        /// <summary>
+        /// Rebuilds the service from the current configuration. <c>With*</c> calls already do this; call it after
+        /// changing the profile at runtime.
+        /// </summary>
+        public void Rebuild()
+        {
+            if (IsManagerInitialized) BuildService();
+        }
+
+        private void BuildService()
+        {
+            // Explicit Unity null check: a destroyed profile must count as missing.
+            var profile = _profile != null ? _profile : null;
+            var hasProfile = profile != null;
+
+            var backend = _backendOverride
+                          ?? (hasProfile ? profile!.Backend : null)
+                          ?? SaveServiceAdapterProfile.CreateDefaultBackend();
+            var serializer = _serializerOverride
+                             ?? (hasProfile ? profile!.Serializer : null)
+                             ?? SaveServiceAdapterProfile.CreateDefaultSerializer();
+            var encryptor = _encryptorOverride
+                            ?? (hasProfile ? profile!.Encryptor : null)
+                            ?? SaveServiceAdapterProfile.CreateDefaultEncryptor();
+            var schemaVersion = _schemaVersionOverride ?? (hasProfile ? profile!.SchemaVersion : SaveService.DefaultSchemaVersion);
+            var eventPublisher = _eventPublisherOverride
+                                 ?? (_injectedEventPublisher != null
+                                     ? new MessagePipeSaveEventPublisher(_injectedEventPublisher)
+                                     : new NullSaveEventPublisher());
+
+            var migrationChain = new SaveMigrationChain();
+            if (hasProfile) AddMigrators(migrationChain, profile!.Migrators);
+            AddMigrators(migrationChain, _additionalMigrators);
+
+            _saveService = new SaveService(backend, serializer, encryptor, schemaVersion, migrationChain, eventPublisher);
+            this.Log($"Save service ready: {backend.GetType().Name}, {serializer.GetType().Name}, " +
+                     $"{encryptor.GetType().Name}, schema v{schemaVersion}, {migrationChain.Count} migrator(s).");
+        }
+
+        private void AddMigrators(SaveMigrationChain chain, IEnumerable<ISaveMigrator> migrators)
+        {
+            foreach (var migrator in migrators)
+            {
+                if (migrator == null) continue;
+
+                try
+                {
+                    chain.AddMigrator(migrator);
+                }
+                catch (ArgumentException e)
+                {
+                    // Saves needing this step will report MigrationFailed (and stay untouched) instead of loading.
+                    this.LogError($"Ignored save migrator: {e.Message}");
+                }
+            }
         }
 
         #endregion
 
-        #region Configuration Methods
+        #region Configuration
 
-        /// <summary>
-        /// Gets the loaded profile (null if not loaded).
-        /// </summary>
+        /// <summary>The profile loaded from Resources (null if none).</summary>
         public SaveServiceAdapterProfile? GetProfile() => _profile;
 
-        /// <summary>
-        /// Checks if a profile is loaded.
-        /// </summary>
         public bool HasProfile => _profile != null;
 
-        /// <summary>
-        /// Configures the backend. Call before InitializeBootstrap.
-        /// </summary>
-        public SaveServiceManager WithBackend(ISaveBackend backend)
+        /// <summary>Schema version written by the current service.</summary>
+        public int GetSchemaVersion() => _saveService?.SchemaVersion
+                                         ?? _schemaVersionOverride
+                                         ?? (_profile != null ? _profile.SchemaVersion : SaveService.DefaultSchemaVersion);
+
+        /// <summary>Uses <paramref name="backend"/> instead of the profile's (null restores the profile's).</summary>
+        public SaveServiceManager WithBackend(ISaveBackend? backend)
         {
-            _backend = backend;
+            _backendOverride = backend;
+            Rebuild();
             return this;
         }
 
-        /// <summary>
-        /// Configures the serializer. Call before InitializeBootstrap.
-        /// </summary>
-        public SaveServiceManager WithSerializer(ISerializer serializer)
+        /// <summary>Uses <paramref name="serializer"/> instead of the profile's (null restores the profile's).</summary>
+        public SaveServiceManager WithSerializer(ISerializer? serializer)
         {
-            _serializer = serializer;
+            _serializerOverride = serializer;
+            Rebuild();
             return this;
         }
 
-        /// <summary>
-        /// Configures the encryptor. Call before InitializeBootstrap.
-        /// </summary>
-        public SaveServiceManager WithEncryptor(IEncryptor encryptor)
+        /// <summary>Uses <paramref name="encryptor"/> instead of the profile's (null restores the profile's).</summary>
+        public SaveServiceManager WithEncryptor(IEncryptor? encryptor)
         {
-            _encryptor = encryptor;
+            _encryptorOverride = encryptor;
+            Rebuild();
             return this;
         }
 
-        /// <summary>
-        /// Configures the event publisher. Call before InitializeBootstrap.
-        /// </summary>
-        public SaveServiceManager WithEventPublisher(ISaveEventPublisher eventPublisher)
+        /// <summary>Uses <paramref name="eventPublisher"/> instead of MessagePipe (null restores MessagePipe).</summary>
+        public SaveServiceManager WithEventPublisher(ISaveEventPublisher? eventPublisher)
         {
-            _eventPublisher = eventPublisher;
+            _eventPublisherOverride = eventPublisher;
+            Rebuild();
             return this;
         }
 
-        /// <summary>
-        /// Configures the schema version. Call before InitializeBootstrap.
-        /// </summary>
-        public SaveServiceManager WithSchemaVersion(int version)
+        /// <summary>Uses <paramref name="version"/> instead of the profile's schema version (null restores it).</summary>
+        public SaveServiceManager WithSchemaVersion(int? version)
         {
-            _currentSchemaVersion = version;
+            if (version < 0) throw new ArgumentOutOfRangeException(nameof(version), "Schema version cannot be negative.");
+            _schemaVersionOverride = version;
+            Rebuild();
             return this;
         }
 
-        /// <summary>
-        /// Gets the current schema version.
-        /// </summary>
-        public int GetSchemaVersion() => _currentSchemaVersion;
+        /// <summary>Adds a migrator to the profile's.</summary>
+        public SaveServiceManager WithMigrator(ISaveMigrator migrator)
+        {
+            _additionalMigrators.Add(migrator ?? throw new ArgumentNullException(nameof(migrator)));
+            Rebuild();
+            return this;
+        }
 
-        /// <summary>
-        /// Checks if the service is initialized.
-        /// </summary>
+        /// <summary>Whether the service is built.</summary>
         public override bool IsInitialized => _saveService != null;
 
         #endregion

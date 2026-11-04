@@ -29,16 +29,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
             if (string.IsNullOrEmpty(cipherText))
                 return cipherText;
 
-            try
-            {
-                var bytes = Convert.FromBase64String(cipherText);
-                return Encoding.UTF8.GetString(bytes);
-            }
-            catch (FormatException)
-            {
-                // Invalid base64, return as-is
-                return cipherText;
-            }
+            // Throws FormatException on invalid data: the save service reports it as corrupted.
+            var bytes = Convert.FromBase64String(cipherText);
+            return Encoding.UTF8.GetString(bytes);
         }
     }
 }
