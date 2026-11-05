@@ -22,7 +22,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class AesEncryptor : IEncryptor
+    public class AesEncryptor : IThreadSafeEncryptor
     {
         /// <summary>Marks the authenticated format. Legacy ciphertext is plain Base64, which never contains ':'.</summary>
         private const string FormatPrefix = "aes2:";

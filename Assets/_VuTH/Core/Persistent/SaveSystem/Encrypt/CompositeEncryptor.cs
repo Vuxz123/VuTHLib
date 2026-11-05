@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -24,7 +24,11 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
                 throw new ArgumentException("Must provide at least one encryptor", nameof(encryptors));
 
             _encryptors = encryptors;
+            AllThreadSafe = Array.TrueForAll(encryptors, EncryptorThreading.IsThreadSafe);
         }
+
+        /// <summary>Whether every chained encryptor may run on a worker thread.</summary>
+        internal bool AllThreadSafe { get; }
 
         /// <summary>
         /// Creates composite encryptor from list.

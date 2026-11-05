@@ -19,7 +19,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class UnityObfuscationEncryptor : IEncryptor
+    public class UnityObfuscationEncryptor : IThreadSafeEncryptor
     {
         private readonly byte[] _deviceKey;
         private readonly string _appSalt;

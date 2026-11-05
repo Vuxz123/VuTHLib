@@ -29,6 +29,9 @@ namespace _VuTH.Core.Persistent.DataPackage
         public PersistentField<long> Gold { get; }
         public PersistentField<long> Exp { get; }
         public PersistentField<int> HighScore { get; }
+
+        /// <summary>Progress: each save slot has its own profile (the default slot keeps the existing save).</summary>
+        public override bool IsSlotScoped => true;
         
         public PlayerProfilePackage() 
             : base("player_profile", SaveStrategy.Immediate)

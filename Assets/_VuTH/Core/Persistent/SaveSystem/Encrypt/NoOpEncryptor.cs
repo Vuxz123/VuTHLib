@@ -11,7 +11,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class NoOpEncryptor : IEncryptor
+    public class NoOpEncryptor : IThreadSafeEncryptor
     {
         public string Encrypt(string plainText)
         {

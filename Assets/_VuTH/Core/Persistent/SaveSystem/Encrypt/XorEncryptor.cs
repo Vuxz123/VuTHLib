@@ -10,7 +10,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class XorEncryptor : IEncryptor
+    public class XorEncryptor : IThreadSafeEncryptor
     {
         private readonly byte[] _key;
 

@@ -1,3 +1,4 @@
+#nullable enable
 using System.Threading;
 using _VuTH.Core.Persistent.SaveSystem;
 using Cysharp.Threading.Tasks;
@@ -12,9 +13,28 @@ namespace _VuTH.Core.Persistent.DataPackage
     public interface IPersistencePackage
     {
         /// <summary>
-        /// Unique key for this package in storage.
+        /// Key the package's data is stored under: <see cref="BaseStorageKey"/>, prefixed with the active save slot for a
+        /// slot-scoped package.
         /// </summary>
         string StorageKey { get; }
+
+        /// <summary>
+        /// The key given by the package, without save slot.
+        /// </summary>
+        string BaseStorageKey { get; }
+
+        /// <summary>
+        /// Whether the package's data belongs to a save slot (e.g. game progress), so each slot has its own copy.
+        /// Packages that are not (e.g. settings) keep one copy whatever the slot. See <see cref="IDataPersistenceManager.SwitchSlotAsync"/>.
+        /// </summary>
+        bool IsSlotScoped { get; }
+
+        /// <summary>
+        /// Points <see cref="StorageKey"/> to <paramref name="slot"/> (null: the default slot). Called by the manager,
+        /// which saves before and loads after. When the slot changes, the package is reset to its defaults (the data in
+        /// memory belongs to the previous slot). Throws for a package that is not slot scoped.
+        /// </summary>
+        void SetSlot(string? slot);
         
         /// <summary>
         /// Current save strategy for this package.
@@ -49,7 +69,8 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         /// <summary>
         /// Completes when the first load finished, whatever its outcome (see <see cref="LoadStatus"/>).
-        /// Changes made before that are overwritten by the loaded data.
+        /// Changes made before that are overwritten by the loaded data. Throws if the package cannot load at all
+        /// (no save service).
         /// </summary>
         UniTask WaitUntilLoadedAsync(CancellationToken cancellationToken = default);
 
@@ -92,6 +113,12 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// Load data from storage and await completion.
         /// </summary>
         UniTask LoadAsync();
+
+        /// <summary>
+        /// Deletes the stored data (and its corrupted backup) and resets the package to its defaults, without saving.
+        /// Re-enables saving if a failed load had disabled it.
+        /// </summary>
+        UniTask DeleteAsync();
     }
     
     /// <summary>

@@ -5,6 +5,7 @@ using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using R3;
 using _VuTH.Core.Persistent.SaveSystem;
+using _VuTH.Core.Persistent.SaveSystem.Migrate;
 
 namespace _VuTH.Core.Persistent.DataPackage
 {
@@ -16,9 +17,14 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// Stored data is never overwritten unless loading it showed that this is safe (see <see cref="CanSave"/>):
     /// when the save cannot be read, has a newer schema or fails to migrate, saves are refused and logged.
     /// </para>
+    /// <para>
+    /// Loads, saves and deletes of one package run one after another, never interleaved, so a load never reads a save
+    /// that is still being written and two loads never mix.
+    /// </para>
     /// </summary>
     /// <typeparam name="TData">DTO type for serialization.</typeparam>
-    public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, ISyncPersistencePackage, IDisposable
+    public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, ISyncPersistencePackage,
+        IPackageLoadFailure, IDisposable
         where TData : class
     {
         /// <summary>
@@ -27,19 +33,30 @@ namespace _VuTH.Core.Persistent.DataPackage
         public virtual float DebounceSeconds => 3.0f;
 
         private readonly Subject<bool> _dirtySubject = new();
-        private readonly UniTaskCompletionSource _loadedSource = new();
+        private readonly SemaphoreSlim _operationLock = new(1, 1);
+        // Result: null once loaded, or the reason the package cannot load. Never faulted, so no unobserved errors.
+        private UniTaskCompletionSource<Exception?> _loadedSource = new();
         private ISaveService? _saveService;
+        private SaveSchema? _schema;
+        private bool _schemaCreated;
         private bool _isDirty;
-        private bool _isLoading;
+        private int _pendingLoads;
         private bool _suppressDirty;
         private bool _isSaving;
         private bool _saveRequestedWhileSaving;
+        private UniTaskCompletionSource? _saveLoopDone;
         private int _dirtyVersion;
         private bool _canSave = true;
         private bool _warnedChangeWhileLoading;
 
         /// <inheritdoc/>
-        public string StorageKey { get; }
+        public string BaseStorageKey { get; }
+
+        /// <inheritdoc/>
+        public string StorageKey { get; private set; }
+
+        /// <inheritdoc/>
+        public virtual bool IsSlotScoped => false;
 
         /// <inheritdoc/>
         public SaveStrategy Strategy { get; }
@@ -56,8 +73,14 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// <inheritdoc/>
         public bool CanSave => _canSave;
 
+        private bool IsLoading => _pendingLoads > 0;
+
         protected PersistencePackage(string storageKey, SaveStrategy strategy)
         {
+            if (string.IsNullOrEmpty(storageKey))
+                throw new ArgumentException("The storage key cannot be empty.", nameof(storageKey));
+
+            BaseStorageKey = storageKey;
             StorageKey = storageKey;
             Strategy = strategy;
         }
@@ -70,6 +93,70 @@ namespace _VuTH.Core.Persistent.DataPackage
             _saveService = saveService;
         }
 
+        /// <inheritdoc/>
+        public void SetSlot(string? slot)
+        {
+            if (!IsSlotScoped)
+                throw new InvalidOperationException($"{GetType().Name} is not slot scoped (override IsSlotScoped).");
+
+            var key = SaveSlots.GetKey(string.IsNullOrEmpty(slot) ? null : slot, BaseStorageKey);
+            if (key == StorageKey) return;
+
+            // The data in memory belongs to the previous slot: start the new one from defaults until it is loaded.
+            StorageKey = key;
+            InjectWithoutNotify(CreateDefaultPayload());
+            LoadStatus = null;
+            _canSave = true;
+            ClearDirty();
+        }
+
+        #region Schema
+
+        /// <summary>
+        /// Override to version this package's data on its own: return its current version and the migrators from older
+        /// versions. Without it the package uses the service-wide schema version, shared by every package, so changing
+        /// the format of this package would need a migrator for all the others.
+        /// <para>
+        /// Saves written before the package had a schema carry the service-wide version (1 by default): start the own
+        /// version there, e.g. <c>new SaveSchema(2, new MyMigrator1To2())</c>. Called once.
+        /// </para>
+        /// </summary>
+        protected virtual SaveSchema? CreateSchema() => null;
+
+        private SaveSchema? Schema
+        {
+            get
+            {
+                if (_schemaCreated) return _schema;
+                _schemaCreated = true;
+                _schema = CreateSchema();
+                return _schema;
+            }
+        }
+
+        private IVersionedSaveService VersionedService => _saveService as IVersionedSaveService ??
+            throw new InvalidOperationException(
+                $"'{StorageKey}' declares its own schema, but {_saveService?.GetType().Name} does not implement " +
+                $"{nameof(IVersionedSaveService)}.");
+
+        private UniTask SaveToServiceAsync(TData payload)
+        {
+            var schema = Schema;
+            if (schema == null) return _saveService!.SaveAsync(StorageKey, payload, CancellationToken.None);
+
+            return VersionedService.SaveAsync(StorageKey, payload, schema, CancellationToken.None);
+        }
+
+        private UniTask<SaveLoadResult<TData>> LoadFromServiceAsync()
+        {
+            var schema = Schema;
+            if (schema == null) return _saveService!.TryLoadAsync<TData>(StorageKey, CancellationToken.None);
+
+            return VersionedService.TryLoadAsync<TData>(StorageKey, schema, CancellationToken.None);
+        }
+
+        #endregion
+
         /// <summary>
         /// Mark this package as dirty, notifying the Manager's save pipeline.
         /// </summary>
@@ -77,7 +164,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             if (_suppressDirty) return;
 
-            if (_isLoading)
+            if (IsLoading)
             {
                 // The loaded data replaces the fields when the load completes: this change cannot be kept.
                 if (!_warnedChangeWhileLoading)
@@ -95,6 +182,12 @@ namespace _VuTH.Core.Persistent.DataPackage
             _dirtySubject.OnNext(true);
         }
 
+        private void ClearDirty()
+        {
+            _isDirty = false;
+            _dirtySubject.OnNext(false);
+        }
+
         #region Save
 
         /// <summary>
@@ -108,7 +201,8 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// <inheritdoc/>
         public bool TrySaveImmediate()
         {
-            if (_saveService is not ISyncSaveService syncService || !_isDirty || !CheckCanSave())
+            // While loading, the fields are about to be replaced by the loaded data: nothing worth writing.
+            if (_saveService is not ISyncSaveService syncService || !_isDirty || IsLoading || !CheckCanSave())
                 return false;
 
             var payload = ExtractPayload();
@@ -116,8 +210,11 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             try
             {
-                if (!syncService.TrySaveImmediate(StorageKey, payload))
-                    return false;
+                var schema = Schema;
+                var written = schema == null
+                    ? syncService.TrySaveImmediate(StorageKey, payload)
+                    : VersionedService.TrySaveImmediate(StorageKey, payload, schema);
+                if (!written) return false;
             }
             catch (Exception ex)
             {
@@ -133,8 +230,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
             else if (_dirtyVersion == versionAtSaveStart)
             {
-                _isDirty = false;
-                _dirtySubject.OnNext(false);
+                ClearDirty();
             }
 
             return true;
@@ -147,44 +243,54 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             if (_isSaving)
             {
+                // The running save loop writes once more with the newest data; complete when it is done.
                 _saveRequestedWhileSaving = true;
+                if (_saveLoopDone != null) await _saveLoopDone.Task;
                 return;
             }
 
-            do
+            _isSaving = true;
+            var done = _saveLoopDone = new UniTaskCompletionSource();
+            await _operationLock.WaitAsync();
+            try
             {
-                _isSaving = true;
-                _saveRequestedWhileSaving = false;
-
-                var payload = ExtractPayload();
-                var versionAtSaveStart = _dirtyVersion;
-
-                try
+                do
                 {
-                    await _saveService.SaveAsync(StorageKey, payload, CancellationToken.None);
+                    _saveRequestedWhileSaving = false;
 
-                    if (_dirtyVersion == versionAtSaveStart)
+                    // Re-checked after waiting: a load or delete may have run meanwhile.
+                    if (_saveService == null || !_isDirty || !_canSave) break;
+
+                    var payload = ExtractPayload();
+                    var versionAtSaveStart = _dirtyVersion;
+
+                    try
                     {
-                        _isDirty = false;
-                        _dirtySubject.OnNext(false);
+                        await SaveToServiceAsync(payload);
+
+                        if (_dirtyVersion == versionAtSaveStart)
+                        {
+                            ClearDirty();
+                        }
+                        else
+                        {
+                            _saveRequestedWhileSaving = true;
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
                         _isDirty = true;
-                        _saveRequestedWhileSaving = true;
+                        this.LogError($"Save failed for {StorageKey}: {ex.Message}");
+                        break;
                     }
-                }
-                catch (Exception ex)
-                {
-                    _isDirty = true;
-                    this.LogError($"Save failed for {StorageKey}: {ex.Message}");
-                    break;
-                }
-                finally
-                {
-                    _isSaving = false;
-                }
-            } while (_saveRequestedWhileSaving && _saveService != null);
+                } while (_saveRequestedWhileSaving);
+            }
+            finally
+            {
+                _isSaving = false;
+                _operationLock.Release();
+                done.TrySetResult();
+            }
         }
 
         private bool CheckCanSave()
@@ -211,13 +317,25 @@ namespace _VuTH.Core.Persistent.DataPackage
         public async UniTask LoadAsync()
         {
             if (_saveService == null)
+            {
+                const string error = "it has no save service. Register it with the DataPersistenceManager, or call " +
+                                     "SetSaveService first.";
+                this.LogError($"Cannot load '{StorageKey}': {error}");
+                FailLoading(new InvalidOperationException($"'{StorageKey}' cannot load: {error}"));
                 return;
+            }
 
-            _isLoading = true;
+            // A previous attempt could not load: waiters from now on wait for this attempt.
+            if (_loadedSource.Task.Status == UniTaskStatus.Succeeded && _loadedSource.Task.GetAwaiter().GetResult() != null)
+            {
+                _loadedSource = new UniTaskCompletionSource<Exception?>();
+            }
 
+            _pendingLoads++;
+            await _operationLock.WaitAsync();
             try
             {
-                var result = await _saveService.TryLoadAsync<TData>(StorageKey, CancellationToken.None);
+                var result = await LoadFromServiceAsync();
                 ApplyLoadResult(result);
             }
             catch (Exception ex)
@@ -228,9 +346,10 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
             finally
             {
-                _isLoading = false;
-                _warnedChangeWhileLoading = false;
-                _loadedSource.TrySetResult();
+                _pendingLoads--;
+                if (!IsLoading) _warnedChangeWhileLoading = false;
+                _operationLock.Release();
+                _loadedSource.TrySetResult(null);
             }
         }
 
@@ -255,8 +374,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                     break;
             }
 
-            _isDirty = false;
-            _dirtySubject.OnNext(false);
+            ClearDirty();
         }
 
         private void InjectWithoutNotify(TData data)
@@ -274,11 +392,68 @@ namespace _VuTH.Core.Persistent.DataPackage
         }
 
         /// <inheritdoc/>
-        public UniTask WaitUntilLoadedAsync(CancellationToken cancellationToken = default)
+        public async UniTask WaitUntilLoadedAsync(CancellationToken cancellationToken = default)
         {
-            return cancellationToken.CanBeCanceled
-                ? _loadedSource.Task.AttachExternalCancellation(cancellationToken)
-                : _loadedSource.Task;
+            var task = _loadedSource.Task;
+            var error = cancellationToken.CanBeCanceled
+                ? await task.AttachExternalCancellation(cancellationToken)
+                : await task;
+            if (error != null) throw error;
+        }
+
+        /// <summary>Releases waiters with <paramref name="error"/> when the package cannot load at all.</summary>
+        private void FailLoading(Exception error)
+        {
+            _loadedSource.TrySetResult(error);
+        }
+
+        void IPackageLoadFailure.FailLoading(Exception error) => FailLoading(error);
+
+        #endregion
+
+        #region Delete
+
+        /// <inheritdoc/>
+        public async UniTask DeleteAsync()
+        {
+            if (_saveService == null)
+                throw new InvalidOperationException($"Cannot delete '{StorageKey}': it has no save service.");
+
+            // Created first: if the package cannot produce its defaults, nothing is deleted.
+            var defaults = CreateDefaultPayload();
+
+            await _operationLock.WaitAsync();
+            try
+            {
+                await _saveService.DeleteAsync(StorageKey, CancellationToken.None);
+
+                InjectWithoutNotify(defaults);
+                LoadStatus = SaveLoadStatus.NotFound;
+                _canSave = true; // Nothing stored any more: nothing can be overwritten.
+                ClearDirty();
+            }
+            finally
+            {
+                _operationLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// The data of a new player, injected by <see cref="DeleteAsync"/>. Default: a new <typeparamref name="TData"/>
+        /// (its field initializers). Override when the package defaults differ from the DTO's.
+        /// </summary>
+        protected virtual TData CreateDefaultPayload()
+        {
+            try
+            {
+                return (TData)Activator.CreateInstance(typeof(TData), nonPublic: true);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"{GetType().Name} cannot create a default {typeof(TData).Name} ({ex.Message}). " +
+                    $"Override {nameof(CreateDefaultPayload)}.", ex);
+            }
         }
 
         #endregion
@@ -319,6 +494,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             _dirtySubject.OnNext(false);
             _dirtySubject.Dispose();
+            _operationLock.Dispose();
         }
     }
 }

@@ -70,6 +70,18 @@ namespace _VuTH.Core.Persistent.SaveSystem
             return _saveService != null && _saveService.TrySaveImmediate(key, data);
         }
 
+        public UniTask SaveAsync<T>(string key, T data, SaveSchema schema, CancellationToken cancellationToken = default) =>
+            Service.SaveAsync(key, data, schema, cancellationToken);
+
+        public UniTask<SaveLoadResult<T>> TryLoadAsync<T>(string key, SaveSchema schema, CancellationToken cancellationToken = default) =>
+            Service.TryLoadAsync<T>(key, schema, cancellationToken);
+
+        /// <inheritdoc />
+        public bool TrySaveImmediate<T>(string key, T data, SaveSchema schema)
+        {
+            return _saveService != null && _saveService.TrySaveImmediate(key, data, schema);
+        }
+
         #endregion
 
         #region Bootstrap Lifecycle

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using R3;
 
 namespace _VuTH.Core.Persistent.DataPackage
@@ -20,18 +21,34 @@ namespace _VuTH.Core.Persistent.DataPackage
         public ReadOnlyReactiveProperty<T> Observable { get; }
         
         /// <summary>
-        /// Current value. Setting this will mark the owner package as dirty.
+        /// Current value. Setting a different value marks the owner package as dirty; setting an equal value does
+        /// nothing. After changing a mutable value in place (e.g. adding to a list), call <see cref="NotifyChanged"/>.
         /// </summary>
         public T Value
         {
             get => _value.Value;
             set
             {
+                if (EqualityComparer<T>.Default.Equals(_value.Value, value)) return;
+
                 _value.Value = value;
                 if (_notifyOnChange)
                 {
                     _ownerPackage?.MarkDirty();
                 }
+            }
+        }
+
+        /// <summary>
+        /// Reports a change made inside the current value (e.g. an item added to a list): notifies subscribers and
+        /// marks the owner package as dirty.
+        /// </summary>
+        public void NotifyChanged()
+        {
+            _value.ForceNotify();
+            if (_notifyOnChange)
+            {
+                _ownerPackage?.MarkDirty();
             }
         }
         

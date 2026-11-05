@@ -13,7 +13,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Encrypt", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class RotEncryptor : IEncryptor
+    public class RotEncryptor : IThreadSafeEncryptor
     {
         private readonly int _rotation;
 
