@@ -1,5 +1,8 @@
-﻿using _VuTH.Core.Window.Transition;
+using _VuTH.Common.Log;
+using _VuTH.Core.Window.Transition;
+using _VuTH.Core.Window.UI;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace _VuTH.Core.Window
 {
@@ -14,7 +17,6 @@ namespace _VuTH.Core.Window
         ITransitionInputBlocker
     {
         public virtual WindowType WindowType => WindowType.Popup;
-        public virtual UILayer Layer => UILayer.Popup;
         public virtual string TransitionPreset => "Scale";
 
         [Header("Transition Settings (Optional)")]
@@ -36,6 +38,42 @@ namespace _VuTH.Core.Window
         [Tooltip("If set, FadeTransition will call SetDim(alpha) to drive this CanvasGroup alpha.")]
         [SerializeField] private CanvasGroup dimmerCanvasGroup;
 
+        [Tooltip("Clicks on this graphic count as outside the popup (CloseOnOutsideClick). Default: the dimmer's graphic.")]
+        [SerializeField] private Graphic outsideClickArea;
+
+        /// <summary>Whether a click outside the popup (on its dimmer) closes it. Default: false.</summary>
+        public virtual bool CloseOnOutsideClick => false;
+
+        protected override void Awake()
+        {
+            base.Awake();
+            SetUpOutsideClick();
+        }
+
+        private void SetUpOutsideClick()
+        {
+            if (!CloseOnOutsideClick) return;
+
+            var area = outsideClickArea;
+            if (!area && dimmerCanvasGroup) area = dimmerCanvasGroup.GetComponent<Graphic>();
+            if (!area)
+            {
+                this.LogWarning($"{name}: CloseOnOutsideClick needs an outside click area or a dimmer with a Graphic.");
+                return;
+            }
+
+            area.raycastTarget = true;
+            if (!area.TryGetComponent<WindowOutsideClickCatcher>(out var catcher))
+                catcher = area.gameObject.AddComponent<WindowOutsideClickCatcher>();
+            catcher.Clicked = OnOutsideClick;
+        }
+
+        /// <summary>Called on a click outside the popup. Default: closes it, like the back button.</summary>
+        protected virtual void OnOutsideClick()
+        {
+            if (CloseOnOutsideClick) Close();
+        }
+
         public virtual bool BlockInput => true;
 
         /// <summary>
@@ -47,16 +85,21 @@ namespace _VuTH.Core.Window
         public bool CloseOnBackPress => AllowBackClose;
 
         /// <summary>
-        /// Whether clicking outside the popup should close it.
+        /// What opening this window does when one of the same type is already open. Override with
+        /// <see cref="WindowDuplicatePolicy.Ignore"/> to prevent double-tap duplicates.
         /// </summary>
-        public virtual bool CloseOnOutsideClick => false;
+        public virtual WindowDuplicatePolicy DuplicatePolicy => WindowDuplicatePolicy.Allow;
+
+        /// <summary>Whether this window stays open when the Screen changes.</summary>
+        public virtual bool KeepOnScreenChange => false;
+
+        /// <summary>Whether the closed instance is kept and reused by the next opening, keeping its state.</summary>
+        public virtual bool KeepInstance => false;
 
         public override void OnBackPressed()
         {
-            if (AllowBackClose)
-            {
-                Close();
-            }
+            if (TryHandleBackInChildren()) return;
+            if (AllowBackClose) Close();
         }
 
         /// <summary>
@@ -99,7 +142,22 @@ namespace _VuTH.Core.Window
     {
         protected void Close(TResult result)
         {
-            CloseSource?.TrySetResult(result);
+            base.Close(result);
         }
+    }
+
+    /// <summary>
+    /// Popup with typed data and result: open it with <c>windowManager.Open&lt;TWindow, TData, TResult&gt;(data)</c>
+    /// for compile-time checked types, and receive the data in <see cref="OnSetup"/>.
+    /// </summary>
+    public abstract class PopupBase<TData, TResult> : PopupBase<TResult>, ITypedWindow<TData, TResult>
+    {
+        public sealed override void Setup(object data)
+        {
+            OnSetup(TypedWindowData.Cast<TData>(this, data));
+        }
+
+        /// <summary>Receives the data passed to Open, before the window is shown.</summary>
+        protected virtual void OnSetup(TData data) { }
     }
 }

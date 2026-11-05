@@ -1,22 +1,48 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
-using ZLinq;
 
 namespace _VuTH.Core.Window
 {
-    /// <summary>
-    /// Loads window prefabs through Addressables (keyed by the window type name) and caches the
-    /// <see cref="AsyncOperationHandle{TObject}"/> per window type so they can be released properly.
-    /// Log messages are emitted with the supplied log origin (the owning <see cref="WindowManager"/>).
-    /// </summary>
-    public sealed class WindowPrefabCache
+    /// <summary>Supplies the prefab of each window type to <see cref="WindowManager"/>.</summary>
+    public interface IWindowPrefabProvider
     {
-        // Cache Addressables prefab handles so we can release them properly.
+        /// <summary>The prefab of <paramref name="windowType"/>, or null (logged) when it cannot be loaded.</summary>
+        UniTask<GameObject> GetOrLoad(Type windowType);
+
+        /// <summary>Releases the prefab of <paramref name="windowType"/> if it is loaded.</summary>
+        void Release(Type windowType);
+
+        /// <summary>Releases every loaded prefab.</summary>
+        void Clear();
+    }
+
+    /// <summary>
+    /// Sets the Addressables key of a window prefab. Without it the key is the class name, which two classes with the
+    /// same name in different namespaces would share.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, Inherited = false)]
+    public sealed class WindowAddressAttribute : Attribute
+    {
+        public string Address { get; }
+
+        public WindowAddressAttribute(string address)
+        {
+            Address = address;
+        }
+    }
+
+    /// <summary>
+    /// Loads window prefabs through Addressables (key: <see cref="WindowAddressAttribute"/>, else the class name) and
+    /// caches the <see cref="AsyncOperationHandle{TObject}"/> per window type so they can be released properly.
+    /// </summary>
+    public sealed class WindowPrefabCache : IWindowPrefabProvider
+    {
         private readonly Dictionary<Type, AsyncOperationHandle<GameObject>> _prefabHandleCache = new();
         private readonly object _logOrigin;
 
@@ -26,121 +52,89 @@ namespace _VuTH.Core.Window
             _logOrigin = logOrigin;
         }
 
-        /// <summary>
-        /// Returns the cached prefab for <paramref name="type"/>, awaiting an in-flight load if needed, or starts a new
-        /// Addressables load keyed by <c>type.Name</c>. Returns null (and drops the handle) on failure.
-        /// </summary>
-        public async UniTask<GameObject> GetOrLoad(Type type)
+        /// <summary>The Addressables key of <paramref name="windowType"/>.</summary>
+        public static string GetAddress(Type windowType)
         {
-            if (_prefabHandleCache.TryGetValue(type, out var cachedHandle) && cachedHandle.IsValid())
+            var attribute = windowType.GetCustomAttribute<WindowAddressAttribute>();
+            return attribute != null && !string.IsNullOrEmpty(attribute.Address) ? attribute.Address : windowType.Name;
+        }
+
+        /// <summary>
+        /// Returns the cached prefab for <paramref name="windowType"/>, awaiting an in-flight load if needed, or starts
+        /// a new Addressables load. Returns null (and drops the handle) on failure.
+        /// </summary>
+        public async UniTask<GameObject> GetOrLoad(Type windowType)
+        {
+            var address = GetAddress(windowType);
+
+            if (!_prefabHandleCache.TryGetValue(windowType, out var handle) || !handle.IsValid())
             {
-                // If handle hasn't completed yet, await completion.
-                try
-                {
-                    if (!cachedHandle.IsDone)
-                        await cachedHandle.Task;
-                }
-                catch (Exception e)
-                {
-                    _logOrigin.LogError($"Addressables load faulted for key '{type.Name}': {e}");
-                    Addressables.Release(cachedHandle);
-                    _prefabHandleCache.Remove(type);
-                    return null;
-                }
-
-                if (!cachedHandle.Result)
-                {
-                    _logOrigin.LogError($"Addressables prefab not found for key '{type.Name}'");
-                    Addressables.Release(cachedHandle);
-                    _prefabHandleCache.Remove(type);
-                    return null;
-                }
-
-                return cachedHandle.Result;
+                handle = Addressables.LoadAssetAsync<GameObject>(address);
+                _prefabHandleCache[windowType] = handle;
             }
-
-            var handle = Addressables.LoadAssetAsync<GameObject>(type.Name);
-            _prefabHandleCache[type] = handle;
 
             try
             {
-                await handle.Task;
+                if (!handle.IsDone) await handle.Task;
             }
             catch (Exception e)
             {
-                _logOrigin.LogError($"Addressables load faulted for key '{type.Name}': {e}");
-                if (handle.IsValid())
-                    Addressables.Release(handle);
-                _prefabHandleCache.Remove(type);
+                _logOrigin.LogError($"Addressables load faulted for key '{address}': {e}");
+                Drop(windowType, handle);
                 return null;
             }
 
-            if (!handle.Result)
+            if (handle.Status != AsyncOperationStatus.Succeeded || !handle.Result)
             {
-                _logOrigin.LogError($"Addressables prefab not found for key '{type.Name}'");
-                // Avoid keeping a failed/empty handle.
-                if (handle.IsValid())
-                    Addressables.Release(handle);
-                _prefabHandleCache.Remove(type);
+                _logOrigin.LogError($"Addressables prefab not found for key '{address}'.");
+                Drop(windowType, handle);
                 return null;
             }
 
             return handle.Result;
         }
 
-        /// <summary>
-        /// Releases the cached handle for <paramref name="type"/> if it finished loading; skips (with a warning)
-        /// while it is still loading. Invalid handles are simply dropped.
-        /// </summary>
-        public void Release(Type type)
+        /// <summary>Releases a failed handle once, even when several callers awaited it.</summary>
+        private void Drop(Type windowType, AsyncOperationHandle<GameObject> handle)
         {
-            if (_prefabHandleCache.TryGetValue(type, out var handle) && handle.IsValid())
-            {
-                // If still loading, don't release mid-flight.
-                // Caller can retry release after load completes.
-                if (handle.IsDone)
-                {
-                    Addressables.Release(handle);
-                    _prefabHandleCache.Remove(type);
-                }
-                else
-                {
-                    _logOrigin.LogWarning($"ReleasePrefab<{type.Name}> skipped because the Addressables handle is still loading.");
-                }
-            }
-            else
-            {
-                _prefabHandleCache.Remove(type);
-            }
+            if (!_prefabHandleCache.TryGetValue(windowType, out var cached) || !cached.Equals(handle)) return;
+
+            _prefabHandleCache.Remove(windowType);
+            if (handle.IsValid()) Addressables.Release(handle);
         }
 
         /// <summary>
-        /// Releases every completed handle and drops invalid ones; handles still loading are kept (with a warning).
+        /// Releases the cached handle for <paramref name="windowType"/> if it finished loading; skips (with a warning)
+        /// while it is still loading. Invalid handles are simply dropped.
         /// </summary>
+        public void Release(Type windowType)
+        {
+            if (!_prefabHandleCache.TryGetValue(windowType, out var handle)) return;
+
+            if (!handle.IsValid())
+            {
+                _prefabHandleCache.Remove(windowType);
+                return;
+            }
+
+            // A handle still loading is awaited by someone: release it later.
+            if (!handle.IsDone)
+            {
+                _logOrigin.LogWarning($"Release of the {windowType.Name} prefab skipped: it is still loading.");
+                return;
+            }
+
+            Addressables.Release(handle);
+            _prefabHandleCache.Remove(windowType);
+        }
+
+        /// <summary>Releases every completed handle and drops invalid ones; handles still loading are kept.</summary>
         public void Clear()
         {
-            foreach (var kv in _prefabHandleCache
-                         .AsValueEnumerable().Where(kv => kv.Value.IsValid() && kv.Value.IsDone))
+            foreach (var windowType in new List<Type>(_prefabHandleCache.Keys))
             {
-                Addressables.Release(kv.Value);
+                Release(windowType);
             }
-
-            // Keep any handles that are still loading; they can be cleared later.
-            foreach (var kv in _prefabHandleCache
-                         .AsValueEnumerable()
-                         .Where(kv => kv.Value.IsValid() && !kv.Value.IsDone))
-            {
-                _logOrigin.LogWarning($"Skipped releasing prefab handle for {kv.Key.Name} because it is still loading.");
-            }
-
-            var keysToRemove = _prefabHandleCache
-                .AsValueEnumerable()
-                .Where(kv => !kv.Value.IsValid() || kv.Value.IsDone)
-                .Select(kv => kv.Key)
-                .ToArray(); // materialize: removing while lazily enumerating the same dictionary throws
-
-            foreach (var key in keysToRemove)
-                _prefabHandleCache.Remove(key);
         }
     }
 }

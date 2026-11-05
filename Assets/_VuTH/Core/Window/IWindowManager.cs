@@ -1,95 +1,159 @@
 ﻿using System;
+using System.Threading;
 using _VuTH.Common;
 using Cysharp.Threading.Tasks;
 
 namespace _VuTH.Core.Window
 {
     /// <summary>
-    /// Window/Popup management - Stackable overlays within a Screen
+    /// Window/Popup management - stackable overlays within a Screen.
+    /// <para>
+    /// <c>Open</c> completes when the window <b>closes</b> (with its result); <c>Show</c> completes once the window is
+    /// <b>shown</b>. Operations run one after another, so opens and closes never interleave.
+    /// </para>
     /// </summary>
     public interface IWindowManager : ICommonManager
     {
         /// <summary>
-        /// Open a window and wait for result. <br/>
-        /// Note: a non-default result is returned only when the window is closed with a payload <br/>
-        /// (e.g., view calls TryRequestClose(result)/Close(result) or manager calls Close/CloseTop(result)).
+        /// Opens a window and completes when it closes, with the result it was closed with (view
+        /// <c>Close(result)</c>, or <see cref="Close(UIViewBase, object)"/> / <see cref="CloseTop(object)"/>).
+        /// Default when closed without a result, by back press, by <see cref="CloseAll"/>, or when it cannot be opened.
+        /// Canceling <paramref name="cancellationToken"/> closes the window and throws <see cref="OperationCanceledException"/>.
         /// </summary>
-        UniTask<TResult> Open<TWindow, TResult>(object data = null) where TWindow : UIViewBase;
-        
-        /// <summary>
-        /// Open a window with options and wait for result. <br/>
-        /// Note: a non-default result is returned only when the window is closed with a payload <br/>
-        /// (e.g., view calls TryRequestClose(result)/Close(result) or manager calls Close/CloseTop(result)).
-        /// </summary>
-        UniTask<TResult> Open<TWindow, TResult>(WindowOptions options) where TWindow : UIViewBase;
-        
-        /// <summary>
-        /// Open a window without waiting for result
-        /// </summary>
-        UniTask Open<TWindow>(object data = null) where TWindow : UIViewBase;
-        
-        /// <summary>
-        /// Close a specific window
-        /// </summary>
-        UniTask Close(UIViewBase popup);
-        
-        /// <summary>
-        /// Close a specific window and provide a result payload for Open&lt;TWindow, TResult&gt;.
-        /// </summary>
-        UniTask Close(UIViewBase popup, object result);
+        UniTask<TResult> Open<TWindow, TResult>(object data = null, CancellationToken cancellationToken = default)
+            where TWindow : UIViewBase;
+
+        /// <inheritdoc cref="Open{TWindow, TResult}(object, CancellationToken)"/>
+        UniTask<TResult> Open<TWindow, TResult>(WindowOptions options, CancellationToken cancellationToken = default)
+            where TWindow : UIViewBase;
 
         /// <summary>
-        /// Close the topmost window
+        /// Opens a window and completes when it <b>closes</b>. To continue as soon as it is shown, use
+        /// <see cref="Show{TWindow}(object)"/>.
         /// </summary>
-        UniTask CloseTop();
-        
+        UniTask Open<TWindow>(object data = null, CancellationToken cancellationToken = default) where TWindow : UIViewBase;
+
         /// <summary>
-        /// Close the topmost window and provide a result payload for Open&lt;TWindow, TResult&gt;.
+        /// Opens a window and completes once it finished transitioning in, returning it (null if it could not be
+        /// opened). The window stays open until closed.
+        /// </summary>
+        UniTask<TWindow> Show<TWindow>(object data = null) where TWindow : UIViewBase;
+
+        /// <inheritdoc cref="Show{TWindow}(object)"/>
+        UniTask<TWindow> Show<TWindow>(WindowOptions options) where TWindow : UIViewBase;
+
+        /// <summary>Closes a window; completes once it is closed.</summary>
+        UniTask Close(UIViewBase window);
+
+        /// <summary>
+        /// Closes a window with a result payload for Open&lt;TWindow, TResult&gt;; completes once it is closed.
+        /// </summary>
+        UniTask Close(UIViewBase window, object result);
+
+        /// <summary>Closes the topmost window; completes once it is closed.</summary>
+        UniTask CloseTop();
+
+        /// <summary>
+        /// Closes the topmost window with a result payload for Open&lt;TWindow, TResult&gt;.
         /// </summary>
         UniTask CloseTop(object result);
-        
+
         /// <summary>
-        /// Close all windows
+        /// Closes all windows; Open calls return the default result. <paramref name="immediate"/> skips the out
+        /// transitions; <paramref name="forceCleanup"/> also removes the windows at once, without waiting for
+        /// operations in progress.
         /// </summary>
         UniTask CloseAll(bool immediate = false, bool forceCleanup = false);
-        
+
+        /// <summary>
+        /// Closes the windows that do not keep open on a Screen change (<see cref="WindowOptions.KeepOnScreenChange"/>).
+        /// Called by <c>CloseWindowsOnScreenChange</c> (Screen integration), or by your own screen flow.
+        /// </summary>
+        UniTask CloseForScreenChangeAsync(bool immediate = true);
+
+        /// <summary>
+        /// Shows a toast and closes it after <paramref name="duration"/> seconds (unscaled; default: the toast's
+        /// <see cref="ToastBase.Duration"/>). Completes when it is closed.
+        /// </summary>
+        UniTask ShowToast<TToast>(object data = null, float? duration = null) where TToast : ToastBase;
+
+        /// <summary>
+        /// Sends a back press to the top window (its <see cref="UIViewBase.OnBackPressed"/>, which closes it by
+        /// default) unless it opted out. Returns whether a window received it, so the caller can handle it otherwise.
+        /// The manager calls it for its back action and Escape.
+        /// </summary>
+        UniTask<bool> HandleBackPressAsync();
+
         /// <summary>
         /// Get the topmost window
         /// </summary>
         UIViewBase TopWindow { get; }
-        
+
         /// <summary>
         /// Number of windows in stack
         /// </summary>
         int WindowCount { get; }
-        
+
         /// <summary>
         /// Whether a transition is in progress
         /// </summary>
         bool IsTransitioning { get; }
-        
+
         /// <summary>
         /// Check if a specific window type is in the stack
         /// </summary>
         bool HasWindow<TWindow>() where TWindow : UIViewBase;
-        
+
         /// <summary>
         /// Get a specific window from the stack
         /// </summary>
         TWindow GetWindow<TWindow>() where TWindow : UIViewBase;
-        
+
         /// <summary>
-        /// Release the cached Addressables prefab handle for a specific window type (if loaded).
+        /// Queues a window: it opens when no window is open (nor opening), highest <paramref name="priority"/> first,
+        /// then in call order. Use it for windows that must not pile up, such as rewards, offers and rating prompts.
+        /// Completes when the window closes; canceling removes it from the queue (or closes it if already open).
+        /// With <see cref="WindowDuplicatePolicy.Ignore"/>, a window type already queued is not queued twice.
+        /// </summary>
+        UniTask<TResult> Enqueue<TWindow, TResult>(WindowOptions options, int priority = 0,
+            CancellationToken cancellationToken = default) where TWindow : UIViewBase;
+
+        /// <inheritdoc cref="Enqueue{TWindow, TResult}"/>
+        UniTask Enqueue<TWindow>(object data = null, int priority = 0, CancellationToken cancellationToken = default)
+            where TWindow : UIViewBase;
+
+        /// <summary>Number of queued windows not opened yet.</summary>
+        int QueuedCount { get; }
+
+        /// <summary>Removes every queued window not opened yet; their Enqueue calls are canceled.</summary>
+        void ClearQueue();
+
+        /// <summary>
+        /// Loads the prefab of <typeparamref name="TWindow"/> and creates <paramref name="instances"/> pooled
+        /// instances, so the first opening does not hitch.
+        /// </summary>
+        UniTask PreloadAsync<TWindow>(int instances = 1) where TWindow : UIViewBase;
+
+        /// <summary>Snapshot of the stack, bottom to top. For debugging tools.</summary>
+        System.Collections.Generic.IReadOnlyList<WindowInfo> GetOpenWindows();
+
+        /// <summary>
+        /// Release the cached prefab of a specific window type (if loaded).
         /// </summary>
         void ReleasePrefab<TWindow>() where TWindow : UIViewBase;
 
         /// <summary>
-        /// Release all cached Addressables prefab handles.
-        /// Useful for long sessions or when you want to unload UI bundles.
+        /// Release all cached prefabs. Useful for long sessions or when you want to unload UI bundles.
         /// </summary>
         void ClearPrefabCache();
 
         event Action<UIViewBase> OnWindowOpened;
         event Action<UIViewBase> OnWindowClosed;
+
+        /// <summary>
+        /// Opened / closed with details (close cause, time shown, result). Also published through MessagePipe as
+        /// <see cref="WindowEvent"/> when the manager is created through DI.
+        /// </summary>
+        event Action<WindowEvent> OnWindowEvent;
     }
 }

@@ -7,7 +7,8 @@ namespace _VuTH.Core.Window.Transition
     [TransitionSettingsName("Scale")]
     public sealed class ScaleTransitionSettings : UITransitionSettings
     {
-        public AnimationCurve scaleCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+        [Tooltip("Scale curve (0..1). Leave empty for the default OutBack / InBack eases.")]
+        public AnimationCurve scaleCurve = new();
 
         public override IUITransition Create()
         {

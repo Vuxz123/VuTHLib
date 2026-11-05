@@ -1,0 +1,29 @@
+{
+    "name": "VuTH.Window.Tests.PlayMode",
+    "rootNamespace": "",
+    "references": [
+        "UnityEngine.TestRunner",
+        "VuTH.Window",
+        "VuTH.Pool",
+        "VuTH.Common",
+        "UniTask",
+        "VuTH.Window.Screen",
+        "VuTH.Screen",
+        "UnityEngine.UI",
+        "VuTH.Common.DI",
+        "VContainer"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

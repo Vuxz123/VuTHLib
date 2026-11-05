@@ -1,18 +1,15 @@
 namespace _VuTH.Core.Window
 {
     /// <summary>
-    /// Optional per-window defaults.
-    /// Implemented by base classes (PopupBase/FullScreenBase) so WindowManager can derive
-    /// defaults without requiring an external UIViewConfig.
+    /// Optional per-window defaults, implemented by <see cref="PopupBase"/> and <see cref="FullScreenBase"/>.
+    /// Values set in <see cref="WindowOptions"/> take precedence.
     /// </summary>
     public interface IWindowDefinition
     {
         WindowType WindowType { get; }
-        UILayer Layer { get; }
 
         /// <summary>
-        /// Legacy preset fallback used when TransitionIn/OutSettings are null.
-        /// Applies to both In and Out.
+        /// Preset fallback used when TransitionIn/OutSettings are null. Applies to both In and Out.
         /// </summary>
         string TransitionPreset { get; }
 
@@ -28,7 +25,22 @@ namespace _VuTH.Core.Window
         /// </summary>
         Transition.UITransitionSettings TransitionOutSettings { get; }
 
+        /// <summary>Whether input is blocked while the window transitions in / out.</summary>
         bool BlockInput { get; }
+
+        /// <summary>Whether the back button / Escape reaches the window (<see cref="UIViewBase.OnBackPressed"/>).</summary>
         bool CloseOnBackPress { get; }
+
+        /// <summary>What opening this window does when one of the same type is already open.</summary>
+        WindowDuplicatePolicy DuplicatePolicy { get; }
+
+        /// <summary>Whether the window stays open when the Screen changes (see <see cref="IWindowManager.CloseForScreenChangeAsync"/>).</summary>
+        bool KeepOnScreenChange { get; }
+
+        /// <summary>
+        /// Whether the closed window is kept (deactivated) and reused by its next opening, keeping its state (scroll
+        /// position, selected tab…), instead of returning to the pool.
+        /// </summary>
+        bool KeepInstance { get; }
     }
 }

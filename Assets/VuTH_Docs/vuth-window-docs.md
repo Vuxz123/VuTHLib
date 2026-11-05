@@ -1,35 +1,126 @@
 # VuTH Unity Framework - Window/UI System Documentation
 
-The VuTH Window system provides a comprehensive UI management solution with window stacking, transitions, and input blocking.
+The Window system opens popups and other overlays on top of the current Screen. It stacks them, plays their
+transitions and returns their results.
 
 ---
 
 ## Table of Contents
 
-1. [Window System Overview](#window-system-overview)
-2. [Base Classes](#base-classes)
-3. [WindowManager](#windowmanager)
-4. [Window Types & Layers](#window-types--layers)
-5. [Transitions](#transitions)
-6. [Input Blocking](#input-blocking)
-7. [Usage Examples](#usage-examples)
+1. [Overview](#overview)
+2. [Opening and Closing](#opening-and-closing)
+3. [Base Classes](#base-classes)
+4. [Window Options](#window-options)
+5. [Window Types and Sorting](#window-types-and-sorting)
+6. [Transitions](#transitions)
+7. [Input Blocking](#input-blocking)
+8. [Back Button](#back-button)
+9. [Duplicates](#duplicates)
+10. [Queue](#queue)
+11. [Toasts](#toasts)
+12. [Screen Changes](#screen-changes)
+13. [Kept Instances](#kept-instances)
+14. [Typed Windows](#typed-windows)
+15. [Tabs and Safe Area](#tabs-and-safe-area)
+16. [Window Events](#window-events)
+17. [Prefabs, Pooling and Preloading](#prefabs-pooling-and-preloading)
+18. [Debugging](#debugging)
+19. [Configuration](#configuration)
 
 ---
 
-## Window System Overview
+## Overview
 
 ```
-WindowManager
-    ├── Window Stack (ordered by UILayer)
-    ├── Input Blocker
-    └── Transition Factory
+WindowManager (bootstrap manager, WindowManager.prefab)
+    ├── Window stack (bottom → top)
+    ├── IWindowPrefabProvider (Addressables by default)
+    ├── IPoolManager (instances; Instantiate / Destroy without a pool)
+    ├── IUIInputBlocker (blocks input during transitions)
+    └── IUITransitionFactory (creates transitions)
 ```
 
-**Key Concepts:**
-- **Windows**: Modal overlays within a Screen
-- **Stack**: Multiple windows can be open simultaneously
-- **Layers**: Sorting order (Screen → Popup → System → Tutorial → Debug)
-- **Transitions**: Smooth animations using PrimeTween
+- Operations run one after another, so an open and a close never interleave.
+- A window that fails to open, throws, or is destroyed is always removed from the stack, and whoever awaits it is
+  released. Event handlers and view callbacks that throw are logged; they do not break the flow.
+- Windows close on a Screen change only through the optional Screen integration (see
+  [Screen Changes](#screen-changes)).
+
+---
+
+## Opening and Closing
+
+```csharp
+public interface IWindowManager : ICommonManager
+{
+    // Completes when the window CLOSES, with its result.
+    UniTask<TResult> Open<TWindow, TResult>(object data = null, CancellationToken ct = default);
+    UniTask<TResult> Open<TWindow, TResult>(WindowOptions options, CancellationToken ct = default);
+    UniTask Open<TWindow>(object data = null, CancellationToken ct = default);
+
+    // Completes once the window is SHOWN (transition in finished); returns it, or null if it could not open.
+    UniTask<TWindow> Show<TWindow>(object data = null);
+    UniTask<TWindow> Show<TWindow>(WindowOptions options);
+
+    UniTask Close(UIViewBase window, object result = null); // completes once closed
+    UniTask CloseTop(object result = null);
+    UniTask CloseAll(bool immediate = false, bool forceCleanup = false);
+    UniTask<bool> HandleBackPressAsync();
+
+    UniTask<TResult> Enqueue<TWindow, TResult>(WindowOptions options, int priority = 0, CancellationToken ct = default);
+    UniTask Enqueue<TWindow>(object data = null, int priority = 0, CancellationToken ct = default);
+    int QueuedCount { get; }
+    void ClearQueue();
+
+    UniTask ShowToast<TToast>(object data = null, float? duration = null);
+    UniTask CloseForScreenChangeAsync(bool immediate = true);
+
+    UniTask PreloadAsync<TWindow>(int instances = 1);
+    IReadOnlyList<WindowInfo> GetOpenWindows(); // bottom → top
+
+    UIViewBase TopWindow { get; }
+    int WindowCount { get; }
+    bool IsTransitioning { get; }
+    bool HasWindow<TWindow>();
+    TWindow GetWindow<TWindow>();
+    void ReleasePrefab<TWindow>();
+    void ClearPrefabCache();
+
+    event Action<UIViewBase> OnWindowOpened;
+    event Action<UIViewBase> OnWindowClosed;
+    event Action<WindowEvent> OnWindowEvent;
+}
+```
+
+> `await Open<X>()` waits until the window is closed. To continue as soon as it is visible, use `Show<X>()`.
+
+```csharp
+// Ask and wait for the answer
+var confirmed = await windowManager.Open<ConfirmPopup, bool>("Delete the save?");
+
+// Show and keep going
+var shop = await windowManager.Show<ShopPopup>();
+```
+
+**Results.** `Open<TWindow, TResult>` returns the value the window was closed with: `Close(result)` in the view, or
+`Close(window, result)` / `CloseTop(result)` on the manager. It returns `default` in these cases:
+
+- the window is closed without a result, by the back button, or by `CloseAll`;
+- the window cannot be opened (for example, its prefab is missing);
+- the result has another type (this is also logged as an error).
+
+**Cancellation.** Canceling the token closes the window with its out transition, then throws
+`OperationCanceledException`.
+
+**CloseAll.**
+
+| Call | Behavior |
+|------|----------|
+| `CloseAll()` | Every window plays its out transition. |
+| `CloseAll(immediate: true)` | Windows close without their transitions. |
+| `CloseAll(forceCleanup: true)` | Windows are removed at once, without waiting for operations in progress. |
+
+Each window is closed exactly once, whatever the mode.
 
 ---
 
@@ -37,431 +128,369 @@ WindowManager
 
 ### UIViewBase
 
-Base class for all UI views:
-
 ```csharp
 public abstract class UIViewBase : MonoBehaviour, IUIView
 {
-    public GameObject GameObject { get; }
-    public Canvas Canvas { get; private set; }
-    public CanvasGroup CanvasGroup { get; private set; }
-    
-    protected bool IsShowing { get; private set; }
-    
-    protected virtual void Awake();
-    public virtual void Setup(object data);
-    public virtual UniTask Show(IUITransition transition = null);
-    public virtual UniTask Hide(IUITransition transition = null);
-    public virtual void OnBackPressed();
+    Canvas Canvas { get; }           // added if missing, with a GraphicRaycaster (needed for clicks)
+    CanvasGroup CanvasGroup { get; } // added if missing
+    bool IsOpen { get; }
+
+    virtual void Setup(object data);  // before the window is shown
+    virtual void OnViewShown();       // after the transition in
+    virtual void OnViewHidden();      // after the transition out, before returning to the pool
+    virtual void OnBackPressed();     // default: an IWindowBackHandler child (e.g. tabs) first, else Close()
+
+    protected void Close(object result = null);
+    bool TryRequestClose(object result = null); // false when not open
+    void ForceClose();                          // closes at once, without transition; Open returns default
 }
 ```
 
-### PopupBase
+Instances are pooled, so the same object is opened many times. Before each opening the manager puts it back in its
+rest state: hidden, not interactable, and with the transition root at its original scale and position. Reset your
+own state in `Setup`.
 
-Modal popup with dimmed background:
+### PopupBase / PopupBase&lt;TResult&gt;
 
-```csharp
-public abstract class PopupBase : UIViewBase, IWindowDefinition, ITransitionTarget, IBackgroundDimmer
-{
-    public virtual WindowType WindowType => WindowType.Popup;
-    public virtual UILayer Layer => UILayer.Popup;
-    public virtual string TransitionPreset => "Scale";
-    
-    [SerializeField] private CanvasGroup dimmer;
-    
-    public virtual void Setup(object data);
-    public void TryClose();
-}
-```
+A modal dialog with a dimmed background (`WindowType.Popup`, `"Scale"` preset).
+
+- **Inspector:** optional transition settings, an optional `transitionRoot`, and an optional `dimmerCanvasGroup`
+  driven by `FadeTransition`.
+- **Overrides:** `BlockInput` and `AllowBackClose`. Set `AllowBackClose` to false for confirmations that must be
+  answered.
+- **Outside click:** override `CloseOnOutsideClick => true` to close on a click on the dimmer (or on the
+  `outsideClickArea` graphic). Override `OnOutsideClick()` to do something else.
+- `PopupBase<TResult>` adds `Close(TResult result)`; `PopupBase<TData, TResult>` also types the data (see
+  [Typed Windows](#typed-windows)).
 
 ### FullScreenBase
 
-Full-screen overlay that blocks interaction below:
+A full-screen dialog (`WindowType.FullScreenPopup`), such as settings or inventory. It has the same transition and
+back-button options as `PopupBase`, and the same typed variants: `FullScreenBase<TResult>` and
+`FullScreenBase<TData, TResult>`.
 
-```csharp
-public abstract class FullScreenBase : UIViewBase, IWindowDefinition
-{
-    public virtual WindowType WindowType => WindowType.FullScreenPopup;
-    public virtual UILayer Layer => UILayer.Popup;
-}
-```
+### ToastBase
+
+A short non-blocking message; see [Toasts](#toasts).
+
+### IWindowDefinition
+
+Per-window defaults, implemented by `PopupBase` and `FullScreenBase`: `WindowType`, `TransitionPreset`,
+`TransitionInSettings`, `TransitionOutSettings`, `BlockInput`, `CloseOnBackPress`, `DuplicatePolicy`,
+`KeepOnScreenChange` and `KeepInstance`.
 
 ---
 
-## WindowManager
-
-### IWindowManager
-
-Interface for window operations:
-
-```csharp
-public interface IWindowManager : ICommonManager
-{
-    // Open window and wait for result
-    UniTask<TResult> Open<TWindow, TResult>(object data = null) where TWindow : UIViewBase;
-    
-    // Open with options
-    UniTask<TResult> Open<TWindow, TResult>(WindowOptions options) where TWindow : UIViewBase;
-    
-    // Close operations
-    void Close<TWindow>() where TWindow : UIViewBase;
-    void CloseTop();
-    void CloseTop(object result);
-    
-    // Query
-    bool IsShowing<TWindow>() where TWindow : UIViewBase;
-    TWindow GetWindow<TWindow>() where TWindow : UIViewBase;
-}
-```
-
-### WindowManager
-
-Main window controller:
-
-```csharp
-public class WindowManager : VBootstrapManager<WindowManager, IWindowManager>
-{
-    [SerializeField] private WindowProfile profile;
-    [SerializeField] private UITransitionFactory transitionFactory;
-    
-    // Window stack (top = last)
-    private readonly Stack<UIViewBase> _windowStack = new();
-}
-```
-
-### Window Options
+## Window Options
 
 ```csharp
 public class WindowOptions
 {
     public object Data { get; set; }
-    public WindowType WindowType { get; set; } = WindowType.Popup;
-    public string TransitionPreset { get; set; } = "Scale";
-    public IUITransition TransitionInSettings { get; set; }
-    public IUITransition TransitionOutSettings { get; set; }
+    public WindowType? WindowType { get; set; }
+    public string TransitionPreset { get; set; }
+    public UITransitionSettings TransitionInSettings { get; set; }
+    public UITransitionSettings TransitionOutSettings { get; set; }
+    public bool? CloseOnBackPress { get; set; }
+    public bool? BlockInput { get; set; }
+    public WindowDuplicatePolicy? Duplicate { get; set; }
+    public bool? KeepOnScreenChange { get; set; }
+    public bool? KeepInstance { get; set; }
 }
 ```
+
+Each field is taken from the first source that sets it, in this order:
+
+1. The value set in the options, whatever it is (even `WindowType.Popup` or `"Scale"`).
+2. The window's `IWindowDefinition`.
+3. The built-in default: `Popup`, `"Scale"`, `true`, `true`, `Allow`, `false`, `false`.
+
+The manager works on a copy, so one options object can be reused for several windows.
 
 ---
 
-## Window Types & Layers
+## Window Types and Sorting
 
-### WindowType
+| WindowType | Base sorting order |
+|------------|--------------------|
+| `Popup`, `FullScreenPopup` | `popupBaseSortingOrder` (1000) |
+| `System` (toasts, loading) | `systemBaseSortingOrder` (2000) |
+| `Tutorial` | `systemBaseSortingOrder + 1000` |
 
-| Type | Description |
-|------|-------------|
-| `FullScreenPopup` | Full screen, closes previous content |
-| `Popup` | Modal dialog with dimmed background |
-| `System` | System overlay (notifications, toasts) |
-
-### UILayer
-
-Sorting layers (higher = on top):
-
-| Layer | Base Order | Description |
-|-------|------------|-------------|
-| `Screen` | 0 | Base screen content |
-| `Popup` | 1000 | Regular popups |
-| `System` | 2000 | System notifications |
-| `Tutorial` | 3000 | Tutorial overlays |
-| `Debug` | 4000 | Debug panels |
-
-### UIViewConfig
-
-Configuration for window prefabs:
-
-```csharp
-[Serializable]
-public class UIViewConfig
-{
-    public string id;
-    public GameObject prefab;
-    public UILayer layer;
-    public WindowType windowType = WindowType.Popup;
-    public bool cacheable = true;
-    public bool blockInput = true;
-    public bool closeOnBackPress = true;
-    public string transitionPreset = "Scale";
-}
-```
+Each window adds `sortingOrderStep` for every window below it in the stack, so the newest window is on top.
 
 ---
 
 ## Transitions
 
-### IUITransition
-
-Interface for transitions:
-
 ```csharp
 public interface IUITransition
 {
-    float Duration { get; }
     UniTask In(IUIView view);
     UniTask Out(IUIView view);
+    float Duration { get; }
 }
 ```
 
-### Built-in Transitions
+For each direction, the manager uses the transition settings when they are set, and the preset otherwise.
 
-| Transition | Description |
-|------------|-------------|
-| `FadeTransition` | Alpha fade in/out |
-| `ScaleTransition` | Scale animation (pop in/out) |
-| `SlideTransition` | Slide from direction |
+| Settings (`[SerializeReference]`) | Preset | Effect |
+|---|---|---|
+| `FadeTransitionSettings` | `Fade` | Alpha, and the dimmer if the view has one |
+| `ScaleTransitionSettings` (optional `scaleCurve`) | `Scale` | Scale from zero with alpha; the default eases are OutBack and InBack |
+| `SlideTransitionSettings` (direction, distance) | `Slide`, `Slide:Left` / `Right` / `Top` / `Bottom` | Slide from off screen |
+| `SequenceTransitionSettings` (steps, parallel) | — | Several transitions together or one after another, e.g. Fade + Slide |
 
-### FadeTransition
+- **Pause-safe:** every built-in transition runs on unscaled time, so it also plays while the game is paused
+  (`Time.timeScale = 0`).
+- **Failure-safe:** a transition that throws is logged, and the window gets its final state anyway.
+- **Factory:** `UITransitionFactory` creates them. It resolves a preset name in this order:
+  1. its preset assets (`UITransitionPresetAsset`, *Create → VuTH → Window → Transition Preset*: a name and any
+     transition settings, made by designers);
+  2. workers registered with `RegisterWorker`;
+  3. the built-in Fade, Scale and Slide workers.
 
-```csharp
-public class FadeTransition : IUITransition
-{
-    public float Duration { get; }
-    
-    public FadeTransition() : this(0.3f) { }
-    public FadeTransition(float duration);
-    
-    public async UniTask In(IUIView view)
-    {
-        await view.CanvasGroup.FadeIn(duration);
-    }
-    
-    public async UniTask Out(IUIView view)
-    {
-        await view.CanvasGroup.FadeOut(duration);
-    }
-}
-```
-
-### ScaleTransition
-
-```csharp
-public class ScaleTransition : IUITransition
-{
-    public float Duration { get; }
-    public float StartScale { get; }
-    public float EndScale { get; }
-    
-    // Default: 0f → 1f (pop in), 1f → 0f (pop out)
-}
-```
-
-### UITransitionFactory
-
-Worker-based transition factory:
-
-```csharp
-public sealed class UITransitionFactory : MonoBehaviour
-{
-    [SerializeField] private bool useDefaultWorkers = true;
-    [SerializeField] private List<UITransitionWorkerBase> customWorkers;
-    
-    public IUITransition Create(string presetName);
-    public IUITransition Create(IUITransitionSettings settings);
-}
-```
-
-### UITransitionRunner
-
-Centralized transition execution:
-
-```csharp
-public sealed class UITransitionRunner
-{
-    public async UniTask RunIn(IUIView view, IUITransition transition);
-    public async UniTask RunOut(IUIView view, IUITransition transition);
-}
-```
+  A preset asset overrides a built-in preset of the same name.
+- **Element animations:** add `UITransitionElement` to a child (a title, a button) to animate it after the window's
+  transition in. It can fade, scale or slide, with its own delay and duration, for example to make buttons pop in
+  one after another. Elements are hidden while the window opens, and the window's in transition (and input blocking)
+  lasts until they finish.
+- **Optional view hooks:** `ITransitionTarget` (which RectTransform to animate), `IBackgroundDimmer` and
+  `ITransitionInputBlocker`.
 
 ---
 
 ## Input Blocking
 
-### UIInputBlocker
+While a window transitions in or out, `IUIInputBlocker` blocks all UI input. Opt out with the window's or the
+options' `BlockInput`, or with the profile's `blockInputDuringTransitions`.
 
-Global input blocker with reference counting:
+**Input is never blocked while a window is simply open**, so its own buttons can be clicked.
+
+`UIInputBlocker` is reference counted: input stays blocked until every `Block(reason)` has a matching `Unblock`. It
+uses a full-screen invisible overlay canvas.
+
+---
+
+## Back Button
+
+The manager listens to the optional `backAction` (`InputActionReference`) and to Escape, then calls
+`HandleBackPressAsync()`. It calls the top window's `OnBackPressed()`, which closes it by default. Nothing happens in
+these cases:
+
+- the window opted out (`CloseOnBackPress` / `AllowBackClose` is false);
+- the window is still transitioning in.
+
+`System` windows (toasts, loading overlays) never take the back press; it goes to the window below them. A child
+implementing `IWindowBackHandler`, such as `WindowTabGroup`, can consume the press before the window closes.
+
+The method returns whether a window received the press, so a game can use it for its own back handling:
 
 ```csharp
-public class UIInputBlocker : MonoBehaviour
-{
-    public bool IsBlocked { get; }
-    
-    public void Block(string reason);
-    public void Unblock(string reason);
-}
+if (!await windowManager.HandleBackPressAsync())
+    screenFlow.GoBack();
 ```
 
-### Usage
+---
 
-Windows automatically block input during transitions:
+## Duplicates
+
+What opening a window does when a window of the **same type** is already open. Set it on the window by overriding
+`DuplicatePolicy`, or per call with `WindowOptions.Duplicate`.
+
+| Policy | Effect |
+|--------|--------|
+| `Allow` (default) | Open another instance. |
+| `Ignore` | Keep the open window. `Show` returns it, and `Open` completes with its result. Prevents double-tap duplicates. |
+| `BringToFront` | Like `Ignore`, and move the window to the top of the stack. |
+| `ReplaceExisting` | Close the open window (its `Open` returns default), then open a new one. |
+
+A call that shares an open window does not own it: canceling its token only stops waiting.
 
 ```csharp
-// PopupBase implements ITransitionInputBlocker
-public abstract class PopupBase : UIViewBase, ITransitionInputBlocker
+public sealed class ShopPopup : PopupBase
 {
-    public virtual void BlockInput();
-    public virtual void UnblockInput();
+    public override WindowDuplicatePolicy DuplicatePolicy => WindowDuplicatePolicy.Ignore;
 }
 ```
 
 ---
 
-## IWindowDefinition
+## Queue
 
-Per-window defaults interface:
+Some windows must not pile up, such as a daily reward, an offer or a rating prompt. Queue them instead of opening
+them:
 
 ```csharp
-public interface IWindowDefinition
+windowManager.Enqueue<DailyRewardPopup>(priority: 10).Forget();
+windowManager.Enqueue<RateAppPopup>().Forget();
+```
+
+- A queued window opens only when no window is open or opening. One opens at a time: the next one waits until the
+  previous one closes.
+- The highest priority opens first; equal priorities open in call order.
+- `Enqueue` completes when the window closes, with its result.
+- Canceling the token removes a waiting window from the queue, or closes it if it is already open.
+- With `Duplicate = Ignore` in the options, a window type that is already queued is not queued again.
+- `ClearQueue()` cancels every window still waiting. `CloseAll` does not touch the queue.
+
+---
+
+## Toasts
+
+```csharp
+public sealed class SavedToast : ToastBase { }
+
+await windowManager.ShowToast<SavedToast>("Saved", duration: 1.5f); // completes when it closes
+```
+
+- A toast closes by itself after `duration` seconds (unscaled), or after the toast's `Duration` (2 s by default).
+- It is a `System` window, so:
+  - it never blocks input, not even during its transitions;
+  - it does not receive clicks once shown, unless you override `Interactable`;
+  - it never takes the back press;
+  - it does not hold back queued windows;
+  - it stays open across Screen changes.
+- Several toasts can be open at once. Position them in `Setup` if they must not overlap.
+
+---
+
+## Screen Changes
+
+Each window says whether it stays open when the Screen changes, through `KeepOnScreenChange` (default `false`;
+`true` for toasts). It can be overridden per call with `WindowOptions.KeepOnScreenChange`.
+
+`CloseForScreenChangeAsync(immediate)` closes every window that does not stay.
+
+To call it automatically, add **`CloseWindowsOnScreenChange`** to the global Screen event profile. It runs when the
+current Screen starts exiting and has two options:
+
+- `immediate` (default true): skip the windows' out transitions;
+- `clearQueue`: also cancel the queued windows.
+
+It lives in the `VuTH.Window.Screen` assembly, so the Window and Screen modules stay independent of each other.
+
+---
+
+## Kept Instances
+
+By default, a closed window returns to the pool, and the next opening may get another instance, so `Setup` resets
+the state. When a window should reopen as it was left (scroll position, selected tab, typed text), override
+`KeepInstance => true` or set `WindowOptions.KeepInstance`. The closed instance is then deactivated and reused by the
+next opening of its type.
+
+The manager keeps one instance per window type. `DestroyKeptInstances()` and `ClearPrefabCache()` release them.
+
+---
+
+## Typed Windows
+
+```csharp
+public sealed class RenamePopup : PopupBase<string, string> // data: current name, result: new name
 {
-    WindowType WindowType { get; }
-    UILayer Layer { get; }
-    string TransitionPreset { get; }
-    IUITransition TransitionInSettings { get; }
-    IUITransition TransitionOutSettings { get; }
+    protected override void OnSetup(string currentName) => input.text = currentName;
+    private void OnConfirm() => Close(input.text);
+}
+
+// Data and result types are checked at compile time.
+var newName = await windowManager.Open<RenamePopup, string, string>(player.Name);
+```
+
+These are extension methods (`WindowManagerExtensions`) for windows implementing `ITypedWindow<TData, TResult>`:
+`PopupBase<TData, TResult>` and `FullScreenBase<TData, TResult>`. If data of another type arrives through the untyped
+API, it is logged and the window receives `default`.
+
+---
+
+## Tabs and Safe Area
+
+**`WindowTabGroup`** (in `_VuTH.Core.Window.UI`) shows one of its `tabs` at a time:
+
+- `SelectTab(i)` switches tab; `TabChanged` reports it.
+- The back button returns to the previously selected tab before it closes the window.
+- Each opening starts on `defaultTab`, unless `resetOnOpen` is off. Combine that with a kept instance to remember
+  the tab.
+
+**`SafeAreaFitter`** fits a RectTransform to `Screen.safeArea` (notch, rounded corners, home indicator). It follows
+rotation and resolution changes, and each edge can be turned off. Put it on a full-screen child that holds the
+window content, and keep backgrounds and dimmers outside it.
+
+---
+
+## Window Events
+
+`OnWindowEvent` and MessagePipe (`ISubscriber<WindowEvent>`, when the manager is created through DI) report each
+window being shown and closed, for analytics or tutorials. Each `WindowEvent` contains:
+
+- `Type`: `Opened` or `Closed`;
+- `WindowName`, `WindowType` and `Window`;
+- for a close only:
+  - `ShownSeconds`: unscaled time the window was shown;
+  - `HasResult`: whether it was closed with a result;
+  - `CloseCause`: `Closed`, `BackPress`, `CloseAll`, `Forced`, `Canceled` or `Replaced`.
+
+```csharp
+windowManager.OnWindowEvent += e =>
+{
+    if (e.Type == WindowEventType.Closed)
+        Analytics.Log("window_closed", e.WindowName, e.CloseCause, e.ShownSeconds);
+};
+```
+
+---
+
+## Prefabs, Pooling and Preloading
+
+- Prefabs are loaded through `IWindowPrefabProvider`, which defaults to `WindowPrefabCache` (Addressables). The key is
+  the class name, or `[WindowAddress("key")]` when two window classes share a name.
+- `ReleasePrefab<T>()` and `ClearPrefabCache()` release loaded prefabs.
+- Instances come from the `IPoolManager`. Without a pool, windows are instantiated and destroyed instead.
+- Destroying an open window (for example on scene unload) removes it from the stack.
+- `WithPrefabProvider`, `WithInputBlocker` and `WithTransitionFactory` replace the defaults, for example in tests.
+- `PreloadAsync<T>(instances)` loads the prefab and creates pooled instances ahead of time, so the first opening does
+  not hitch. It does nothing when the prefab already has a pool.
+
+```csharp
+[WindowAddress("UI/Shop/ConfirmPopup")]
+public sealed class ConfirmPopup : PopupBase<bool>
+{
+    [SerializeField] private Button yes, no;
+
+    protected override void Awake()
+    {
+        base.Awake();
+        yes.onClick.AddListener(() => Close(true));
+        no.onClick.AddListener(() => Close(false));
+    }
+
+    public override bool AllowBackClose => false; // must be answered
 }
 ```
 
 ---
 
-## Architecture Overview
+## Debugging
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      WindowManager                          │
-│                  (VBootstrapManager)                        │
-├─────────────────────────────────────────────────────────────┤
-│  Window Stack                                              │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │ [Debug] (Layer 4000)                                │  │
-│  │ [Tutorial] (Layer 3000)                             │  │
-│  │ [System] (Layer 2000)                              │  │
-│  │ [Popup] (Layer 1000) ← Top                         │  │
-│  └─────────────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│  UITransitionFactory                                       │
-│  ├── FadeTransition                                        │
-│  ├── ScaleTransition                                       │
-│  └── SlideTransition                                       │
-├─────────────────────────────────────────────────────────────┤
-│  UIInputBlocker (reference counting)                       │
-└─────────────────────────────────────────────────────────────┘
-```
+In Play Mode, the **Window** tab of the Settings window shows the live stack:
+
+- every window, top first, with its type, sorting order and state (`Opening`, `Open`, `Closing`);
+- the number of queued windows;
+- whether input is blocked, and why.
+
+Each window has **Select**, **Close** and **Force** buttons, and the tab has **Close All**, **Force Close All** and
+**Clear Queue**. From code, `GetOpenWindows()` returns the same snapshot.
 
 ---
 
-## Quick Usage Examples
+## Configuration
 
-### Creating a Popup
+`Resources/Window/WindowManagerCentralProfile` (Settings window → Window):
 
-```csharp
-public class ConfirmPopup : PopupBase
-{
-    [SerializeField] private Button okButton;
-    [SerializeField] private Button cancelButton;
-    
-    public override void Setup(object data)
-    {
-        base.Setup(data);
-        
-        okButton.onClick.AddListener(() => TryClose(true));
-        cancelButton.onClick.AddListener(() => TryClose(false));
-    }
-    
-    public void TryClose(bool confirmed)
-    {
-        if (confirmed)
-            TryRequestClose(confirmed);
-        else
-            TryClose();
-    }
-}
-```
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `popupBaseSortingOrder` | 1000 | Sorting order of the bottom Popup / FullScreenPopup |
+| `systemBaseSortingOrder` | 2000 | Sorting order of the bottom System window (Tutorial adds 1000) |
+| `sortingOrderStep` | 10 | Added per window below in the stack |
+| `blockInputDuringTransitions` | true | Block UI input during transitions |
 
-### Opening a Window
-
-```csharp
-// Open and wait for result
-var result = await WindowManager.Instance
-    .Open<ConfirmPopup, bool>(new WindowOptions 
-    {
-        Data = "Are you sure?"
-    });
-
-if (result)
-    Debug.Log("User confirmed!");
-```
-
-### Opening with Preset
-
-```csharp
-var result = await WindowManager.Instance.Open<MyPopup, bool>(
-    new WindowOptions 
-    {
-        Data = data,
-        TransitionPreset = "Scale"
-    });
-```
-
-### Custom Transition
-
-```csharp
-public class MyTransition : IUITransition
-{
-    public float Duration => 0.5f;
-    
-    public async UniTask In(IUIView view)
-    {
-        // Custom animation
-        await view.CanvasGroup.FadeIn(0.3f);
-        await view.transform.ScaleAsync(1f, 0.2f);
-    }
-    
-    public async UniTask Out(IUIView view)
-    {
-        await view.CanvasGroup.FadeOut(0.3f);
-    }
-}
-
-// Use
-await window.Show(new MyTransition());
-```
-
-### Closing Top Window
-
-```csharp
-// Close with result
-WindowManager.Instance.CloseTop(someResult);
-
-// Close without result
-WindowManager.Instance.CloseTop();
-```
-
-### Check if Window is Open
-
-```csharp
-if (WindowManager.Instance.IsShowing<SettignsPopup>())
-{
-    // Update existing popup
-}
-```
-
----
-
-## Event Flow
-
-```
-WindowManager.Open<Popup>()
-    └── Create window (instantiate prefab)
-            └── Setup(data)
-                    └── Show(transition)
-                            ├── BlockInput()
-                            ├── Run transition In
-                            │       └── PrimeTween animation
-                            └── OnTransitionCompleted
-                                    └── UnblockInput()
-
-WindowManager.CloseTop()
-    └── Hide(transition)
-            ├── Run transition Out
-            ├── OnTransitionCompleted
-            └── Destroy/Return to pool
-```
+If the profile is missing, the manager logs an error and uses these defaults.

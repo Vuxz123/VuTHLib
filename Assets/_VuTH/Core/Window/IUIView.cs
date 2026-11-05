@@ -1,21 +1,17 @@
-﻿using _VuTH.Core.Window.Transition;
-using Cysharp.Threading.Tasks;
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace _VuTH.Core.Window
 {
     /// <summary>
-    /// Base interface for all UI controllers
+    /// Base interface for all UI views. Showing, hiding and transitions are driven by <see cref="IWindowManager"/>.
     /// </summary>
     public interface IUIView
     {
         GameObject GameObject { get; }
         Canvas Canvas { get; }
         CanvasGroup CanvasGroup { get; }
-        
+
         void Setup(object data);
-        UniTask Show(IUITransition transition = null);
-        UniTask Hide(IUITransition transition = null);
-        void OnBackPressed(); // Android back button
+        void OnBackPressed(); // Android back button / Escape
     }
 }

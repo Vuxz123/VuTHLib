@@ -11,7 +11,6 @@ namespace _VuTH.Core.Window.Transition
         
         public override IUITransition Create()
         {
-            // Note: SlideTransition currently doesn't take a curve.
             return new SlideTransition(direction, duration, distance);
         }
     }

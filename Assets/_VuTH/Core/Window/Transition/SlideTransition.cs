@@ -1,11 +1,12 @@
-﻿using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 
 namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
-    /// Slide transition (from side)
+    /// Slide transition (from side): slides the transition root from off screen to its rest position.
+    /// Runs on unscaled time, so it also plays while the game is paused.
     /// </summary>
     public class SlideTransition : IUITransition
     {
@@ -38,13 +39,14 @@ namespace _VuTH.Core.Window.Transition
                 return;
             }
 
-            var startPos = GetOffscreenPosition(rt);
+            // The rest position (restored before each opening).
             var endPos = rt.anchoredPosition;
+            var startPos = GetOffscreenPosition(rt);
 
             rt.anchoredPosition = startPos;
             cg.alpha = 1f;
 
-            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.OutCubic);
+            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.OutCubic, useUnscaledTime: true);
             await t;
 
             rt.anchoredPosition = endPos;
@@ -68,7 +70,7 @@ namespace _VuTH.Core.Window.Transition
             var startPos = rt.anchoredPosition;
             var endPos = GetOffscreenPosition(rt);
 
-            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.InCubic);
+            var t = Tween.UIAnchoredPosition(rt, startPos, endPos, Duration, ease: Ease.InCubic, useUnscaledTime: true);
             await t;
 
             rt.anchoredPosition = endPos;

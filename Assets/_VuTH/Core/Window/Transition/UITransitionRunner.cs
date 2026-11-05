@@ -4,12 +4,15 @@ namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
     /// Centralized transition execution.
-    /// Keeps consistent final UI states even if transition is null.
+    /// Keeps consistent final UI states even if transition is null, and plays the window's
+    /// <see cref="UITransitionElement"/>s after its transition in.
     /// </summary>
     public sealed class UITransitionRunner : IUITransitionRunner
     {
         public async UniTask RunIn(IUIView view, IUITransition transition)
         {
+            UITransitionElement.PrepareAll(view);
+
             if (transition == null)
             {
                 // Ensure final state
@@ -17,10 +20,13 @@ namespace _VuTH.Core.Window.Transition
                 cg.alpha = 1f;
                 cg.interactable = true;
                 cg.blocksRaycasts = true;
-                return;
+            }
+            else
+            {
+                await transition.In(view);
             }
 
-            await transition.In(view);
+            await UITransitionElement.PlayAll(view);
         }
 
         public async UniTask RunOut(IUIView view, IUITransition transition)
@@ -39,4 +45,3 @@ namespace _VuTH.Core.Window.Transition
         }
     }
 }
-

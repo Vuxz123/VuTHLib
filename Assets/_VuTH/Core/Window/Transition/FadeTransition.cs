@@ -4,7 +4,8 @@ using PrimeTween;
 namespace _VuTH.Core.Window.Transition
 {
     /// <summary>
-    /// Fade transition
+    /// Fade transition. Runs on unscaled time, so it also plays while the game is paused (<c>Time.timeScale = 0</c>).
+    /// Drives the view's dimmer (<see cref="IBackgroundDimmer"/>) along with its alpha.
     /// </summary>
     public class FadeTransition : IUITransition
     {
@@ -19,64 +20,45 @@ namespace _VuTH.Core.Window.Transition
 
         public async UniTask In(IUIView view)
         {
-            var blocker = (view as object) as ITransitionInputBlocker;
-            blocker?.SetInputBlocked(true);
-
-            var dimmer = (view as object) as IBackgroundDimmer;
-
+            var blocker = view as ITransitionInputBlocker;
+            var dimmer = view as IBackgroundDimmer;
             var cg = view.CanvasGroup;
+
+            blocker?.SetInputBlocked(true);
             cg.alpha = 0f;
 
-            // Drive dimmer with a parallel tween.
-            Tween dimTween = default;
-            if (dimmer != null)
-            {
-                dimTween = Tween.Custom(0f, 1f, Duration,
-                    onValueChange: v => dimmer.SetDim(v));
-            }
+            var dimTween = dimmer != null
+                ? Tween.Custom(0f, 1f, Duration, onValueChange: dimmer.SetDim, useUnscaledTime: true)
+                : default;
+            await Tween.Alpha(cg, 0f, 1f, Duration, useUnscaledTime: true);
+            if (dimTween.isAlive) await dimTween;
 
-            var alphaTween = Tween.Alpha(cg, 0f, 1f, Duration);
-            await alphaTween;
-
-            if (dimTween.isAlive)
-                await dimTween;
-
-            cg.alpha = 1f;
             dimmer?.SetDim(1f);
+            blocker?.SetInputBlocked(false);
+            cg.alpha = 1f;
             cg.interactable = true;
             cg.blocksRaycasts = true;
-
-            blocker?.SetInputBlocked(false);
         }
 
         public async UniTask Out(IUIView view)
         {
-            var blocker = (view as object) as ITransitionInputBlocker;
-            blocker?.SetInputBlocked(true);
-
-            var dimmer = (view as object) as IBackgroundDimmer;
-
+            var blocker = view as ITransitionInputBlocker;
+            var dimmer = view as IBackgroundDimmer;
             var cg = view.CanvasGroup;
+
+            blocker?.SetInputBlocked(true);
             cg.interactable = false;
 
-            Tween dimTween = default;
-            if (dimmer != null)
-            {
-                dimTween = Tween.Custom(1f, 0f, Duration,
-                    onValueChange: v => dimmer.SetDim(v));
-            }
+            var dimTween = dimmer != null
+                ? Tween.Custom(1f, 0f, Duration, onValueChange: dimmer.SetDim, useUnscaledTime: true)
+                : default;
+            await Tween.Alpha(cg, 1f, 0f, Duration, useUnscaledTime: true);
+            if (dimTween.isAlive) await dimTween;
 
-            var alphaTween = Tween.Alpha(cg, 1f, 0f, Duration);
-            await alphaTween;
-
-            if (dimTween.isAlive)
-                await dimTween;
-
-            cg.alpha = 0f;
             dimmer?.SetDim(0f);
+            cg.alpha = 0f;
+            cg.interactable = false;
             cg.blocksRaycasts = false;
-
-            blocker?.SetInputBlocked(false);
         }
     }
 }

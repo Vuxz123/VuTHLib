@@ -4,7 +4,9 @@
     "references": [
         "GUID:d5b0d0a5036570c4baaaf39691266a41",
         "GUID:dd36bf84407fff046b0bcd4bca4c1c92",
-        "VuTH.Common.Editor"
+        "VuTH.Common.Editor",
+        "VuTH.Common",
+        "UniTask"
     ],
     "includePlatforms": [
         "Editor"
