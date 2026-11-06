@@ -114,6 +114,20 @@ namespace _VuTH.Core.Window.Transition
             Buffer.Clear();
         }
 
+        /// <summary>Stops the tweens of every element of <paramref name="view"/> (window removed mid-transition).</summary>
+        internal static void StopAll(IUIView view)
+        {
+            view.GameObject.GetComponentsInChildren(true, Buffer);
+            foreach (var element in Buffer)
+            {
+                if (!element._restCaptured) continue;
+                Tween.StopAll(element._group);
+                Tween.StopAll(element._rect);
+            }
+
+            Buffer.Clear();
+        }
+
         /// <summary>Plays every active element of <paramref name="view"/> (each with its delay) and waits for all.</summary>
         internal static UniTask PlayAll(IUIView view)
         {

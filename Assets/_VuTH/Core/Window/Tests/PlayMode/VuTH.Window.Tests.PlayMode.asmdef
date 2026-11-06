@@ -11,7 +11,8 @@
         "VuTH.Screen",
         "UnityEngine.UI",
         "VuTH.Common.DI",
-        "VContainer"
+        "VContainer",
+        "PrimeTween.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

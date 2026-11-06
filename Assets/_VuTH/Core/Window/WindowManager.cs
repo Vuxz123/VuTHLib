@@ -23,9 +23,10 @@ namespace _VuTH.Core.Window
     /// Opens windows (prefabs loaded through <see cref="IWindowPrefabProvider"/>, instances from the pool), stacks them
     /// and closes them with their transitions.
     /// <para>
-    /// Opens and closes run one after another. UI input is blocked only while a window transitions in or out, never
-    /// while it is simply open. A window that fails to open, throws, or is destroyed is always removed from the stack,
-    /// and whoever awaits it is released.
+    /// Opens and closes run one after another, except overlays (<see cref="IWindowOverlay"/>, e.g. toasts) which never
+    /// wait for other windows. UI input is blocked only while a window transitions in or out, never while it is simply
+    /// open. A window that fails to open, throws, or is destroyed is always removed from the stack, and whoever awaits
+    /// it is released.
     /// </para>
     /// </summary>
     public class WindowManager : VBootstrapManager<WindowManager, IWindowManager>, IWindowManager
@@ -39,40 +40,56 @@ namespace _VuTH.Core.Window
         [SerializeField] private Component inputBlockerComponent;
         [SerializeField] private Component transitionFactoryComponent;
 
-        [Header("Input")]
+        [Header("Back Input")]
+        [Tooltip("Handle the back input (back action / Escape) here. Turn off when the game calls HandleBackPressAsync " +
+                 "itself, so a press is not handled twice.")]
+        [SerializeField] private bool handleBackInput = true;
+
         [Tooltip("Optional. If set, this InputAction will be used as the Back button (recommended for mobile).")]
         [SerializeField] private InputActionReference backAction;
+
+        [Tooltip("Escape on the keyboard also counts as back.")]
+        [SerializeField] private bool escapeIsBack = true;
 
         // Injected; falls back to the PoolManager singleton without DI, and to Instantiate / Destroy without a pool.
         private IPoolManager _pool;
         private IPublisher<WindowEvent> _eventPublisher;
-
-        // Closed windows kept for their next opening (KeepInstance), one per window type.
-        private readonly Dictionary<Type, (UIViewBase Window, bool Pooled)> _keptInstances = new();
 
         private IUIInputBlocker _inputBlocker;
         private IUITransitionFactory _transitionFactory;
         private IWindowPrefabProvider _prefabProvider;
         private readonly IUITransitionRunner _transitionRunner = new UITransitionRunner();
 
-        // Open windows (index 0 = bottom, last = top) + resolved options per window.
+        // Open windows (index 0 = bottom, last = top); their options are in their entries.
         private readonly WindowStack<UIViewBase> _windows = new();
         private readonly Dictionary<UIViewBase, WindowEntry> _entries = new();
+
+        // Closed windows kept for their next opening (KeepInstance), one per window type.
+        private readonly Dictionary<Type, (UIViewBase Window, bool Pooled)> _keptInstances = new();
+
+        // Window types whose prefab was loaded through the provider (released by ClearPrefabCache).
+        private readonly HashSet<Type> _loadedTypes = new();
 
         private readonly SemaphoreSlim _opGate = new(1, 1);
         private int _transitionCount;
         private int _pendingOpens;
         private bool _backPressedThisFrame;
+        private WindowStackState _stackState;
 
-        // Queued opens (highest priority first, then oldest first); one runs at a time, when no window is open.
+        // Queued opens (highest priority first, then oldest first); one runs at a time, when no modal window is open.
         private readonly List<QueuedOpen> _queue = new();
         private long _queueSequence;
         private bool _queueBusy;
 
-        public UIViewBase TopWindow => _windows.Top;
+        /// <summary>The topmost window that is not an overlay (a toast is never the top window).</summary>
+        public UIViewBase TopWindow => TopModalEntry()?.Window;
+
+        /// <summary>Every open window, overlays included.</summary>
         public int WindowCount => _windows.Count;
+
         public bool IsTransitioning => _transitionCount > 0;
         public int QueuedCount => _queue.Count;
+        public WindowStackState StackState => _stackState;
 
         /// <summary>The input blocker in use (null when blocking is disabled). For debugging tools.</summary>
         public IUIInputBlocker InputBlocker => _inputBlocker;
@@ -80,8 +97,20 @@ namespace _VuTH.Core.Window
         public event Action<UIViewBase> OnWindowOpened;
         public event Action<UIViewBase> OnWindowClosed;
         public event Action<WindowEvent> OnWindowEvent;
+        public event Action<WindowStackState> OnStackChanged;
+        public event Action OnBackPressUnhandled;
 
         private IWindowPrefabProvider PrefabProvider => _prefabProvider ??= new WindowPrefabCache(this);
+
+        /// <summary>The profile, loaded on first use (an Open before initialization must not fail).</summary>
+        private WindowProfile Config
+        {
+            get
+            {
+                EnsureProfile();
+                return config;
+            }
+        }
 
         private enum CloseReason
         {
@@ -110,6 +139,7 @@ namespace _VuTH.Core.Window
             public readonly UIViewBase Window;
             public readonly WindowOptions Options;
             public readonly bool Pooled;
+            public readonly bool IsOverlay;
             public readonly UniTaskCompletionSource<CloseToken> CloseSource = new();
             public readonly UniTaskCompletionSource Closed = new();
             public WindowState State = WindowState.Opening;
@@ -121,14 +151,20 @@ namespace _VuTH.Core.Window
             public CloseReason Reason = CloseReason.Force;
             public bool HasResult;
 
-            public WindowEntry(UIViewBase window, WindowOptions options, bool pooled)
+            public WindowEntry(UIViewBase window, WindowOptions options, bool pooled, bool isOverlay)
             {
                 Window = window;
                 Options = options;
                 Pooled = pooled;
+                IsOverlay = isOverlay;
             }
 
             public bool CloseRequested => CloseSource.Task.Status != UniTaskStatus.Pending;
+
+            /// <summary>Open and not closing.</summary>
+            public bool IsActive => !Cleaned && !CloseRequested;
+
+            public bool IsFullScreen => Options.WindowType.GetValueOrDefault() == WindowType.FullScreenPopup;
 
             public bool RequestClose(CloseReason reason, object payload = null)
             {
@@ -197,6 +233,16 @@ namespace _VuTH.Core.Window
             return this;
         }
 
+        /// <summary>
+        /// Whether the manager handles the back input itself (back action / Escape). Turn off when the game calls
+        /// <see cref="HandleBackPressAsync"/> from its own input handling.
+        /// </summary>
+        public bool HandleBackInput
+        {
+            get => handleBackInput;
+            set => handleBackInput = value;
+        }
+
         #endregion
 
         #region Lifecycle
@@ -247,7 +293,6 @@ namespace _VuTH.Core.Window
             }
 
             _windows.Clear();
-            DestroyKeptInstances();
             ClearPrefabCache();
         }
 
@@ -264,36 +309,89 @@ namespace _VuTH.Core.Window
             config = ScriptableObject.CreateInstance<WindowProfile>();
         }
 
+        #endregion
+
+        #region Prefabs
+
         public void ReleasePrefab<TWindow>() where TWindow : UIViewBase
         {
-            PrefabProvider.Release(typeof(TWindow));
+            ReleasePrefab(typeof(TWindow));
         }
 
+        /// <summary>
+        /// Releases every loaded prefab whose window type is not open, together with its pooled and kept instances.
+        /// </summary>
         public void ClearPrefabCache()
         {
-            DestroyKeptInstances();
-            PrefabProvider.Clear();
+            foreach (var windowType in new List<Type>(_loadedTypes))
+            {
+                ReleasePrefab(windowType);
+            }
         }
 
-        /// <summary>Releases the closed instances kept by <see cref="WindowOptions.KeepInstance"/>.</summary>
-        public void DestroyKeptInstances()
+        /// <summary>
+        /// Releases a prefab and every instance made from it (pooled and kept), since they reference its assets.
+        /// Skipped while a window of that type is open.
+        /// </summary>
+        private bool ReleasePrefab(Type windowType)
         {
-            foreach (var kept in _keptInstances.Values)
+            foreach (var entry in _entries.Values)
             {
-                if (kept.Window) Release(kept.Window.gameObject, kept.Pooled);
+                if (entry.Cleaned || entry.Window == null || entry.Window.GetType() != windowType) continue;
+
+                this.LogWarning($"Not releasing the {windowType.Name} prefab: a {windowType.Name} window is open.");
+                return false;
             }
 
-            _keptInstances.Clear();
+            DestroyKeptInstance(windowType);
+
+            if (PrefabProvider.TryGetLoaded(windowType, out var prefab) && prefab && _pool.IsAlive())
+            {
+                try
+                {
+                    _pool.ClearPool(prefab);
+                }
+                catch (Exception e)
+                {
+                    this.LogError($"Could not clear the pool of {windowType.Name}: {e}");
+                }
+            }
+
+            PrefabProvider.Release(windowType);
+            _loadedTypes.Remove(windowType);
+            return true;
+        }
+
+        /// <summary>Releases the closed instances kept by <see cref="WindowOptions.KeepInstance"/> (their state is lost).</summary>
+        public void DestroyKeptInstances()
+        {
+            foreach (var windowType in new List<Type>(_keptInstances.Keys))
+            {
+                DestroyKeptInstance(windowType);
+            }
+        }
+
+        private void DestroyKeptInstance(Type windowType)
+        {
+            if (!_keptInstances.Remove(windowType, out var kept) || !kept.Window) return;
+            Release(kept.Window.gameObject, kept.Pooled);
         }
 
         public async UniTask PreloadAsync<TWindow>(int instances = 1) where TWindow : UIViewBase
         {
-            var prefab = await PrefabProvider.GetOrLoad(typeof(TWindow));
+            var prefab = await LoadPrefabAsync(typeof(TWindow));
             if (!prefab || instances <= 0 || !_pool.IsAlive()) return;
 
             // WarmupPool replaces an existing pool (losing track of its instances): only warm up a new one.
             if (_pool.GetPrefabStats(prefab) != null) return;
             _pool.WarmupPool(prefab, instances);
+        }
+
+        private async UniTask<GameObject> LoadPrefabAsync(Type windowType)
+        {
+            var prefab = await PrefabProvider.GetOrLoad(windowType);
+            if (prefab) _loadedTypes.Add(windowType);
+            return prefab;
         }
 
         #endregion
@@ -376,11 +474,15 @@ namespace _VuTH.Core.Window
             _pendingOpens++;
             try
             {
-                var prefab = await PrefabProvider.GetOrLoad(typeof(TWindow));
+                var prefab = await LoadPrefabAsync(typeof(TWindow));
                 if (!prefab) return default;
 
                 cancellationToken.ThrowIfCancellationRequested();
-                return await RunSerialized(() => OpenEntryAsync<TWindow>(prefab, options));
+
+                // Overlays (toasts) never wait for, nor delay, the other windows.
+                return prefab.GetComponent<TWindow>() is IWindowOverlay
+                    ? await OpenEntryAsync<TWindow>(prefab, options, isOverlay: true)
+                    : await RunSerialized(() => OpenEntryAsync<TWindow>(prefab, options, isOverlay: false));
             }
             finally
             {
@@ -389,13 +491,13 @@ namespace _VuTH.Core.Window
             }
         }
 
-        private async UniTask<OpenTicket> OpenEntryAsync<TWindow>(GameObject prefab, WindowOptions options)
+        private async UniTask<OpenTicket> OpenEntryAsync<TWindow>(GameObject prefab, WindowOptions options, bool isOverlay)
             where TWindow : UIViewBase
         {
             // Resolved from the prefab: the duplicate policy is needed before spawning.
             var resolved = WindowOptionsResolver.Resolve(options, prefab.GetComponent<TWindow>() as IWindowDefinition);
 
-            var existing = FindOpen(typeof(TWindow));
+            var existing = FindActive(typeof(TWindow), exactType: true);
             if (existing != null)
             {
                 switch (resolved.Duplicate.GetValueOrDefault())
@@ -417,10 +519,9 @@ namespace _VuTH.Core.Window
             var window = SpawnWindow<TWindow>(prefab, out var pooled);
             if (!window) return default;
 
-            var entry = new WindowEntry(window, resolved, pooled);
+            var entry = new WindowEntry(window, resolved, pooled, isOverlay);
             _entries[window] = entry;
             _windows.Push(window);
-            _windows.SetOptions(window, resolved);
 
             try
             {
@@ -429,10 +530,11 @@ namespace _VuTH.Core.Window
                 window.Canvas.sortingOrder = GetSortingOrder(resolved.WindowType.GetValueOrDefault(), _windows.Count);
                 window.transform.SetAsLastSibling();
 
-                window.Bind(
+                window.Bind(resolved,
                     result => entry.RequestClose(CloseReason.Normal, result),
                     () => entry.RequestClose(CloseReason.Force));
                 WatchLifetime(entry);
+                RefreshStack();
 
                 window.Setup(resolved.Data);
 
@@ -451,26 +553,11 @@ namespace _VuTH.Core.Window
             entry.Shown = true;
             entry.State = WindowState.Open;
             entry.ShownAt = Time.realtimeSinceStartup;
+            RefreshStack();
             Notify(OnWindowOpened, window);
             Publish(entry, WindowEventType.Opened);
             SafeCall(window.OnViewShown, window, nameof(UIViewBase.OnViewShown));
             return new OpenTicket(entry, true);
-        }
-
-        /// <summary>The topmost open window of exactly <paramref name="windowType"/> that is not closing.</summary>
-        private WindowEntry FindOpen(Type windowType)
-        {
-            var windows = _windows.ToArray();
-            for (var i = windows.Length - 1; i >= 0; i--)
-            {
-                if (windows[i] && windows[i].GetType() == windowType &&
-                    _entries.TryGetValue(windows[i], out var entry) && !entry.Cleaned && !entry.CloseRequested)
-                {
-                    return entry;
-                }
-            }
-
-            return null;
         }
 
         private void BringToFront(WindowEntry entry)
@@ -480,18 +567,15 @@ namespace _VuTH.Core.Window
             _windows.Remove(entry.Window);
             _windows.Push(entry.Window);
             entry.Window.transform.SetAsLastSibling();
-            RefreshSortingOrders();
-        }
 
-        /// <summary>Sorting orders from the current stack positions.</summary>
-        private void RefreshSortingOrders()
-        {
             var windows = _windows.ToArray();
             for (var i = 0; i < windows.Length; i++)
             {
-                if (!windows[i] || !_entries.TryGetValue(windows[i], out var entry)) continue;
-                windows[i].Canvas.sortingOrder = GetSortingOrder(entry.Options.WindowType.GetValueOrDefault(), i + 1);
+                if (!windows[i] || !_entries.TryGetValue(windows[i], out var other)) continue;
+                windows[i].Canvas.sortingOrder = GetSortingOrder(other.Options.WindowType.GetValueOrDefault(), i + 1);
             }
+
+            RefreshStack();
         }
 
         private TWindow SpawnWindow<TWindow>(GameObject prefab, out bool pooled) where TWindow : UIViewBase
@@ -548,6 +632,28 @@ namespace _VuTH.Core.Window
 
         #endregion
 
+        #region Toast
+
+        public async UniTask ShowToast<TToast>(object data = null, float? duration = null) where TToast : ToastBase
+        {
+            var ticket = await BeginOpenAsync<TToast>(new WindowOptions { Data = data }, CancellationToken.None);
+            var entry = ticket.Entry;
+            if (entry == null || entry.Cleaned) return;
+
+            var seconds = duration ?? ((ToastBase)entry.Window).Duration;
+            CloseAfterAsync(entry, seconds).Forget();
+            await RunUntilClosedAsync(entry, CancellationToken.None);
+        }
+
+        /// <summary>Closes this opening of the toast after <paramref name="seconds"/>, unless it is closed before.</summary>
+        private static async UniTaskVoid CloseAfterAsync(WindowEntry entry, float seconds)
+        {
+            await UniTask.Delay(TimeSpan.FromSeconds(Mathf.Max(0f, seconds)), DelayType.UnscaledDeltaTime);
+            entry.RequestClose(CloseReason.Normal);
+        }
+
+        #endregion
+
         #region Queue
 
         public UniTask Enqueue<TWindow>(object data = null, int priority = 0, CancellationToken cancellationToken = default)
@@ -581,10 +687,10 @@ namespace _VuTH.Core.Window
             };
 
             var registration = cancellationToken.CanBeCanceled
-                ? cancellationToken.Register(() =>
+                ? cancellationToken.Register(() => OnMainThread(() =>
                 {
                     if (_queue.Remove(item)) source.TrySetCanceled(cancellationToken);
-                })
+                }))
                 : default;
 
             item.Cancel = () =>
@@ -629,7 +735,7 @@ namespace _VuTH.Core.Window
             }
         }
 
-        /// <summary>Opens the next queued window when nothing else is open or opening.</summary>
+        /// <summary>Opens the next queued window when no modal window is open or opening.</summary>
         private void PumpQueue()
         {
             if (_queueBusy || _queue.Count == 0 || HasModalWindow() || _pendingOpens > 0 || !IsManagerInitialized)
@@ -654,39 +760,15 @@ namespace _VuTH.Core.Window
             }
         }
 
-        /// <summary>Whether a Popup / FullScreenPopup is open: System (toast, loading) and Tutorial windows do not count.</summary>
+        /// <summary>Whether a window other than an overlay is open (a loading overlay counts, a toast does not).</summary>
         private bool HasModalWindow()
         {
             foreach (var entry in _entries.Values)
             {
-                if (entry.Cleaned) continue;
-                var type = entry.Options.WindowType.GetValueOrDefault();
-                if (type is WindowType.Popup or WindowType.FullScreenPopup) return true;
+                if (!entry.Cleaned && !entry.IsOverlay) return true;
             }
 
             return false;
-        }
-
-        #endregion
-
-        #region Toast
-
-        public async UniTask ShowToast<TToast>(object data = null, float? duration = null) where TToast : ToastBase
-        {
-            var ticket = await BeginOpenAsync<TToast>(new WindowOptions { Data = data }, CancellationToken.None);
-            var entry = ticket.Entry;
-            if (entry == null || entry.Cleaned) return;
-
-            var seconds = duration ?? ((ToastBase)entry.Window).Duration;
-            CloseAfterAsync(entry, seconds).Forget();
-            await RunUntilClosedAsync(entry, CancellationToken.None);
-        }
-
-        /// <summary>Closes this opening of the toast after <paramref name="seconds"/>, unless it is closed before.</summary>
-        private static async UniTaskVoid CloseAfterAsync(WindowEntry entry, float seconds)
-        {
-            await UniTask.Delay(TimeSpan.FromSeconds(Mathf.Max(0f, seconds)), DelayType.UnscaledDeltaTime);
-            entry.RequestClose(CloseReason.Normal);
         }
 
         #endregion
@@ -697,7 +779,7 @@ namespace _VuTH.Core.Window
         private async UniTask<CloseToken> RunUntilClosedAsync(WindowEntry entry, CancellationToken cancellationToken)
         {
             var registration = cancellationToken.CanBeCanceled
-                ? cancellationToken.Register(() => entry.RequestClose(CloseReason.Canceled))
+                ? cancellationToken.Register(() => OnMainThread(() => entry.RequestClose(CloseReason.Canceled)))
                 : default;
 
             CloseToken token;
@@ -712,17 +794,19 @@ namespace _VuTH.Core.Window
 
             if (!entry.Cleaned)
             {
-                await RunSerialized(() => CloseEntryAsync(entry, token));
+                if (entry.IsOverlay) await CloseEntryAsync(entry, token);
+                else await RunSerialized(() => CloseEntryAsync(entry, token));
             }
 
             return token;
         }
 
-        /// <summary>Plays the out transition and removes the window. Must run inside the operation gate.</summary>
+        /// <summary>Plays the out transition and removes the window. Inside the operation gate (except overlays).</summary>
         private async UniTask CloseEntryAsync(WindowEntry entry, CloseToken token)
         {
             if (entry.Cleaned) return;
             entry.State = WindowState.Closing;
+            RefreshStack(); // What a closing full screen window covered shows again during its transition out.
 
             try
             {
@@ -745,18 +829,13 @@ namespace _VuTH.Core.Window
 
             var window = entry.Window;
             _windows.Remove(window);
-            _windows.RemoveOptions(window);
             _entries.Remove(window);
 
             if (window)
             {
                 window.Unbind();
                 if (window.TryGetComponent<WindowLifetimeWatcher>(out var watcher)) watcher.Destroyed = null;
-
-                // A transition still running would keep animating the pooled instance.
-                Tween.StopAll(window.CanvasGroup);
-                var root = TransitionUtils.GetTransitionRoot(window);
-                if (root) Tween.StopAll(root);
+                StopTweens(window);
             }
 
             if (entry.Shown)
@@ -780,8 +859,18 @@ namespace _VuTH.Core.Window
             }
 
             entry.Closed.TrySetResult();
-
+            RefreshStack();
             PumpQueue();
+        }
+
+        /// <summary>A transition still running would keep animating the instance once it is back in the pool.</summary>
+        private static void StopTweens(UIViewBase window)
+        {
+            Tween.StopAll(window);          // tweens targeting the view itself (the dimmer of FadeTransition)
+            Tween.StopAll(window.CanvasGroup);
+            var root = TransitionUtils.GetTransitionRoot(window);
+            if (root) Tween.StopAll(root);
+            UITransitionElement.StopAll(window);
         }
 
         private void Release(GameObject instance, bool pooled)
@@ -819,10 +908,11 @@ namespace _VuTH.Core.Window
             return CloseTop(null);
         }
 
+        /// <summary>Closes the topmost window that is not an overlay (a toast on top is skipped).</summary>
         public UniTask CloseTop(object result)
         {
-            var top = _windows.Top;
-            return top ? Close(top, result) : UniTask.CompletedTask;
+            var top = TopModalEntry();
+            return top != null ? Close(top.Window, result) : UniTask.CompletedTask;
         }
 
         public UniTask CloseAll(bool immediate = false, bool forceCleanup = false)
@@ -874,16 +964,37 @@ namespace _VuTH.Core.Window
 
         #endregion
 
-        #region Query Methods
+        #region Queries
 
+        /// <summary>Whether a window of type <typeparamref name="TWindow"/> (or derived) is open and not closing.</summary>
         public bool HasWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windows.HasWindowOfType<TWindow>();
+            return FindActive(typeof(TWindow), exactType: false) != null;
         }
 
+        /// <summary>The topmost window of type <typeparamref name="TWindow"/> (or derived) that is not closing, or null.</summary>
         public TWindow GetWindow<TWindow>() where TWindow : UIViewBase
         {
-            return _windows.GetWindowOfType<TWindow>();
+            return FindActive(typeof(TWindow), exactType: false)?.Window as TWindow;
+        }
+
+        /// <summary>The topmost open, not closing window of <paramref name="windowType"/> (exactly, or derived).</summary>
+        private WindowEntry FindActive(Type windowType, bool exactType)
+        {
+            foreach (var entry in TopFirstEntries(e => e.IsActive && e.Window))
+            {
+                var type = entry.Window.GetType();
+                if (exactType ? type == windowType : windowType.IsAssignableFrom(type)) return entry;
+            }
+
+            return null;
+        }
+
+        /// <summary>The topmost window that is not an overlay (any state), or null.</summary>
+        private WindowEntry TopModalEntry()
+        {
+            var entries = TopFirstEntries(e => !e.IsOverlay && !e.Cleaned);
+            return entries.Count > 0 ? entries[0] : null;
         }
 
         public IReadOnlyList<WindowInfo> GetOpenWindows()
@@ -900,6 +1011,54 @@ namespace _VuTH.Core.Window
             }
 
             return result;
+        }
+
+        #endregion
+
+        #region Stack State
+
+        /// <summary>
+        /// Hides the windows covered by a shown full screen window (their canvases stop rendering), then reports the
+        /// stack state if it changed.
+        /// </summary>
+        private void RefreshStack()
+        {
+            var covered = false;
+            var modalCount = 0;
+            UIViewBase top = null;
+
+            foreach (var entry in TopFirstEntries(e => !e.Cleaned))
+            {
+                var window = entry.Window;
+                if (!window) continue;
+
+                if (entry.IsOverlay)
+                {
+                    window.Canvas.enabled = true; // Overlays are above everything.
+                    continue;
+                }
+
+                modalCount++;
+                if (top == null) top = window;
+
+                window.Canvas.enabled = !covered;
+                if (entry.State == WindowState.Open && entry.IsFullScreen) covered = true;
+            }
+
+            var state = new WindowStackState(modalCount, covered, top);
+            if (state.Equals(_stackState)) return;
+
+            _stackState = state;
+            if (OnStackChanged == null) return;
+
+            try
+            {
+                OnStackChanged(state);
+            }
+            catch (Exception e)
+            {
+                this.LogError($"A stack state subscriber threw: {e}");
+            }
         }
 
         #endregion
@@ -932,6 +1091,13 @@ namespace _VuTH.Core.Window
             }
         }
 
+        /// <summary>Token callbacks may run on any thread; window state is only touched on the main thread.</summary>
+        private static void OnMainThread(Action action)
+        {
+            if (PlayerLoopHelper.IsMainThread) action();
+            else UniTask.Post(action);
+        }
+
         /// <summary>
         /// Runs the in / out transition, blocking UI input only for its duration. A failing transition is logged and
         /// the final state applied, so it cannot leave the window half shown.
@@ -942,7 +1108,7 @@ namespace _VuTH.Core.Window
             if (!window) return;
 
             var options = entry.Options;
-            var block = _inputBlocker != null && config.blockInputDuringTransitions && options.BlockInput.GetValueOrDefault(true);
+            var block = _inputBlocker != null && Config.blockInputDuringTransitions && options.BlockInput.GetValueOrDefault(true);
 
             _transitionCount++;
             if (block) _inputBlocker.Block(TransitionBlockReason);
@@ -981,8 +1147,9 @@ namespace _VuTH.Core.Window
 
         private int GetSortingOrder(WindowType windowType, int stackCountAfterPush)
         {
+            var profile = Config;
             return WindowSortingOrder.Compute(windowType, stackCountAfterPush,
-                config.popupBaseSortingOrder, config.systemBaseSortingOrder, config.sortingOrderStep);
+                profile.popupBaseSortingOrder, profile.systemBaseSortingOrder, profile.sortingOrderStep);
         }
 
         private void Notify(Action<UIViewBase> handler, UIViewBase window)
@@ -1077,11 +1244,26 @@ namespace _VuTH.Core.Window
         private void Update()
         {
             var backPressed = _backPressedThisFrame
-                              || (Keyboard.current != null && Keyboard.current[Key.Escape].wasPressedThisFrame);
+                              || (escapeIsBack && Keyboard.current != null && Keyboard.current[Key.Escape].wasPressedThisFrame);
             _backPressedThisFrame = false;
-            if (!backPressed) return;
+            if (!backPressed || !handleBackInput) return;
 
-            HandleBackPressAsync().Forget(ex => this.LogError($"Back press handling failed: {ex}"));
+            ProcessBackInputAsync().Forget(ex => this.LogError($"Back press handling failed: {ex}"));
+        }
+
+        /// <summary>The manager's own back input: unhandled presses are reported through <see cref="OnBackPressUnhandled"/>.</summary>
+        internal async UniTask ProcessBackInputAsync()
+        {
+            if (await HandleBackPressAsync()) return;
+
+            try
+            {
+                OnBackPressUnhandled?.Invoke();
+            }
+            catch (Exception e)
+            {
+                this.LogError($"A back press subscriber threw: {e}");
+            }
         }
 
         public UniTask<bool> HandleBackPressAsync()
@@ -1089,13 +1271,14 @@ namespace _VuTH.Core.Window
             // Serialized: a back press never closes a window that is still transitioning in.
             return RunSerialized(() =>
             {
-                // The topmost window that is not a System overlay (toast, loading): those never take the back press.
-                var target = TopFirstEntries(e => e.Options.WindowType.GetValueOrDefault() != WindowType.System);
-                if (target.Count == 0) return UniTask.FromResult(false);
+                // The topmost window that is not an overlay; a toast never takes the back press.
+                var entry = TopModalEntry();
+                if (entry == null) return UniTask.FromResult(false);
 
-                var entry = target[0];
                 var window = entry.Window;
                 if (!window || !entry.Shown || entry.CloseRequested) return UniTask.FromResult(false);
+
+                // The single switch: the options (from the window's AllowBackClose unless the caller overrode it).
                 if (!entry.Options.CloseOnBackPress.GetValueOrDefault(true)) return UniTask.FromResult(false);
 
                 entry.BackPressed = true;

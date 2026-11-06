@@ -15,6 +15,9 @@ namespace _VuTH.Core.Window
         /// <summary>The prefab of <paramref name="windowType"/>, or null (logged) when it cannot be loaded.</summary>
         UniTask<GameObject> GetOrLoad(Type windowType);
 
+        /// <summary>The prefab of <paramref name="windowType"/> if it is loaded; never starts a load.</summary>
+        bool TryGetLoaded(Type windowType, out GameObject prefab);
+
         /// <summary>Releases the prefab of <paramref name="windowType"/> if it is loaded.</summary>
         void Release(Type windowType);
 
@@ -92,6 +95,17 @@ namespace _VuTH.Core.Window
             }
 
             return handle.Result;
+        }
+
+        public bool TryGetLoaded(Type windowType, out GameObject prefab)
+        {
+            prefab = null;
+            if (!_prefabHandleCache.TryGetValue(windowType, out var handle) || !handle.IsValid() || !handle.IsDone)
+                return false;
+            if (handle.Status != AsyncOperationStatus.Succeeded) return false;
+
+            prefab = handle.Result;
+            return prefab;
         }
 
         /// <summary>Releases a failed handle once, even when several callers awaited it.</summary>

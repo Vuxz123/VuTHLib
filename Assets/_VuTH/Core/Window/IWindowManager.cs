@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using _VuTH.Common;
 using Cysharp.Threading.Tasks;
@@ -50,7 +50,7 @@ namespace _VuTH.Core.Window
         /// </summary>
         UniTask Close(UIViewBase window, object result);
 
-        /// <summary>Closes the topmost window; completes once it is closed.</summary>
+        /// <summary>Closes the topmost window that is not an overlay (a toast is skipped); completes once it is closed.</summary>
         UniTask CloseTop();
 
         /// <summary>
@@ -84,29 +84,36 @@ namespace _VuTH.Core.Window
         /// </summary>
         UniTask<bool> HandleBackPressAsync();
 
-        /// <summary>
-        /// Get the topmost window
-        /// </summary>
+        /// <summary>The topmost window that is not an overlay: a toast on top is never the top window.</summary>
         UIViewBase TopWindow { get; }
 
-        /// <summary>
-        /// Number of windows in stack
-        /// </summary>
+        /// <summary>Number of open windows, overlays (toasts) included.</summary>
         int WindowCount { get; }
+
+        /// <summary>Modal windows open, whether the Screen is covered by a full screen window, top window.</summary>
+        WindowStackState StackState { get; }
+
+        /// <summary>
+        /// Raised when <see cref="StackState"/> changes: pause gameplay while <see cref="WindowStackState.HasModal"/>,
+        /// stop rendering the Screen while <see cref="WindowStackState.IsScreenCovered"/>.
+        /// </summary>
+        event Action<WindowStackState> OnStackChanged;
+
+        /// <summary>
+        /// Raised when the manager's own back input (back action / Escape) reaches no window, e.g. to show a "quit the
+        /// game?" dialog. Not raised for <see cref="HandleBackPressAsync"/> calls made by the game.
+        /// </summary>
+        event Action OnBackPressUnhandled;
 
         /// <summary>
         /// Whether a transition is in progress
         /// </summary>
         bool IsTransitioning { get; }
 
-        /// <summary>
-        /// Check if a specific window type is in the stack
-        /// </summary>
+        /// <summary>Whether a window of type <typeparamref name="TWindow"/> (or derived) is open and not closing.</summary>
         bool HasWindow<TWindow>() where TWindow : UIViewBase;
 
-        /// <summary>
-        /// Get a specific window from the stack
-        /// </summary>
+        /// <summary>The topmost window of type <typeparamref name="TWindow"/> (or derived) that is not closing, or null.</summary>
         TWindow GetWindow<TWindow>() where TWindow : UIViewBase;
 
         /// <summary>
@@ -138,12 +145,14 @@ namespace _VuTH.Core.Window
         System.Collections.Generic.IReadOnlyList<WindowInfo> GetOpenWindows();
 
         /// <summary>
-        /// Release the cached prefab of a specific window type (if loaded).
+        /// Releases the prefab of a window type together with its pooled and kept instances (they reference its assets).
+        /// Skipped (with a warning) while a window of that type is open.
         /// </summary>
         void ReleasePrefab<TWindow>() where TWindow : UIViewBase;
 
         /// <summary>
-        /// Release all cached prefabs. Useful for long sessions or when you want to unload UI bundles.
+        /// <see cref="ReleasePrefab{TWindow}"/> for every loaded window type that is not open. Useful for long sessions
+        /// or to unload UI bundles.
         /// </summary>
         void ClearPrefabCache();
 

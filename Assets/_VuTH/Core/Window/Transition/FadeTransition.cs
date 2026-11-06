@@ -28,7 +28,7 @@ namespace _VuTH.Core.Window.Transition
             cg.alpha = 0f;
 
             var dimTween = dimmer != null
-                ? Tween.Custom(0f, 1f, Duration, onValueChange: dimmer.SetDim, useUnscaledTime: true)
+                ? Tween.Custom(dimmer, 0f, 1f, Duration, (d, v) => d.SetDim(v), useUnscaledTime: true)
                 : default;
             await Tween.Alpha(cg, 0f, 1f, Duration, useUnscaledTime: true);
             if (dimTween.isAlive) await dimTween;
@@ -50,7 +50,7 @@ namespace _VuTH.Core.Window.Transition
             cg.interactable = false;
 
             var dimTween = dimmer != null
-                ? Tween.Custom(1f, 0f, Duration, onValueChange: dimmer.SetDim, useUnscaledTime: true)
+                ? Tween.Custom(dimmer, 1f, 0f, Duration, (d, v) => d.SetDim(v), useUnscaledTime: true)
                 : default;
             await Tween.Alpha(cg, 1f, 0f, Duration, useUnscaledTime: true);
             if (dimTween.isAlive) await dimTween;

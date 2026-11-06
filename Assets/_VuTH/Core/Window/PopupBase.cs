@@ -10,26 +10,12 @@ namespace _VuTH.Core.Window
     /// Modal popup - dialog with dimmed background.
     /// Use for confirmations, alerts, small dialogs.
     /// </summary>
-    public abstract class PopupBase : UIViewBase,
-        IWindowDefinition,
+    public abstract class PopupBase : WindowBase,
         ITransitionTarget,
         IBackgroundDimmer,
         ITransitionInputBlocker
     {
-        public virtual WindowType WindowType => WindowType.Popup;
-        public virtual string TransitionPreset => "Scale";
-
-        [Header("Transition Settings (Optional)")]
-        [SerializeReference]
-        [TransitionSettingsReference]
-        private UITransitionSettings transitionIn;
-
-        [SerializeReference]
-        [TransitionSettingsReference]
-        private UITransitionSettings transitionOut;
-
-        public UITransitionSettings TransitionInSettings => transitionIn;
-        public UITransitionSettings TransitionOutSettings => transitionOut;
+        public override WindowType WindowType => WindowType.Popup;
 
         [Header("Transition Runtime Hooks (Optional)")]
         [Tooltip("If set, transitions animate this RectTransform instead of the root RectTransform.")]
@@ -41,19 +27,19 @@ namespace _VuTH.Core.Window
         [Tooltip("Clicks on this graphic count as outside the popup (CloseOnOutsideClick). Default: the dimmer's graphic.")]
         [SerializeField] private Graphic outsideClickArea;
 
-        /// <summary>Whether a click outside the popup (on its dimmer) closes it. Default: false.</summary>
-        public virtual bool CloseOnOutsideClick => false;
+        /// <summary>
+        /// Target for transitions.
+        /// If not set, TransitionUtils will fall back to this view's RectTransform.
+        /// </summary>
+        public RectTransform TransitionRoot => transitionRoot;
 
-        protected override void Awake()
+        protected override void OnOpening()
         {
-            base.Awake();
-            SetUpOutsideClick();
+            if (Options.CloseOnOutsideClick.GetValueOrDefault()) EnsureOutsideClickCatcher();
         }
 
-        private void SetUpOutsideClick()
+        private void EnsureOutsideClickCatcher()
         {
-            if (!CloseOnOutsideClick) return;
-
             var area = outsideClickArea;
             if (!area && dimmerCanvasGroup) area = dimmerCanvasGroup.GetComponent<Graphic>();
             if (!area)
@@ -65,48 +51,20 @@ namespace _VuTH.Core.Window
             area.raycastTarget = true;
             if (!area.TryGetComponent<WindowOutsideClickCatcher>(out var catcher))
                 catcher = area.gameObject.AddComponent<WindowOutsideClickCatcher>();
-            catcher.Clicked = OnOutsideClick;
+            catcher.Clicked = HandleOutsideClick;
         }
 
-        /// <summary>Called on a click outside the popup. Default: closes it, like the back button.</summary>
+        private void HandleOutsideClick()
+        {
+            // The catcher stays on the instance: only react during an opening that asked for it.
+            if (IsOpen && Options.CloseOnOutsideClick.GetValueOrDefault()) OnOutsideClick();
+        }
+
+        /// <summary>Called on a click outside the popup when CloseOnOutsideClick is on. Default: closes it.</summary>
         protected virtual void OnOutsideClick()
         {
-            if (CloseOnOutsideClick) Close();
+            Close();
         }
-
-        public virtual bool BlockInput => true;
-
-        /// <summary>
-        /// Whether this popup can be closed by back button.
-        /// Override to false for important confirmations.
-        /// </summary>
-        public virtual bool AllowBackClose => true;
-
-        public bool CloseOnBackPress => AllowBackClose;
-
-        /// <summary>
-        /// What opening this window does when one of the same type is already open. Override with
-        /// <see cref="WindowDuplicatePolicy.Ignore"/> to prevent double-tap duplicates.
-        /// </summary>
-        public virtual WindowDuplicatePolicy DuplicatePolicy => WindowDuplicatePolicy.Allow;
-
-        /// <summary>Whether this window stays open when the Screen changes.</summary>
-        public virtual bool KeepOnScreenChange => false;
-
-        /// <summary>Whether the closed instance is kept and reused by the next opening, keeping its state.</summary>
-        public virtual bool KeepInstance => false;
-
-        public override void OnBackPressed()
-        {
-            if (TryHandleBackInChildren()) return;
-            if (AllowBackClose) Close();
-        }
-
-        /// <summary>
-        /// Target for transitions.
-        /// If not set, TransitionUtils will fall back to this view's RectTransform.
-        /// </summary>
-        public RectTransform TransitionRoot => transitionRoot;
 
         /// <summary>
         /// Called by FadeTransition (and any other dimmer-aware transitions).

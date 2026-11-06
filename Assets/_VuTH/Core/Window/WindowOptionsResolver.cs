@@ -27,6 +27,7 @@ namespace _VuTH.Core.Window
             options.Duplicate ??= definition.DuplicatePolicy;
             options.KeepOnScreenChange ??= definition.KeepOnScreenChange;
             options.KeepInstance ??= definition.KeepInstance;
+            options.CloseOnOutsideClick ??= definition.CloseOnOutsideClick;
         }
 
         /// <summary>
@@ -46,6 +47,7 @@ namespace _VuTH.Core.Window
             resolved.Duplicate ??= WindowDuplicatePolicy.Allow;
             resolved.KeepOnScreenChange ??= false;
             resolved.KeepInstance ??= false;
+            resolved.CloseOnOutsideClick ??= false;
             return resolved;
         }
     }

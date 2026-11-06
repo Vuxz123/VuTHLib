@@ -42,5 +42,8 @@ namespace _VuTH.Core.Window
         /// position, selected tab…), instead of returning to the pool.
         /// </summary>
         bool KeepInstance { get; }
+
+        /// <summary>Whether a click outside the window (on its dimmer) closes it. Only popups have one.</summary>
+        bool CloseOnOutsideClick { get; }
     }
 }

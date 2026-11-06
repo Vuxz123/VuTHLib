@@ -10,6 +10,16 @@ namespace _VuTH.Core.Window
         bool HandleBack();
     }
 
+    /// <summary>
+    /// Marks a window as a non-modal overlay (e.g. <see cref="ToastBase"/>): it opens and closes outside the operation
+    /// queue (it never waits for, nor delays, other windows), it is not the <see cref="IWindowManager.TopWindow"/>, never
+    /// takes the back press, and does not hold back queued windows. Other System windows, such as a loading overlay,
+    /// are modal.
+    /// </summary>
+    public interface IWindowOverlay
+    {
+    }
+
     /// <summary>A component inside a window notified before each opening, before <see cref="UIViewBase.Setup"/>.</summary>
     public interface IWindowOpenHandler
     {

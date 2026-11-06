@@ -10,6 +10,7 @@ using _VuTH.Core.Window.Transition;
 using _VuTH.Core.Window.UI;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using PrimeTween;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
@@ -64,13 +65,16 @@ namespace _VuTH.Core.Window.Tests.PlayMode
         {
             public readonly Dictionary<Type, GameObject> Prefabs = new();
             public UniTask<GameObject> GetOrLoad(Type windowType) => UniTask.FromResult(Prefabs[windowType]);
-            public void Release(Type windowType) { }
+            public bool TryGetLoaded(Type windowType, out GameObject prefab) => Prefabs.TryGetValue(windowType, out prefab);
+            public readonly List<Type> Released = new();
+            public void Release(Type windowType) => Released.Add(windowType);
             public void Clear() { }
         }
 
         private readonly List<GameObject> _owned = new();
         private WindowManager _manager;
         private PrefabProvider _prefabs;
+        private PoolManager _pool;
 
         [SetUp]
         public void SetUp()
@@ -80,7 +84,7 @@ namespace _VuTH.Core.Window.Tests.PlayMode
             var poolGo = new GameObject("PoolManager_Test");
             poolGo.SetActive(false);
             _owned.Add(poolGo);
-            var pool = poolGo.AddComponent<PoolManager>();
+            var pool = _pool = poolGo.AddComponent<PoolManager>();
             SetField(pool, "rootPoolTransform", root);
             SetField(pool, "warmupOnAwake", false);
             poolGo.SetActive(true);
@@ -199,8 +203,8 @@ namespace _VuTH.Core.Window.Tests.PlayMode
         public IEnumerator Toast_ClosesByItself_AndDoesNotBlockClicks() => UniTask.ToCoroutine(async () =>
         {
             var toast = _manager.ShowToast<TestToast>(duration: 0.1f);
-            await WaitUntil(() => _manager.TopWindow is TestToast, "toast shown");
-            var view = (TestToast)_manager.TopWindow;
+            await WaitUntil(() => _manager.HasWindow<TestToast>(), "toast shown");
+            var view = _manager.GetWindow<TestToast>();
 
             Assert.IsFalse(view.CanvasGroup.blocksRaycasts);
             await toast.Timeout(TimeSpan.FromSeconds(3), DelayType.Realtime);
@@ -212,11 +216,11 @@ namespace _VuTH.Core.Window.Tests.PlayMode
         {
             var popup = await _manager.Show<PlainPopup>();
             _manager.ShowToast<TestToast>(duration: 10f).Forget();
-            await WaitUntil(() => _manager.TopWindow is TestToast, "toast on top");
+            await WaitUntil(() => _manager.HasWindow<TestToast>(), "toast on top");
 
             Assert.IsTrue(await _manager.HandleBackPressAsync(), "the popup below the toast gets it");
-            await WaitUntil(() => !_manager.HasWindow<PlainPopup>(), "popup closed");
-            Assert.IsFalse(popup.IsOpen);
+            await WaitUntil(() => !popup.IsOpen, "popup closed");
+            Assert.IsTrue(_manager.HasWindow<TestToast>(), "the toast stays");
 
             var queued = _manager.Enqueue<PlainPopup>();
             await WaitUntil(() => _manager.HasWindow<PlainPopup>(), "queued popup opens despite the toast");
@@ -352,6 +356,239 @@ namespace _VuTH.Core.Window.Tests.PlayMode
             Assert.IsInstanceOf<SlideTransition>(factory.Create("Slide:Left"));
             Object.DestroyImmediate(preset);
         }
+
+        // ---- Review fixes ----
+
+        public class DimmedPopup : PopupBase
+        {
+        }
+
+        public class FirmPopup : PopupBase
+        {
+            public override bool AllowBackClose => false;
+        }
+
+        public class FullPopup : FullScreenBase
+        {
+        }
+
+        /// <summary>Holds the transitions of non-toast windows until released.</summary>
+        private sealed class GateFactory : IUITransitionFactory
+        {
+            public UniTaskCompletionSource Gate = new();
+            public IUITransition Create(UITransitionSettings settings) => new Gated(this);
+            public IUITransition Create(string presetName) => new Gated(this);
+
+            private sealed class Gated : IUITransition
+            {
+                private readonly GateFactory _factory;
+                public Gated(GateFactory factory) => _factory = factory;
+                public float Duration => 0f;
+                public UniTask In(IUIView view) => Run(view, true);
+                public UniTask Out(IUIView view) => Run(view, false);
+
+                private async UniTask Run(IUIView view, bool visible)
+                {
+                    if (view is not ToastBase) await _factory.Gate.Task;
+                    view.CanvasGroup.alpha = visible ? 1f : 0f;
+                    view.CanvasGroup.interactable = visible;
+                    view.CanvasGroup.blocksRaycasts = visible;
+                }
+            }
+        }
+
+        private GameObject DimmedTemplate()
+        {
+            var template = Template<DimmedPopup>();
+            var dimmer = new GameObject("Dimmer", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
+            dimmer.transform.SetParent(template.transform, false);
+            SetField(template.GetComponent<DimmedPopup>(), "dimmerCanvasGroup", dimmer.GetComponent<CanvasGroup>());
+            return template;
+        }
+
+        [UnityTest]
+        public IEnumerator ReleasePrefab_SkippedWhileOpen_AndClearsThePoolOtherwise() => UniTask.ToCoroutine(async () =>
+        {
+            var prefab = _prefabs.Prefabs[typeof(PlainPopup)];
+            var popup = await _manager.Show<PlainPopup>();
+
+            _manager.ReleasePrefab<PlainPopup>();
+            CollectionAssert.IsEmpty(_prefabs.Released, "an open window still uses the prefab");
+
+            await _manager.Close(popup);
+            Assert.IsNotNull(_pool.GetPrefabStats(prefab), "the closed instance waits in the pool");
+
+            _manager.ReleasePrefab<PlainPopup>();
+            CollectionAssert.AreEqual(new[] { typeof(PlainPopup) }, _prefabs.Released);
+            Assert.IsNull(_pool.GetPrefabStats(prefab), "pooled instances released with the prefab");
+        });
+
+        [UnityTest]
+        public IEnumerator ClearPrefabCache_ReleasesOnlyTypesNotOpen() => UniTask.ToCoroutine(async () =>
+        {
+            await _manager.Show<PlainPopup>();
+            var kept = await _manager.Show<KeptPopup>();
+            await _manager.Close(kept);
+
+            _manager.ClearPrefabCache();
+
+            CollectionAssert.AreEqual(new[] { typeof(KeptPopup) }, _prefabs.Released);
+            await UniTask.NextFrame();
+            Assert.IsTrue(kept == null, "the kept instance is released with its prefab");
+        });
+
+        [UnityTest]
+        public IEnumerator TopWindow_AndCloseTop_SkipToasts() => UniTask.ToCoroutine(async () =>
+        {
+            var popup = await _manager.Show<PlainPopup>();
+            _manager.ShowToast<TestToast>(duration: 10f).Forget();
+            await WaitUntil(() => _manager.HasWindow<TestToast>(), "toast shown");
+
+            Assert.AreSame(popup, _manager.TopWindow);
+            await _manager.CloseTop();
+
+            Assert.IsFalse(_manager.HasWindow<PlainPopup>(), "the popup closed, not the toast");
+            Assert.IsTrue(_manager.HasWindow<TestToast>());
+        });
+
+        [UnityTest]
+        public IEnumerator Toast_DoesNotWaitForAPopupTransition() => UniTask.ToCoroutine(async () =>
+        {
+            var gate = new GateFactory();
+            _manager.WithTransitionFactory(gate);
+
+            var popup = _manager.Show<PlainPopup>();
+            _manager.ShowToast<TestToast>(duration: 10f).Forget();
+
+            await WaitUntil(() => _manager.GetWindow<TestToast>() != null &&
+                                  _manager.GetWindow<TestToast>().CanvasGroup.alpha > 0f, "toast shown");
+            Assert.AreEqual(UniTaskStatus.Pending, popup.Status, "the popup is still transitioning in");
+
+            gate.Gate.TrySetResult();
+            await popup;
+        });
+
+        [UnityTest]
+        public IEnumerator ForceClose_StopsTheDimmerTween() => UniTask.ToCoroutine(async () =>
+        {
+            DimmedTemplate();
+            var factoryGo = new GameObject("TransitionFactory_Test");
+            _owned.Add(factoryGo);
+            _manager.WithTransitionFactory(factoryGo.AddComponent<UITransitionFactory>());
+
+            _manager.Show<DimmedPopup>(new WindowOptions { TransitionInSettings = new FadeTransitionSettings { duration = 2f } })
+                .Forget();
+            await WaitUntil(() => _manager.GetWindow<DimmedPopup>() != null, "opening");
+            var popup = _manager.GetWindow<DimmedPopup>();
+            await UniTask.Yield();
+            Assert.Greater(Tween.GetTweensCount(popup), 0, "the dimmer tween targets the popup");
+
+            await _manager.CloseAll(forceCleanup: true);
+
+            Assert.AreEqual(0, Tween.GetTweensCount(popup));
+        });
+
+        [UnityTest]
+        public IEnumerator ForceClose_StopsElementTweens() => UniTask.ToCoroutine(async () =>
+        {
+            var template = _prefabs.Prefabs[typeof(PlainPopup)];
+            var child = new GameObject("Element", typeof(RectTransform));
+            child.transform.SetParent(template.transform, false);
+            SetField(child.AddComponent<UITransitionElement>(), "duration", 2f);
+
+            _manager.Show<PlainPopup>().Forget();
+            await WaitUntil(() => _manager.GetWindow<PlainPopup>() != null, "opening");
+            await UniTask.Yield();
+            var group = _manager.GetWindow<PlainPopup>().transform.Find("Element").GetComponent<CanvasGroup>();
+            Assert.Greater(Tween.GetTweensCount(group), 0);
+
+            await _manager.CloseAll(forceCleanup: true);
+
+            Assert.AreEqual(0, Tween.GetTweensCount(group));
+        });
+
+        [UnityTest]
+        public IEnumerator BackInput_ReachingNoWindow_IsReported() => UniTask.ToCoroutine(async () =>
+        {
+            var unhandled = 0;
+            _manager.OnBackPressUnhandled += () => unhandled++;
+
+            await _manager.ProcessBackInputAsync();
+            Assert.AreEqual(1, unhandled);
+
+            await _manager.Show<PlainPopup>();
+            await _manager.ProcessBackInputAsync();
+            Assert.AreEqual(1, unhandled, "a window took it");
+        });
+
+        [UnityTest]
+        public IEnumerator BackPress_CallerOptionOverridesTheWindow() => UniTask.ToCoroutine(async () =>
+        {
+            Template<FirmPopup>();
+            await _manager.Show<FirmPopup>(new WindowOptions { CloseOnBackPress = true });
+
+            Assert.IsTrue(await _manager.HandleBackPressAsync());
+            await WaitUntil(() => _manager.WindowCount == 0, "closed: there is a single switch");
+        });
+
+        [UnityTest]
+        public IEnumerator GetWindow_ReturnsTheTopmost() => UniTask.ToCoroutine(async () =>
+        {
+            await _manager.Show<PlainPopup>();
+            var top = await _manager.Show<PlainPopup>();
+
+            Assert.AreSame(top, _manager.GetWindow<PlainPopup>());
+            Assert.AreSame(top, _manager.GetWindow<PopupBase>(), "derived types match");
+        });
+
+        [UnityTest]
+        public IEnumerator FullScreen_HidesTheWindowsBelow_AndReportsTheStack() => UniTask.ToCoroutine(async () =>
+        {
+            Template<FullPopup>();
+            var states = new List<WindowStackState>();
+            _manager.OnStackChanged += states.Add;
+
+            var below = await _manager.Show<PlainPopup>();
+            var full = await _manager.Show<FullPopup>();
+
+            Assert.IsFalse(below.Canvas.enabled, "covered: not rendered");
+            Assert.IsTrue(_manager.StackState.IsScreenCovered);
+            Assert.AreEqual(2, _manager.StackState.ModalCount);
+
+            await _manager.Close(full);
+            Assert.IsTrue(below.Canvas.enabled);
+            Assert.IsFalse(_manager.StackState.IsScreenCovered);
+
+            await _manager.Close(below);
+            Assert.IsFalse(_manager.StackState.HasModal);
+            Assert.IsTrue(states.Exists(s => s.IsScreenCovered));
+            Assert.IsFalse(states[^1].HasModal);
+        });
+
+        [UnityTest]
+        public IEnumerator OutsideClick_CanBeTurnedOnPerOpening() => UniTask.ToCoroutine(async () =>
+        {
+            DimmedTemplate();
+            var popup = await _manager.Show<DimmedPopup>(new WindowOptions { CloseOnOutsideClick = true });
+
+            popup.transform.Find("Dimmer").GetComponent<IPointerClickHandler>().OnPointerClick(null);
+
+            await WaitUntil(() => _manager.WindowCount == 0, "closed by the outside click");
+        });
+
+        [UnityTest]
+        public IEnumerator Open_BeforeInitialization_LoadsTheProfile() => UniTask.ToCoroutine(async () =>
+        {
+            var go = new GameObject("WindowManager_NotInitialized");
+            go.SetActive(false);
+            _owned.Add(go);
+            var manager = go.AddComponent<WindowManager>().WithPrefabProvider(_prefabs);
+
+            var popup = await manager.Show<PlainPopup>();
+
+            Assert.IsNotNull(popup, "no NullReferenceException on the profile");
+            await manager.Close(popup);
+        });
     }
 
     /// <summary>The shipped WindowManager prefab is wired correctly (blocker, transition factory).</summary>
@@ -365,6 +602,12 @@ namespace _VuTH.Core.Window.Tests.PlayMode
         {
             public GameObject Prefab;
             public UniTask<GameObject> GetOrLoad(Type windowType) => UniTask.FromResult(Prefab);
+            public bool TryGetLoaded(Type windowType, out GameObject prefab)
+            {
+                prefab = Prefab;
+                return prefab;
+            }
+
             public void Release(Type windowType) { }
             public void Clear() { }
         }

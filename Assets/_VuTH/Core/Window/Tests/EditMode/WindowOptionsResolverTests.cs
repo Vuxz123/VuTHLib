@@ -21,6 +21,7 @@ namespace _VuTH.Core.Window.Tests.EditMode
             public WindowDuplicatePolicy DuplicatePolicy { get; set; } = WindowDuplicatePolicy.Ignore;
             public bool KeepOnScreenChange { get; set; } = true;
             public bool KeepInstance { get; set; } = true;
+            public bool CloseOnOutsideClick { get; set; } = true;
         }
 
         [Test]

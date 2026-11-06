@@ -95,7 +95,7 @@ namespace _VuTH.Core.Window.Tests.EditMode
             _stack.Push(a);
 
             var snapshot = _stack.ToArray();
-            _stack.ClearWindows();
+            _stack.Clear();
 
             Assert.AreEqual(1, snapshot.Length);
             Assert.AreSame(a, snapshot[0]);
@@ -127,46 +127,14 @@ namespace _VuTH.Core.Window.Tests.EditMode
         }
 
         [Test]
-        public void Options_SetGetRemove()
+        public void Clear_RemovesWindows()
         {
-            var a = new FakeView();
-            var options = new WindowOptions();
-
-            _stack.SetOptions(a, options);
-
-            Assert.IsTrue(_stack.TryGetOptions(a, out var stored));
-            Assert.AreSame(options, stored);
-
-            Assert.IsTrue(_stack.RemoveOptions(a));
-            Assert.IsFalse(_stack.TryGetOptions(a, out _));
-            Assert.IsFalse(_stack.RemoveOptions(a));
-        }
-
-        [Test]
-        public void Options_AreIndependentOfStackMembership()
-        {
-            var a = new FakeView();
-            var options = new WindowOptions();
-            _stack.SetOptions(a, options);
-            _stack.Push(a);
-
-            _stack.ClearWindows();
-
-            Assert.AreEqual(0, _stack.Count);
-            Assert.IsTrue(_stack.TryGetOptions(a, out _), "ClearWindows must not drop options.");
-        }
-
-        [Test]
-        public void Clear_RemovesWindowsAndOptions()
-        {
-            var a = new FakeView();
-            _stack.SetOptions(a, new WindowOptions());
-            _stack.Push(a);
+            _stack.Push(new FakeView());
 
             _stack.Clear();
 
             Assert.AreEqual(0, _stack.Count);
-            Assert.IsFalse(_stack.TryGetOptions(a, out _));
+            Assert.IsNull(_stack.Top);
         }
     }
 }

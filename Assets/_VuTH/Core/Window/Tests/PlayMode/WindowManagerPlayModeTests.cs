@@ -51,7 +51,9 @@ namespace _VuTH.Core.Window.Tests.PlayMode
         {
             public readonly Dictionary<Type, GameObject> Prefabs = new();
             public UniTask<GameObject> GetOrLoad(Type windowType) => UniTask.FromResult(Prefabs[windowType]);
-            public void Release(Type windowType) { }
+            public bool TryGetLoaded(Type windowType, out GameObject prefab) => Prefabs.TryGetValue(windowType, out prefab);
+            public readonly List<Type> Released = new();
+            public void Release(Type windowType) => Released.Add(windowType);
             public void Clear() { }
         }
 

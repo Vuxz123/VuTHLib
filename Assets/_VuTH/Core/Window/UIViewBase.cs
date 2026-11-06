@@ -32,6 +32,12 @@ namespace _VuTH.Core.Window
         /// <summary>Whether the window is currently opened by the window manager.</summary>
         public bool IsOpen => _requestClose != null;
 
+        /// <summary>
+        /// Options of the current opening, resolved (every field set: caller, then window, then defaults). Null while
+        /// the window is not open.
+        /// </summary>
+        protected WindowOptions Options { get; private set; }
+
         protected virtual void Awake()
         {
             EnsureComponents();
@@ -102,22 +108,29 @@ namespace _VuTH.Core.Window
             _forceClose?.Invoke();
         }
 
-        internal void Bind(Action<object> requestClose, Action forceClose)
+        /// <summary>Called on each opening, after <see cref="Options"/> is set and before <see cref="Setup"/>.</summary>
+        protected virtual void OnOpening() { }
+
+        internal void Bind(WindowOptions options, Action<object> requestClose, Action forceClose)
         {
+            Options = options;
             _requestClose = requestClose;
             _forceClose = forceClose;
+            OnOpening();
         }
 
         internal void Unbind()
         {
             _requestClose = null;
             _forceClose = null;
+            Options = null;
         }
 
         /// <summary>Restores the rest state before an opening: hidden, not interactive, transition root in place.</summary>
         internal void PrepareForOpen()
         {
             EnsureComponents();
+            Canvas.enabled = true; // May have been hidden under a full screen window in a previous opening.
 
             var root = TransitionUtils.GetTransitionRoot(this);
             if (root != _restRoot)

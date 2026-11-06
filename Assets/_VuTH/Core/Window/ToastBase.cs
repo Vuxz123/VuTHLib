@@ -7,12 +7,14 @@ namespace _VuTH.Core.Window
     /// Short non-blocking message (toast / notification), shown with <see cref="IWindowManager.ShowToast{TToast}"/> and
     /// closed after <see cref="Duration"/>.
     /// <para>
-    /// A toast is a <see cref="WindowType.System"/> window: it never blocks input (not even during its transitions),
-    /// never takes the back button, does not hold back queued windows and stays open across Screen changes. Several
-    /// toasts may be open at once; position them in <see cref="UIViewBase.Setup"/> if they must not overlap.
+    /// A toast is a <see cref="WindowType.System"/> overlay (<see cref="IWindowOverlay"/>): it opens and closes without
+    /// waiting for (or delaying) other windows, never blocks input (not even during its transitions), is not the
+    /// <see cref="IWindowManager.TopWindow"/>, never takes the back button, does not hold back queued windows and stays
+    /// open across Screen changes. Several toasts may be open at once; position them in <see cref="UIViewBase.Setup"/>
+    /// if they must not overlap.
     /// </para>
     /// </summary>
-    public abstract class ToastBase : UIViewBase, IWindowDefinition, ITransitionTarget
+    public abstract class ToastBase : UIViewBase, IWindowDefinition, IWindowOverlay, ITransitionTarget
     {
         [Header("Toast")]
         [Tooltip("Seconds (unscaled) before the toast closes, unless ShowToast passes a duration.")]
@@ -47,6 +49,7 @@ namespace _VuTH.Core.Window
         public WindowDuplicatePolicy DuplicatePolicy => WindowDuplicatePolicy.Allow;
         public virtual bool KeepOnScreenChange => true;
         public bool KeepInstance => false;
+        public bool CloseOnOutsideClick => false;
 
         public override void OnViewShown()
         {

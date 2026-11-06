@@ -15,17 +15,18 @@ transitions and returns their results.
 6. [Transitions](#transitions)
 7. [Input Blocking](#input-blocking)
 8. [Back Button](#back-button)
-9. [Duplicates](#duplicates)
-10. [Queue](#queue)
-11. [Toasts](#toasts)
-12. [Screen Changes](#screen-changes)
-13. [Kept Instances](#kept-instances)
-14. [Typed Windows](#typed-windows)
-15. [Tabs and Safe Area](#tabs-and-safe-area)
-16. [Window Events](#window-events)
-17. [Prefabs, Pooling and Preloading](#prefabs-pooling-and-preloading)
-18. [Debugging](#debugging)
-19. [Configuration](#configuration)
+9. [Stack State](#stack-state)
+10. [Duplicates](#duplicates)
+11. [Queue](#queue)
+12. [Toasts](#toasts)
+13. [Screen Changes](#screen-changes)
+14. [Kept Instances](#kept-instances)
+15. [Typed Windows](#typed-windows)
+16. [Tabs and Safe Area](#tabs-and-safe-area)
+17. [Window Events](#window-events)
+18. [Prefabs, Pooling and Preloading](#prefabs-pooling-and-preloading)
+19. [Debugging](#debugging)
+20. [Configuration](#configuration)
 
 ---
 
@@ -40,7 +41,8 @@ WindowManager (bootstrap manager, WindowManager.prefab)
     └── IUITransitionFactory (creates transitions)
 ```
 
-- Operations run one after another, so an open and a close never interleave.
+- Operations run one after another, so an open and a close never interleave. Overlays (`IWindowOverlay`, such
+  as toasts) are the exception: they never wait for, nor delay, the other windows.
 - A window that fails to open, throws, or is destroyed is always removed from the stack, and whoever awaits it is
   released. Event handlers and view callbacks that throw are logged; they do not break the flow.
 - Windows close on a Screen change only through the optional Screen integration (see
@@ -78,13 +80,17 @@ public interface IWindowManager : ICommonManager
     UniTask PreloadAsync<TWindow>(int instances = 1);
     IReadOnlyList<WindowInfo> GetOpenWindows(); // bottom → top
 
-    UIViewBase TopWindow { get; }
-    int WindowCount { get; }
+    UIViewBase TopWindow { get; }              // topmost window that is not an overlay (never a toast)
+    int WindowCount { get; }                   // every open window, toasts included
     bool IsTransitioning { get; }
-    bool HasWindow<TWindow>();
-    TWindow GetWindow<TWindow>();
+    bool HasWindow<TWindow>();                 // open and not closing; derived types match
+    TWindow GetWindow<TWindow>();              // the topmost such window
     void ReleasePrefab<TWindow>();
     void ClearPrefabCache();
+
+    WindowStackState StackState { get; }
+    event Action<WindowStackState> OnStackChanged;
+    event Action OnBackPressUnhandled;
 
     event Action<UIViewBase> OnWindowOpened;
     event Action<UIViewBase> OnWindowClosed;
@@ -103,7 +109,7 @@ var shop = await windowManager.Show<ShopPopup>();
 ```
 
 **Results.** `Open<TWindow, TResult>` returns the value the window was closed with: `Close(result)` in the view, or
-`Close(window, result)` / `CloseTop(result)` on the manager. It returns `default` in these cases:
+`Close(window, result)` / `CloseTop(result)` on the manager (`CloseTop` skips toasts). It returns `default` in these cases:
 
 - the window is closed without a result, by the back button, or by `CloseAll`;
 - the window cannot be opened (for example, its prefab is missing);
@@ -140,6 +146,9 @@ public abstract class UIViewBase : MonoBehaviour, IUIView
     virtual void OnViewHidden();      // after the transition out, before returning to the pool
     virtual void OnBackPressed();     // default: an IWindowBackHandler child (e.g. tabs) first, else Close()
 
+    protected WindowOptions Options { get; } // resolved options of the current opening (null when closed)
+    protected virtual void OnOpening();      // each opening, after Options is set, before Setup
+
     protected void Close(object result = null);
     bool TryRequestClose(object result = null); // false when not open
     void ForceClose();                          // closes at once, without transition; Open returns default
@@ -150,24 +159,35 @@ Instances are pooled, so the same object is opened many times. Before each openi
 rest state: hidden, not interactable, and with the transition root at its original scale and position. Reset your
 own state in `Setup`.
 
+### WindowBase
+
+The shared base of `PopupBase` and `FullScreenBase`. It holds the optional transition settings (Inspector) and the
+per-window defaults that can be overridden:
+
+- `TransitionPreset`, which defaults to `WindowOptions.DefaultTransitionPreset`;
+- `BlockInput`;
+- `AllowBackClose` (set it to false for confirmations that must be answered);
+- `DuplicatePolicy`, `KeepOnScreenChange`, `KeepInstance` and `CloseOnOutsideClick`.
+
 ### PopupBase / PopupBase&lt;TResult&gt;
 
 A modal dialog with a dimmed background (`WindowType.Popup`, `"Scale"` preset).
 
-- **Inspector:** optional transition settings, an optional `transitionRoot`, and an optional `dimmerCanvasGroup`
-  driven by `FadeTransition`.
-- **Overrides:** `BlockInput` and `AllowBackClose`. Set `AllowBackClose` to false for confirmations that must be
-  answered.
-- **Outside click:** override `CloseOnOutsideClick => true` to close on a click on the dimmer (or on the
-  `outsideClickArea` graphic). Override `OnOutsideClick()` to do something else.
+- **Inspector:** an optional `transitionRoot`, and an optional `dimmerCanvasGroup` driven by `FadeTransition`.
+- **Outside click:** with `CloseOnOutsideClick` (override it, or set it in the options per opening), a click on the
+  dimmer, or on the `outsideClickArea` graphic, closes the popup. Override `OnOutsideClick()` to do something else.
 - `PopupBase<TResult>` adds `Close(TResult result)`; `PopupBase<TData, TResult>` also types the data (see
   [Typed Windows](#typed-windows)).
 
 ### FullScreenBase
 
-A full-screen dialog (`WindowType.FullScreenPopup`), such as settings or inventory. It has the same transition and
-back-button options as `PopupBase`, and the same typed variants: `FullScreenBase<TResult>` and
+A full-screen dialog (`WindowType.FullScreenPopup`), such as settings or inventory. It has the same options as
+`PopupBase` (see `WindowBase`), and the same typed variants: `FullScreenBase<TResult>` and
 `FullScreenBase<TData, TResult>`.
+
+Once it is shown, the windows below it stop rendering: their canvases are disabled, which saves overdraw and canvas
+rebuilds on mobile. They render again as soon as it starts closing. `StackState.IsScreenCovered` becomes true, so
+the game can stop rendering the Screen too (see [Stack State](#stack-state)).
 
 ### ToastBase
 
@@ -177,7 +197,7 @@ A short non-blocking message; see [Toasts](#toasts).
 
 Per-window defaults, implemented by `PopupBase` and `FullScreenBase`: `WindowType`, `TransitionPreset`,
 `TransitionInSettings`, `TransitionOutSettings`, `BlockInput`, `CloseOnBackPress`, `DuplicatePolicy`,
-`KeepOnScreenChange` and `KeepInstance`.
+`KeepOnScreenChange`, `KeepInstance` and `CloseOnOutsideClick`.
 
 ---
 
@@ -196,6 +216,7 @@ public class WindowOptions
     public WindowDuplicatePolicy? Duplicate { get; set; }
     public bool? KeepOnScreenChange { get; set; }
     public bool? KeepInstance { get; set; }
+    public bool? CloseOnOutsideClick { get; set; }
 }
 ```
 
@@ -203,7 +224,7 @@ Each field is taken from the first source that sets it, in this order:
 
 1. The value set in the options, whatever it is (even `WindowType.Popup` or `"Scale"`).
 2. The window's `IWindowDefinition`.
-3. The built-in default: `Popup`, `"Scale"`, `true`, `true`, `Allow`, `false`, `false`.
+3. The built-in default: `Popup`, `"Scale"`, `true`, `true`, `Allow`, `false`, `false`, `false`.
 
 The manager works on a copy, so one options object can be reused for several windows.
 
@@ -274,21 +295,51 @@ uses a full-screen invisible overlay canvas.
 
 ## Back Button
 
-The manager listens to the optional `backAction` (`InputActionReference`) and to Escape, then calls
-`HandleBackPressAsync()`. It calls the top window's `OnBackPressed()`, which closes it by default. Nothing happens in
-these cases:
+`HandleBackPressAsync()` gives the press to the top window (the topmost that is not an overlay; a toast never takes
+it). It calls the window's `OnBackPressed()`, which closes it by default. Nothing happens in these cases:
 
-- the window opted out (`CloseOnBackPress` / `AllowBackClose` is false);
+- the window opted out: `CloseOnBackPress` is false. This is the only switch. It comes from the window's
+  `AllowBackClose` unless the caller set it in the options, and the caller's value wins.
 - the window is still transitioning in.
 
-`System` windows (toasts, loading overlays) never take the back press; it goes to the window below them. A child
-implementing `IWindowBackHandler`, such as `WindowTabGroup`, can consume the press before the window closes.
+A child implementing `IWindowBackHandler`, such as `WindowTabGroup`, can consume the press before the window closes.
+The method returns whether a window received the press.
 
-The method returns whether a window received the press, so a game can use it for its own back handling:
+**Who reads the back input:** choose one of these two setups, so that a single press is never handled twice.
+
+- **The manager (default).** It reads the optional `backAction` (`InputActionReference`) and Escape (`escapeIsBack`).
+  A press that reaches no window raises `OnBackPressUnhandled`, for example to go back a Screen or to ask "quit the
+  game?":
+
+  ```csharp
+  windowManager.OnBackPressUnhandled += () => screenFlow.GoBack();
+  ```
+- **The game.** Turn off `handleBackInput` (Inspector, or the `HandleBackInput` property) and call the method from your
+  own input handling:
+
+  ```csharp
+  if (!await windowManager.HandleBackPressAsync())
+      screenFlow.GoBack();
+  ```
+
+---
+
+## Stack State
+
+`StackState` (`WindowStackState`) summarizes the stack, and `OnStackChanged` reports every change:
+
+| Field | Meaning |
+|-------|---------|
+| `ModalCount` / `HasModal` | Open windows that are not overlays (toasts do not count; a loading overlay does) |
+| `IsScreenCovered` | A shown full screen window covers the Screen |
+| `Top` | Same as `TopWindow` |
 
 ```csharp
-if (!await windowManager.HandleBackPressAsync())
-    screenFlow.GoBack();
+windowManager.OnStackChanged += state =>
+{
+    gameplay.SetPaused(state.HasModal);
+    screenCamera.enabled = !state.IsScreenCovered;
+};
 ```
 
 ---
@@ -345,7 +396,9 @@ await windowManager.ShowToast<SavedToast>("Saved", duration: 1.5f); // completes
 ```
 
 - A toast closes by itself after `duration` seconds (unscaled), or after the toast's `Duration` (2 s by default).
-- It is a `System` window, so:
+- It is a `System` window and an overlay (`IWindowOverlay`), so:
+  - it opens and closes right away: it never waits for, nor delays, a popup transition;
+  - it is never the `TopWindow`, and `CloseTop` skips it;
   - it never blocks input, not even during its transitions;
   - it does not receive clicks once shown, unless you override `Interactable`;
   - it never takes the back press;
@@ -379,7 +432,8 @@ the state. When a window should reopen as it was left (scroll position, selected
 `KeepInstance => true` or set `WindowOptions.KeepInstance`. The closed instance is then deactivated and reused by the
 next opening of its type.
 
-The manager keeps one instance per window type. `DestroyKeptInstances()` and `ClearPrefabCache()` release them.
+The manager keeps one instance per window type. `DestroyKeptInstances()` releases them, and releasing a prefab
+releases its kept instance too.
 
 ---
 
@@ -443,7 +497,9 @@ windowManager.OnWindowEvent += e =>
 
 - Prefabs are loaded through `IWindowPrefabProvider`, which defaults to `WindowPrefabCache` (Addressables). The key is
   the class name, or `[WindowAddress("key")]` when two window classes share a name.
-- `ReleasePrefab<T>()` and `ClearPrefabCache()` release loaded prefabs.
+- `ReleasePrefab<T>()` releases a prefab together with its pooled and kept instances, because they reference the
+  prefab's assets. It is skipped, with a warning, while a window of that type is open. `ClearPrefabCache()` does
+  this for every loaded type that is not open.
 - Instances come from the `IPoolManager`. Without a pool, windows are instantiated and destroyed instead.
 - Destroying an open window (for example on scene unload) removes it from the stack.
 - `WithPrefabProvider`, `WithInputBlocker` and `WithTransitionFactory` replace the defaults, for example in tests.

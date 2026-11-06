@@ -50,6 +50,9 @@ namespace _VuTH.Core.Window
         /// </summary>
         public bool? KeepInstance { get; set; }
 
+        /// <summary>Whether a click outside the popup (on its dimmer) closes it. Default: the window's, else false.</summary>
+        public bool? CloseOnOutsideClick { get; set; }
+
         /// <summary>A copy, so resolving never changes an options object the caller may reuse.</summary>
         public WindowOptions Clone() => (WindowOptions)MemberwiseClone();
     }

@@ -4,8 +4,8 @@ namespace _VuTH.Core.Window
 {
     /// <summary>
     /// Bookkeeping for the open-window stack used by <see cref="WindowManager"/>:
-    /// keeps windows in insertion order (index 0 = bottom, last = top) and the resolved
-    /// <see cref="WindowOptions"/> per window. Pure C# (no Unity dependencies) so it can be unit tested.
+    /// keeps windows in insertion order (index 0 = bottom, last = top). Pure C# (no Unity dependencies) so it can be
+    /// unit tested.
     /// </summary>
     /// <remarks>
     /// Equality uses <see cref="EqualityComparer{T}.Default"/> (same as a plain List/Dictionary),
@@ -16,7 +16,6 @@ namespace _VuTH.Core.Window
     {
         // Index 0 = bottom, last = top.
         private readonly List<TView> _windows = new();
-        private readonly Dictionary<TView, WindowOptions> _options = new();
 
         /// <summary>Number of windows currently in the stack.</summary>
         public int Count => _windows.Count;
@@ -49,16 +48,9 @@ namespace _VuTH.Core.Window
             return _windows.ToArray();
         }
 
-        /// <summary>Removes all windows from the stack (options are left untouched).</summary>
-        public void ClearWindows()
-        {
-            _windows.Clear();
-        }
-
-        /// <summary>Removes all windows and all stored options.</summary>
+        /// <summary>Removes all windows.</summary>
         public void Clear()
         {
-            _options.Clear();
             _windows.Clear();
         }
 
@@ -84,25 +76,6 @@ namespace _VuTH.Core.Window
             }
 
             return null;
-        }
-
-        /// <summary>Stores (or replaces) the resolved options for a window.</summary>
-        public void SetOptions(TView window, WindowOptions options)
-        {
-            _options[window] = options;
-        }
-
-        /// <summary>Gets the resolved options for a window, if any were stored.</summary>
-        public bool TryGetOptions(TView window, out WindowOptions options)
-        {
-            return _options.TryGetValue(window, out options);
-        }
-
-        /// <summary>Removes the stored options for a window.</summary>
-        /// <returns>True if options were stored for the window.</returns>
-        public bool RemoveOptions(TView window)
-        {
-            return _options.Remove(window);
         }
     }
 }
