@@ -16,7 +16,10 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// </summary>
     public class RangedPersistentField<T> : PersistentField<T> where T : struct, IComparable<T>
     {
-        /// <param name="normalize">Optional extra normalization, applied after the clamp.</param>
+        /// <param name="normalize">
+        /// Optional extra normalization (e.g. a step). It runs between two clamps, so its result is still within the
+        /// range: Min..Max always holds, whatever the normalizer does.
+        /// </param>
         public RangedPersistentField(IPersistencePackage owner, T defaultValue, T min, T max,
             RangeMode mode = RangeMode.Clamp, Func<T, T> normalize = null, bool notifyOnChange = true)
             : base(owner, defaultValue, notifyOnChange, Chain(min, max, normalize))
@@ -46,7 +49,10 @@ namespace _VuTH.Core.Persistent.DataPackage
         private static Func<T, T> Chain(T min, T max, Func<T, T> normalize)
         {
             if (normalize == null) return value => PersistentFieldConstraints.Clamp(value, min, max);
-            return value => normalize(PersistentFieldConstraints.Clamp(value, min, max));
+
+            // Clamp, normalize, clamp again: [Range(0, 0.9)] + a 0.25 step must not turn 0.9 into 1.
+            return value => PersistentFieldConstraints.Clamp(
+                normalize(PersistentFieldConstraints.Clamp(value, min, max)), min, max);
         }
     }
 
@@ -57,12 +63,13 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// </summary>
     public class ColorPersistentField : PersistentField<Color>
     {
-        /// <param name="normalize">Optional extra normalization, applied after the color rules.</param>
+        /// <param name="normalize">Optional extra normalization, between two applications of the color rules.</param>
         public ColorPersistentField(IPersistencePackage owner, Color defaultValue, bool showAlpha = true, bool hdr = false,
             Func<Color, Color> normalize = null, bool notifyOnChange = true)
             : base(owner, defaultValue, notifyOnChange, normalize == null
                 ? value => PersistentFieldConstraints.Color(value, showAlpha, hdr)
-                : value => normalize(PersistentFieldConstraints.Color(value, showAlpha, hdr)))
+                : value => PersistentFieldConstraints.Color(
+                    normalize(PersistentFieldConstraints.Color(value, showAlpha, hdr)), showAlpha, hdr))
         {
             ShowAlpha = showAlpha;
             Hdr = hdr;

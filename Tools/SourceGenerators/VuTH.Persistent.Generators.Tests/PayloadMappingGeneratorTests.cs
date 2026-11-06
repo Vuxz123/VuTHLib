@@ -54,7 +54,8 @@ namespace _VuTH.Core.Persistent.DataPackage
     {
         private readonly Func<T, T> _normalize;
         public PersistentField(IPersistencePackage owner, T value = default, bool notifyOnChange = true, Func<T, T> normalize = null)
-        { _normalize = normalize; _value = Normalize(value); }
+        { Owner = owner; _normalize = normalize; _value = Normalize(value); }
+        public IPersistencePackage Owner { get; }
         private T _value;
         private T Normalize(T v) => _normalize != null ? _normalize(v) : v;
         public T Value { get => _value; set => TrySetValue(value); }
@@ -66,7 +67,7 @@ namespace _VuTH.Core.Persistent.DataPackage
     public class RangedPersistentField<T> : PersistentField<T> where T : struct, IComparable<T>
     {
         public RangedPersistentField(IPersistencePackage owner, T value, T min, T max, RangeMode mode = RangeMode.Clamp, Func<T, T> normalize = null, bool notifyOnChange = true)
-            : base(owner, value, notifyOnChange, v => normalize != null ? normalize(PersistentFieldConstraints.Clamp(v, min, max)) : PersistentFieldConstraints.Clamp(v, min, max))
+            : base(owner, value, notifyOnChange, v => normalize != null ? PersistentFieldConstraints.Clamp(normalize(PersistentFieldConstraints.Clamp(v, min, max)), min, max) : PersistentFieldConstraints.Clamp(v, min, max))
         { Min = min; Max = max; Mode = mode; }
         public T Min { get; }
         public T Max { get; }
@@ -78,6 +79,23 @@ namespace _VuTH.Core.Persistent.DataPackage
     {
         public ColorPersistentField(IPersistencePackage owner, UnityEngine.Color value, bool showAlpha = true, bool hdr = false, Func<UnityEngine.Color, UnityEngine.Color> normalize = null, bool notifyOnChange = true)
             : base(owner, value, notifyOnChange, v => PersistentFieldConstraints.Color(v, showAlpha, hdr)) { }
+    }
+
+    public static class GeneratedFieldGuard
+    {
+        public static TAttribute CreateAttribute<TAttribute>(Func<TAttribute> create, string usage)
+        {
+            try { return create(); }
+            catch (Exception e) { throw new InvalidOperationException($""[{typeof(TAttribute).Name}] on {usage} could not be created: {e.Message}"", e); }
+        }
+
+        public static TField FromFactory<TField, T>(TField field, IPersistencePackage owner, string factory, string usage)
+            where TField : PersistentField<T>
+        {
+            if (field == null) throw new InvalidOperationException($""[{factory}] on {usage} returned no field."");
+            if (!ReferenceEquals(field.Owner, owner)) throw new InvalidOperationException($""[{factory}] on {usage} returned a field owned by another package."");
+            return field;
+        }
     }
 
     public static class PersistentFieldConstraints
@@ -501,6 +519,38 @@ public sealed class OtherCurrencyAttribute : Attribute, IPersistentFieldFactory<
 {
     public CurrencyField Create(IPersistencePackage owner, long defaultValue) => new CurrencyField(owner, defaultValue);
 }
+
+public sealed class NullFactoryAttribute : Attribute, IPersistentFieldFactory<long, CurrencyField>
+{
+    public CurrencyField Create(IPersistencePackage owner, long defaultValue) => null;
+}
+
+public sealed class OrphanFactoryAttribute : Attribute, IPersistentFieldFactory<long, CurrencyField>
+{
+    public CurrencyField Create(IPersistencePackage owner, long defaultValue) => new CurrencyField(null, defaultValue);
+}
+
+public sealed class BrokenAttribute : Attribute, IPersistentFieldNormalizer<float>
+{
+    public BrokenAttribute(float step) { if (step <= 0f) throw new ArgumentOutOfRangeException(nameof(step)); }
+    public float Normalize(float value) => value;
+}
+
+public sealed class AbsAttribute : Attribute, IPersistentFieldNormalizer<float>, IPersistentFieldNormalizer<int>
+{
+    public float Normalize(float value) => Math.Abs(value);
+    public int Normalize(int value) => Math.Abs(value);
+}
+
+public abstract class ScaledAttribute : Attribute
+{
+    public float Scale { get; set; } = 1f;
+}
+
+public sealed class ScaleAttribute : ScaledAttribute, IPersistentFieldNormalizer<float>
+{
+    public float Normalize(float value) => value * Scale;
+}
 ";
 
         [Fact]
@@ -514,13 +564,52 @@ public partial class P : PersistencePackage<Settings> { }");
             Assert.Empty(diagnostics);
             Assert.Empty(Errors(output));
             var code = Assert.Single(generated);
-            Assert.Contains("private static readonly global::StepAttribute __vuthVolumeNormalizer0 = new global::StepAttribute(0.25F);", code);
+            Assert.Contains("CreateAttribute(() => new global::StepAttribute(0.25F), \"Settings.volume\")", code);
 
             dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
             package.Volume.Value = 0.6f;
             Assert.Equal(0.5f, (float)package.Volume.Value);   // rounded to the step
             package.Volume.Value = 3f;
             Assert.Equal(1f, (float)package.Volume.Value);     // clamped, then rounded
+        }
+
+        [Fact]
+        public void UserNormalizers_CannotLeaveTheRange()
+        {
+            var (diagnostics, _, output) = Run(UserAttributes + @"
+public class Settings { [UnityEngine.Range(0f, 0.9f), Step(0.25f)] public float volume; }
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Settings> { }");
+
+            Assert.Empty(diagnostics);
+            Assert.Empty(Errors(output));
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            package.Volume.Value = 0.9f;                       // the step gives 1, clamped back to 0.9
+            Assert.Equal(0.9f, (float)package.Volume.Value);
+        }
+
+        [Fact]
+        public void UserNormalizer_OnADeclaredPlainField_IsClampedAgainOnLoad()
+        {
+            var (_, generated, output) = Run(UserAttributes + @"
+public class Settings { [UnityEngine.Range(0f, 0.9f), Step(0.25f)] public float volume; }
+[GeneratePayloadMapping]
+public partial class P : PersistencePackage<Settings>
+{
+    public PersistentField<float> Volume { get; }
+    public P() { Volume = new PersistentField<float>(this); }
+}");
+
+            Assert.Empty(Errors(output));
+            Assert.Contains("Clamp(__vuthVolumeNormalizer0.Normalize(", Assert.Single(generated));
+
+            var type = Load(output).GetType("P")!;
+            dynamic package = Activator.CreateInstance(type)!;
+            dynamic data = Activator.CreateInstance(type.Assembly.GetType("Settings")!)!;
+            data.volume = 0.9f;
+            package.InjectPayload(data);
+            Assert.Equal(0.9f, (float)package.Volume.Value);
         }
 
         [Fact]
@@ -551,9 +640,122 @@ public partial class P : PersistencePackage<Settings>
     public P() { Volume = new PersistentField<float>(this); }
 }");
 
-            Assert.Empty(diagnostics);
+            Assert.Equal("VUTHP017", Assert.Single(diagnostics).Id);   // the values the game sets are not normalized
             Assert.Empty(Errors(output));
             Assert.Contains("__vuthVolumeNormalizer0.Normalize(data.volume)", Assert.Single(generated));
+        }
+
+        [Fact]
+        public void UserFactory_OnADeclaredField_IsAWarning()
+        {
+            var (diagnostics, generated, output) = Run(UserAttributes + @"
+public class Wallet { [Currency] public long gold; }
+[GeneratePayloadMapping]
+public partial class P : PersistencePackage<Wallet>
+{
+    public PersistentField<long> Gold { get; }
+    public P() { Gold = new PersistentField<long>(this); }
+}");
+
+            Assert.Equal("VUTHP016", Assert.Single(diagnostics).Id);
+            Assert.Empty(Errors(output));
+            Assert.DoesNotContain("CurrencyAttribute", Assert.Single(generated));
+        }
+
+        [Fact]
+        public void UserFactory_ReturningNull_OrAnotherOwner_FailsClearly()
+        {
+            var (diagnostics, _, output) = Run(UserAttributes + @"
+public class Wallet { [NullFactory] public long gold; [OrphanFactory] public long gems; }
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Wallet> { }");
+
+            Assert.Empty(diagnostics);
+            Assert.Empty(Errors(output));
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            var noField = Assert.Throws<InvalidOperationException>(() => (object)package.Gold);
+            Assert.Contains("NullFactoryAttribute", noField.Message);
+            Assert.Contains("Wallet.gold", noField.Message);
+            var orphan = Assert.Throws<InvalidOperationException>(() => (object)package.Gems);
+            Assert.Contains("another package", orphan.Message);
+        }
+
+        [Fact]
+        public void AttributeConstructorThrowing_FailsOnlyItsField_WithAClearError()
+        {
+            var (diagnostics, _, output) = Run(UserAttributes + @"
+public class Settings { [Broken(0f)] public float speed; public int lives = 3; }
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Settings> { }");
+
+            Assert.Empty(diagnostics);
+            Assert.Empty(Errors(output));
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            Assert.Equal(3, (int)package.Lives.Value);                     // the package type still works
+            var error = Assert.Throws<InvalidOperationException>(() => (object)package.Speed);
+            Assert.Contains("Settings.speed", error.Message);
+        }
+
+        [Fact]
+        public void AttributeForSeveralTypes_UsesTheMemberType()
+        {
+            var (diagnostics, _, output) = Run(UserAttributes + @"
+public class Settings { [Abs] public int count; [Abs] public float speed; }
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Settings> { }");
+
+            Assert.Empty(diagnostics);
+            Assert.Empty(Errors(output));
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            package.Count.Value = -4;
+            Assert.Equal(4, (int)package.Count.Value);
+            package.Speed.Value = -2f;
+            Assert.Equal(2f, (float)package.Speed.Value);
+        }
+
+        [Fact]
+        public void NamedArgument_FromABaseAttribute_IsAccepted()
+        {
+            var (diagnostics, _, output) = Run(UserAttributes + @"
+public class Settings { [Scale(Scale = 2f)] public float speed; }
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Settings> { }");
+
+            Assert.Empty(diagnostics);
+            Assert.Empty(Errors(output));
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            package.Speed.Value = 3f;
+            Assert.Equal(6f, (float)package.Speed.Value);
+        }
+
+        [Fact]
+        public void BoundOutsideTheMemberType_UsesTheTypeLimit_WithAWarning()
+        {
+            var (diagnostics, generated, output) = Run(@"
+using _VuTH.Core.Persistent.DataPackage;
+public class Dto
+{
+    [UnityEngine.Min(-1)] public uint count;
+    [UnityEngine.Range(-10f, 300f)] public byte level;
+    [UnityEngine.Min(0)] public long gold;
+}
+[GeneratePersistentFields]
+public partial class P : PersistencePackage<Dto> { }");
+
+            Assert.Equal(3, diagnostics.Count(d => d.Id == "VUTHP018"));   // -1 for uint, -10 and 300 for byte
+            Assert.Empty(Errors(output));
+            var code = Assert.Single(generated);
+            Assert.Contains("uint.MinValue", code);
+            Assert.Contains("byte.MaxValue", code);
+
+            dynamic package = Activator.CreateInstance(Load(output).GetType("P")!)!;
+            Assert.Equal(0u, (uint)package.Count.Min);
+            Assert.Equal((byte)0, (byte)package.Level.Min);
+            Assert.Equal((byte)255, (byte)package.Level.Max);
         }
 
         [Fact]

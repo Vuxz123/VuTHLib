@@ -82,6 +82,21 @@ namespace VuTH.Persistent.Generators
             "[RejectOutOfRange] on '{0}' has no effect: the member has no [Range] or [Min]",
             Category, DiagnosticSeverity.Warning, true);
 
+        public static readonly DiagnosticDescriptor FactoryOnDeclaredField = new(
+            "VUTHP016", "Field factory not used",
+            "[{0}] on {1}.{2} is not used: the package declares the field '{3}' itself. Remove the declaration to let the factory create it, or remove the attribute.",
+            Category, DiagnosticSeverity.Warning, true);
+
+        public static readonly DiagnosticDescriptor NormalizerOnlyOnLoad = new(
+            "VUTHP017", "Normalizer applied to loaded data only",
+            "The package declares the field '{0}' itself: [{1}] on {2}.{3} only normalizes loaded data, not the values the game sets. Remove the declaration to let the generator create the field, or pass the normalization to the field you create.",
+            Category, DiagnosticSeverity.Warning, true);
+
+        public static readonly DiagnosticDescriptor BoundOutOfType = new(
+            "VUTHP018", "Range bound outside the member type",
+            "[{0}] bound {1} on '{2}' does not fit in {3}; {4} is used instead",
+            Category, DiagnosticSeverity.Warning, true);
+
         public static readonly IReadOnlyDictionary<string, DiagnosticDescriptor> ById = new Dictionary<string, DiagnosticDescriptor>
         {
             [NotAPackage.Id] = NotAPackage,
@@ -99,6 +114,9 @@ namespace VuTH.Persistent.Generators
             [FactoryIgnoresConstraints.Id] = FactoryIgnoresConstraints,
             [ExtensionNotAccessible.Id] = ExtensionNotAccessible,
             [RejectWithoutRange.Id] = RejectWithoutRange,
+            [FactoryOnDeclaredField.Id] = FactoryOnDeclaredField,
+            [NormalizerOnlyOnLoad.Id] = NormalizerOnlyOnLoad,
+            [BoundOutOfType.Id] = BoundOutOfType,
         };
     }
 }

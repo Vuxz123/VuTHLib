@@ -14,7 +14,7 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// }
     /// </code>
     /// A method you write yourself is kept: only the missing one is generated. Mapping problems are compile errors or
-    /// warnings (VUTHP001 to VUTHP015, listed in the persistence documentation).
+    /// warnings (VUTHP001 to VUTHP018, listed in the persistence documentation).
     /// </summary>
     [AttributeUsage(AttributeTargets.Class, Inherited = false)]
     public sealed class GeneratePayloadMappingAttribute : Attribute

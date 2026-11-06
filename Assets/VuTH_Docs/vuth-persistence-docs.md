@@ -290,7 +290,8 @@ Two interfaces let your own attributes on DTO members shape the generated fields
 stripping:
 
 ```csharp
-// A normalizer: constrains the value; several apply in declaration order, after Range / Min / ColorUsage.
+// A normalizer: constrains the value; several apply in declaration order, between two applications of
+// Range / Min / ColorUsage, so the result always stays within the range.
 public sealed class StepAttribute : Attribute, IPersistentFieldNormalizer<float>
 {
     private readonly float _step;
@@ -310,13 +311,20 @@ public class WalletDto { [Currency] public long gems; }
 
 **Rules:**
 
-- The interface's `T` must be the member's type (VUTHP011).
+- The interface's `T` must be the member's type (VUTHP011). An attribute may implement it for several types; the one
+  matching the member is used.
 - A member has at most one factory (VUTHP012). A factory builds the whole field, so the member's other constraints and
-  normalizers are ignored (VUTHP013).
+  normalizers are ignored (VUTHP013). An attribute that is both a factory and a normalizer is used as the factory.
 - The attribute and its constructor must be accessible from the package (VUTHP014). Its arguments are constants (a
-  C# rule), so they can always be written back into code, named arguments included.
-- On a declared field, normalizers apply to the loaded value, and factories are not used.
-- `Normalize` must be pure. `Create` must only construct the field: no subscription, no service lookup.
+  C# rule), so they can always be written back into code, named arguments included (also those of a base class).
+- On a field the package declares itself, factories are not used (VUTHP016) and normalizers only apply to the loaded
+  value, not to the values the game sets (VUTHP017). Let the generator create the field, or pass the normalization to
+  the field you create.
+- `Normalize` must be pure. `Create` must only construct the field, with the owner it receives: no subscription, no
+  service lookup.
+- Attributes are created on first use. If a constructor throws, or a factory returns null or a field of another
+  package, accessing that field throws an `InvalidOperationException` naming the attribute and the member; the rest of
+  the package keeps working.
 
 To expose a type other than the saved one, for example a stored string shown as an enum, declare the field yourself.
 Converters between stored and exposed types are not supported.
@@ -358,6 +366,9 @@ Problems show up at compile time:
 | VUTHP013 | warning | A field factory ignores the member's constraints / normalizers |
 | VUTHP014 | error | A normalizer / factory attribute cannot be instantiated from the package (not accessible, abstract) |
 | VUTHP015 | warning | `[RejectOutOfRange]` on a member without `[Range]` / `[Min]` |
+| VUTHP016 | warning | A field factory is on a member whose field the package declares itself: it is not used |
+| VUTHP017 | warning | A normalizer is on a member whose field the package declares itself: it only normalizes loaded data |
+| VUTHP018 | warning | A `[Range]` / `[Min]` bound does not fit the member type (e.g. `[Min(-1)]` on a `uint`): the type limit is used |
 
 The generator is incremental: it keeps no symbol between steps, so editing unrelated code does not regenerate the
 packages.

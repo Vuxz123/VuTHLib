@@ -108,7 +108,7 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
 
         public class WalletDto
         {
-            [UnityEngine.Range(0f, 1f), Step(0.25f)] public float volume = 0.5f;
+            [UnityEngine.Range(0f, 0.9f), Step(0.25f)] public float volume = 0.5f;
             [Currency] public long gems = 10;
         }
 
@@ -121,14 +121,14 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
         }
 
         [Test]
-        public void UserNormalizer_RunsInUnity_AfterTheRange()
+        public void UserNormalizer_RunsInUnity_WithinTheRange()
         {
             var package = new WalletPackage();
 
             package.Volume.Value = 0.6f;
             Assert.AreEqual(0.5f, package.Volume.Value, "rounded to the 0.25 step");
             package.Volume.Value = 7f;
-            Assert.AreEqual(1f, package.Volume.Value, "clamped, then rounded");
+            Assert.AreEqual(0.9f, package.Volume.Value, 1e-6f, "the step gives 1, clamped back to the 0.9 maximum");
             package.Dispose();
         }
 

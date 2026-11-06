@@ -61,6 +61,8 @@ namespace VuTH.Persistent.Generators
             public string TypeName = "";
             public string Creation = "";
             public string FieldTypeName = ""; // factories only
+            public string Usage = "";         // "Dto.member", for error messages
+            public string AttributeName = "";
         }
 
         private sealed class Rules
@@ -412,17 +414,19 @@ namespace VuTH.Persistent.Generators
                 var attributeClass = attribute.AttributeClass;
                 if (attributeClass == null) continue;
 
-                var normalizer = attributeClass.AllInterfaces.FirstOrDefault(i =>
-                    i.OriginalDefinition.ToDisplayString() == NormalizerInterface);
-                var factory = attributeClass.AllInterfaces.FirstOrDefault(i =>
-                    i.OriginalDefinition.ToDisplayString() == FactoryInterface);
-                if (normalizer == null && factory == null) continue;
+                // An attribute may implement the interfaces for several types: keep the one of the member's type.
+                var normalizers = Implementations(attributeClass, NormalizerInterface);
+                var factoryInterfaces = Implementations(attributeClass, FactoryInterface);
+                if (normalizers.Count == 0 && factoryInterfaces.Count == 0) continue;
 
-                var handled = normalizer ?? factory!;
-                if (!SymbolEqualityComparer.Default.Equals(handled.TypeArguments[0], type))
+                var normalizer = normalizers.FirstOrDefault(i => SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
+                var factory = factoryInterfaces.FirstOrDefault(i => SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
+                if (normalizer == null && factory == null)
                 {
+                    var handledTypes = normalizers.Concat(factoryInterfaces)
+                        .Select(i => i.TypeArguments[0].ToDisplayString()).Distinct();
                     ctx.Report(Diagnostics.ExtensionTypeMismatch, location, attributeClass.Name,
-                        handled.TypeArguments[0].ToDisplayString(), member.ContainingType.Name, member.Name, type.ToDisplayString());
+                        string.Join(" / ", handledTypes), member.ContainingType.Name, member.Name, type.ToDisplayString());
                     continue;
                 }
 
@@ -433,13 +437,28 @@ namespace VuTH.Persistent.Generators
                     continue;
                 }
 
-                if (factory != null)
+                // A factory builds the whole field; an attribute that is also a normalizer is expected to apply itself.
+                if (factory != null && !declared)
                 {
                     factories.Add((attribute, factory));
                     continue;
                 }
 
-                var extension = CreateExtension(ctx, attribute, $"__vuth{fieldName}Normalizer{index++}");
+                if (factory != null && normalizer == null)
+                {
+                    // The package declares the field: the factory has nothing to create.
+                    ctx.Report(Diagnostics.FactoryOnDeclaredField, location, attributeClass.Name,
+                        member.ContainingType.Name, member.Name, fieldName);
+                    continue;
+                }
+
+                if (declared)
+                {
+                    ctx.Report(Diagnostics.NormalizerOnlyOnLoad, location, fieldName, attributeClass.Name,
+                        member.ContainingType.Name, member.Name);
+                }
+
+                var extension = CreateExtension(ctx, attribute, $"__vuth{fieldName}Normalizer{index++}", Usage(member));
                 rules.Normalizers.Add(extension);
             }
 
@@ -448,7 +467,7 @@ namespace VuTH.Persistent.Generators
                 ctx.Report(Diagnostics.SeveralFactories, location, member.ContainingType.Name, member.Name,
                     string.Join(", ", factories.Select(f => f.Attribute.AttributeClass!.Name)));
             }
-            else if (factories.Count == 1 && !declared)
+            else if (factories.Count == 1)
             {
                 var (attribute, factoryInterface) = factories[0];
                 if (rules.Constraint != null || rules.Normalizers.Count > 0)
@@ -464,12 +483,29 @@ namespace VuTH.Persistent.Generators
                     rules.Constraint = null;
                 }
 
-                var extension = CreateExtension(ctx, attribute, $"__vuth{fieldName}Factory");
+                var extension = CreateExtension(ctx, attribute, $"__vuth{fieldName}Factory", Usage(member));
                 extension.FieldTypeName = factoryInterface.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 rules.Factory = extension;
             }
 
             return rules;
+        }
+
+        private static List<INamedTypeSymbol> Implementations(INamedTypeSymbol type, string genericInterface) =>
+            type.AllInterfaces.Where(i => i.OriginalDefinition.ToDisplayString() == genericInterface).ToList();
+
+        private static string Usage(ISymbol member) => $"{member.ContainingType.Name}.{member.Name}";
+
+        /// <summary>A member by name in the type or its base types (an attribute's named argument may be inherited).</summary>
+        private static ISymbol? FindInHierarchy(INamedTypeSymbol type, string name)
+        {
+            for (var current = type; current != null; current = current.BaseType)
+            {
+                var member = current.GetMembers(name).FirstOrDefault(m => m is IFieldSymbol or IPropertySymbol);
+                if (member != null) return member;
+            }
+
+            return null;
         }
 
         private static bool IsConstructible(Context ctx, AttributeData attribute, INamedTypeSymbol attributeClass)
@@ -485,8 +521,11 @@ namespace VuTH.Persistent.Generators
             // Named arguments are set in an object initializer: they must be writable from the package.
             foreach (var named in attribute.NamedArguments)
             {
-                var target = attributeClass.GetMembers(named.Key).FirstOrDefault();
+                var target = FindInHierarchy(attributeClass, named.Key);
                 if (target == null || !ctx.Compilation.IsSymbolAccessibleWithin(target, ctx.Package)) return false;
+
+                var setter = (target as IPropertySymbol)?.SetMethod;
+                if (setter != null && !ctx.Compilation.IsSymbolAccessibleWithin(setter, ctx.Package)) return false;
             }
 
             return true;
@@ -495,7 +534,7 @@ namespace VuTH.Persistent.Generators
         /// <summary>
         /// The attribute re-created in code from its arguments (always constants in C#), as a static of the package.
         /// </summary>
-        private static Extension CreateExtension(Context ctx, AttributeData attribute, string name)
+        private static Extension CreateExtension(Context ctx, AttributeData attribute, string name, string usage)
         {
             var typeName = attribute.AttributeClass!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var arguments = string.Join(", ", attribute.ConstructorArguments.Select(Constant));
@@ -505,7 +544,14 @@ namespace VuTH.Persistent.Generators
                 creation += " { " + string.Join(", ", attribute.NamedArguments.Select(a => $"{a.Key} = {Constant(a.Value)}")) + " }";
             }
 
-            var extension = new Extension { Name = name, TypeName = typeName, Creation = creation };
+            var extension = new Extension
+            {
+                Name = name,
+                TypeName = typeName,
+                Creation = creation,
+                Usage = usage,
+                AttributeName = attribute.AttributeClass.Name,
+            };
             ctx.Statics.Add(extension);
             return extension;
         }
@@ -585,23 +631,23 @@ namespace VuTH.Persistent.Generators
 
                 if (range is { ConstructorArguments.Length: 2 })
                 {
-                    return new Constraint
-                    {
-                        Kind = "range",
-                        Attribute = "Range",
-                        Min = Literal(range.ConstructorArguments[0].Value, typeName),
-                        Max = Literal(range.ConstructorArguments[1].Value, typeName),
-                        Reject = reject,
-                    };
+                    var low = Bound(ctx, "Range", range.ConstructorArguments[0].Value, type, member, location);
+                    var high = Bound(ctx, "Range", range.ConstructorArguments[1].Value, type, member, location);
+                    if (low == null || high == null) return null;
+
+                    return new Constraint { Kind = "range", Attribute = "Range", Min = low, Max = high, Reject = reject };
                 }
 
                 if (min is { ConstructorArguments.Length: 1 })
                 {
+                    var low = Bound(ctx, "Min", min.ConstructorArguments[0].Value, type, member, location);
+                    if (low == null) return null;
+
                     return new Constraint
                     {
                         Kind = "range",
                         Attribute = "Min",
-                        Min = Literal(min.ConstructorArguments[0].Value, typeName),
+                        Min = low,
                         Max = $"{typeName}.MaxValue",
                         Reject = reject,
                     };
@@ -630,12 +676,51 @@ namespace VuTH.Persistent.Generators
             return null;
         }
 
-        /// <summary>A float attribute argument as a literal of the member type.</summary>
-        private static string Literal(object? value, string typeName)
+        /// <summary>
+        /// A float attribute argument as a constant of the member type. A bound the type cannot hold (e.g.
+        /// <c>[Min(-1)]</c> on a uint, which would not compile) becomes the type's limit, with a warning; NaN drops the
+        /// constraint.
+        /// </summary>
+        private static string? Bound(Context ctx, string attribute, object? value, ITypeSymbol type, ISymbol member,
+            Location? location)
         {
+            var typeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var number = Convert.ToSingle(value, CultureInfo.InvariantCulture);
-            return $"({typeName})({number.ToString("R", CultureInfo.InvariantCulture)}F)";
+            var text = number.ToString("R", CultureInfo.InvariantCulture);
+            if (float.IsNaN(number))
+            {
+                ctx.Report(Diagnostics.UnsupportedConstraint, location, attribute, member.Name, $"{type.ToDisplayString()} (NaN bound)");
+                return null;
+            }
+
+            var (min, max) = Limits(type);
+            if (number < min || number > max)
+            {
+                var limit = number < min ? "MinValue" : "MaxValue";
+                ctx.Report(Diagnostics.BoundOutOfType, location, attribute, text, member.Name, type.ToDisplayString(),
+                    $"{type.ToDisplayString()}.{limit}");
+                return $"{typeName}.{limit}";
+            }
+
+            // The float nearest to a 64-bit limit can lie just outside it (2^63 for long.MaxValue): use the limit.
+            if (number >= max) return $"{typeName}.MaxValue";
+            if (number <= min) return $"{typeName}.MinValue";
+            return $"({typeName})({text}F)";
         }
+
+        private static (double Min, double Max) Limits(ITypeSymbol type) => type.SpecialType switch
+        {
+            SpecialType.System_SByte => (sbyte.MinValue, sbyte.MaxValue),
+            SpecialType.System_Byte => (byte.MinValue, byte.MaxValue),
+            SpecialType.System_Int16 => (short.MinValue, short.MaxValue),
+            SpecialType.System_UInt16 => (ushort.MinValue, ushort.MaxValue),
+            SpecialType.System_Int32 => (int.MinValue, int.MaxValue),
+            SpecialType.System_UInt32 => (uint.MinValue, uint.MaxValue),
+            SpecialType.System_Int64 => (long.MinValue, long.MaxValue),
+            SpecialType.System_UInt64 => (ulong.MinValue, ulong.MaxValue),
+            SpecialType.System_Decimal => ((double)decimal.MinValue, (double)decimal.MaxValue),
+            _ => (double.NegativeInfinity, double.PositiveInfinity), // float, double: any float fits
+        };
 
         #endregion
 
@@ -677,7 +762,12 @@ namespace VuTH.Persistent.Generators
         private static string NewField(Mapping mapping, string defaultValue)
         {
             var rules = mapping.Rules;
-            if (rules.Factory != null) return $"{rules.Factory.Name}.Create(this, {defaultValue})";
+            if (rules.Factory != null)
+            {
+                var factory = rules.Factory;
+                return $"{Global}GeneratedFieldGuard.FromFactory<{factory.FieldTypeName}, {mapping.ValueType}>(" +
+                       $"{factory.Name}.Create(this, {defaultValue}), this, {Quote(factory.AttributeName)}, {Quote(factory.Usage)})";
+            }
 
             var normalize = NormalizerLambda(mapping);
             switch (rules.Constraint?.Kind)
@@ -703,17 +793,20 @@ namespace VuTH.Persistent.Generators
             if (mapping.Generated) return value; // the generated field normalizes itself
 
             var constraint = mapping.Rules.Constraint;
-            if (constraint != null && !mapping.DeclaredConstrained)
-            {
-                value = constraint.Kind == "range"
-                    ? $"{Global}PersistentFieldConstraints.Clamp({value}, {constraint.Min}, {constraint.Max})"
-                    : $"{Global}PersistentFieldConstraints.Color({value}, {Bool(constraint.ShowAlpha)}, {Bool(constraint.Hdr)})";
-            }
+            if (constraint == null || mapping.DeclaredConstrained) return ApplyNormalizers(mapping, value);
 
-            return ApplyNormalizers(mapping, value);
+            string Constrain(string expression) => constraint.Kind == "range"
+                ? $"{Global}PersistentFieldConstraints.Clamp({expression}, {constraint.Min}, {constraint.Max})"
+                : $"{Global}PersistentFieldConstraints.Color({expression}, {Bool(constraint.ShowAlpha)}, {Bool(constraint.Hdr)})";
+
+            // Constrain, normalize, constrain again: like the generated fields, a normalizer cannot leave the range.
+            value = Constrain(value);
+            return mapping.Rules.Normalizers.Count == 0 ? value : Constrain(ApplyNormalizers(mapping, value));
         }
 
         private static string Bool(bool value) => value ? "true" : "false";
+
+        private static string Quote(string text) => SymbolDisplay.FormatLiteral(text, quote: true);
 
         private static string Render(Context ctx, ITypeSymbol dto, List<Mapping> mappings, bool generateExtract,
             bool generateInject)
@@ -759,9 +852,14 @@ namespace VuTH.Persistent.Generators
             if (ctx.Statics.Count > 0)
             {
                 Separator();
+                // Created on first use and guarded: an attribute constructor that throws fails the field using it with a
+                // clear error, not the type initializer of the whole package.
                 foreach (var extension in ctx.Statics)
                 {
-                    builder.AppendLine($"{body}private static readonly {extension.TypeName} {extension.Name} = {extension.Creation};");
+                    builder.AppendLine($"{body}private static {extension.TypeName} {extension.Name}Instance;");
+                    builder.AppendLine($"{body}private static {extension.TypeName} {extension.Name} =>");
+                    builder.AppendLine($"{body}    {extension.Name}Instance ??= {Global}GeneratedFieldGuard.CreateAttribute(" +
+                                       $"() => {extension.Creation}, {Quote(extension.Usage)});");
                 }
             }
 

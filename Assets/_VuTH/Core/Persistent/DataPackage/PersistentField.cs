@@ -32,6 +32,9 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// </summary>
         public ReadOnlyReactiveProperty<T> Observable { get; }
 
+        /// <summary>The package owning the field.</summary>
+        public IPersistencePackage Owner => _ownerPackage;
+
         /// <summary>
         /// Current value. Setting a different value marks the owner package as dirty; setting an equal value does
         /// nothing. The value is checked (<see cref="AcceptsValue"/>) then normalized first. After changing a mutable
