@@ -1,11 +1,11 @@
-﻿namespace _VuTH.Core.Pool
+namespace _VuTH.Core.Pool
 {
     public interface IPoolable
     {
-        // Gọi khi lấy ra khỏi pool (thay cho Start/OnEnable)
+        // Called when taken out of the pool (instead of Start / OnEnable)
         void OnSpawn(); 
     
-        // Gọi khi trả về pool (thay cho OnDisable/Destroy)
+        // Called when returned to the pool (instead of OnDisable / OnDestroy)
         void OnDespawn();
     }
 }

@@ -4,9 +4,19 @@ using UnityEngine;
 
 namespace _VuTH.Core.Pool.Tests.EditMode
 {
+    /// <summary>Scheduled despawns apply only to the life of the instance they were made for.</summary>
     public class ScheduledDespawnQueueTests
     {
         private readonly List<GameObject> _owned = new();
+        private ScheduledDespawnQueue _queue;
+        private PrefabPool _pool;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _queue = new ScheduledDespawnQueue();
+            _pool = PrefabPool.Create(NewObject("Prefab"));
+        }
 
         [TearDown]
         public void TearDown()
@@ -15,6 +25,7 @@ namespace _VuTH.Core.Pool.Tests.EditMode
             {
                 if (go != null) Object.DestroyImmediate(go);
             }
+
             _owned.Clear();
         }
 
@@ -25,58 +36,79 @@ namespace _VuTH.Core.Pool.Tests.EditMode
             return go;
         }
 
+        /// <summary>A spawned instance (active, first life).</summary>
+        private PooledInstance Spawned(string name)
+        {
+            var instance = new PooledInstance(NewObject(name), _pool) { Generation = 1 };
+            _pool.AddActive(instance);
+            return instance;
+        }
+
         [Test]
         public void Process_DespawnsOnlyDueEntries_AndKeepsTheRest()
         {
-            var queue = new ScheduledDespawnQueue();
-            var early = NewObject("early");
-            var exact = NewObject("exact");
-            var late = NewObject("late");
-            queue.Schedule(early, 1f);
-            queue.Schedule(exact, 2f);
-            queue.Schedule(late, 5f);
+            var early = Spawned("early");
+            var late = Spawned("late");
+            _queue.Schedule(early, 1f);
+            _queue.Schedule(late, 5f);
+            var despawned = new List<PooledInstance>();
 
-            var despawned = new List<GameObject>();
-            queue.Process(2f, despawned.Add);
+            _queue.Process(2f, despawned.Add);
 
-            Assert.That(despawned, Is.EquivalentTo(new[] { early, exact }));
-            Assert.That(queue.Count, Is.EqualTo(1));
-
-            despawned.Clear();
-            queue.Process(5f, despawned.Add);
-
-            Assert.That(despawned, Is.EqualTo(new[] { late }));
-            Assert.That(queue.Count, Is.EqualTo(0));
+            Assert.That(despawned, Is.EqualTo(new[] { early }));
+            Assert.That(_queue.Count, Is.EqualTo(1));
         }
 
         [Test]
         public void Process_DropsDestroyedObjects_WithoutCallingBack()
         {
-            var queue = new ScheduledDespawnQueue();
-            var doomed = new GameObject("doomed");
-            queue.Schedule(doomed, 10f);
-            Object.DestroyImmediate(doomed);
+            var instance = Spawned("dead");
+            _queue.Schedule(instance, 0f);
+            Object.DestroyImmediate(instance.GameObject);
+            var despawned = new List<PooledInstance>();
 
-            var despawned = new List<GameObject>();
-            queue.Process(0f, despawned.Add);
+            _queue.Process(1f, despawned.Add);
 
             Assert.That(despawned, Is.Empty);
-            Assert.That(queue.Count, Is.EqualTo(0));
+            Assert.That(_queue.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Process_DropsAScheduleOfAnEarlierLife()
+        {
+            // Despawn(obj, 2f), then a manual despawn and a respawn elsewhere: the old schedule must not fire.
+            var instance = Spawned("reused");
+            _queue.Schedule(instance, 2f);
+            instance.Generation += 2; // despawned, then spawned again
+            var despawned = new List<PooledInstance>();
+
+            _queue.Process(3f, despawned.Add);
+
+            Assert.That(despawned, Is.Empty);
+            Assert.That(_queue.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Process_DropsTheScheduleOfAnInstanceAlreadyDespawned()
+        {
+            var instance = Spawned("gone");
+            _queue.Schedule(instance, 0f);
+            _pool.RemoveActive(instance);
+            var despawned = new List<PooledInstance>();
+
+            _queue.Process(1f, despawned.Add);
+
+            Assert.That(despawned, Is.Empty);
         }
 
         [Test]
         public void Clear_DropsPendingEntries()
         {
-            var queue = new ScheduledDespawnQueue();
-            queue.Schedule(NewObject("a"), 1f);
-            queue.Schedule(NewObject("b"), 1f);
+            _queue.Schedule(Spawned("a"), 1f);
 
-            queue.Clear();
+            _queue.Clear();
 
-            var despawned = new List<GameObject>();
-            queue.Process(100f, despawned.Add);
-            Assert.That(queue.Count, Is.EqualTo(0));
-            Assert.That(despawned, Is.Empty);
+            Assert.That(_queue.Count, Is.EqualTo(0));
         }
     }
 }

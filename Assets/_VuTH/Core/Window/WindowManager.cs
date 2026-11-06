@@ -382,8 +382,7 @@ namespace _VuTH.Core.Window
             var prefab = await LoadPrefabAsync(typeof(TWindow));
             if (!prefab || instances <= 0 || !_pool.IsAlive()) return;
 
-            // WarmupPool replaces an existing pool (losing track of its instances): only warm up a new one.
-            if (_pool.GetPrefabStats(prefab) != null) return;
+            // Tops the pool up to this many inactive instances; an existing pool keeps its instances.
             _pool.WarmupPool(prefab, instances);
         }
 

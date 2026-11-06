@@ -30,17 +30,33 @@ The main pooling system that manages both GameObject and C# class pooling. It's 
 
 ### How Object Pooling Works
 
-1. **Pool Creation**: When a prefab is first spawned, a pool is automatically created (or via explicit warmup)
-2. **Object Reuse**: When despawned, objects are not destroyed - they're returned to the queue
-3. **Spawn Flow**:
-   - Try to get from pool queue → if exists, reuse it (Pool Hit)
-   - If pool empty → check overflow behavior → instantiate new or recycle (Pool Miss)
-   - Call `OnSpawn()` on all `IPoolable` components
-   - Track in spawn order queue for potential recycling
-4. **Despawn Flow**:
-   - Call `OnDespawn()` on all `IPoolable` components
-   - Set inactive and return to pool queue
-   - Optionally destroy excess if `maxPoolSize` exceeded
+1. **Pool creation.** A pool is created the first time its prefab is spawned, or by a warmup.
+2. **Per-instance state.** Each instance has its own state (`PooledInstance`): whether it is spawned, its owning
+   pool, a generation number, its category, and its cached `IPoolable` components. The pool relies on it to stay
+   consistent:
+   - **A second despawn is refused**, with a warning. Before this fix, the instance went into the pool twice and two
+     spawns handed out the same object.
+   - **A scheduled despawn only applies to the life it was made for.** The generation changes on every spawn and
+     despawn. `Despawn(obj, 2f)` followed by a manual despawn and a respawn elsewhere no longer despawns the new
+     user.
+   - **Instances destroyed from outside** (for example by a scene unload) are skipped when spawning. They no longer
+     count against `maxSize` and are forgotten.
+   - The spawn order used by `RecycleOldest` is a linked list. A despawn removes the instance in O(1).
+3. **Spawn flow**:
+   - Reuse an inactive instance (pool hit). Otherwise apply the overflow behavior, then create one (pool miss).
+   - New instances are instantiated under an inactive staging object. `Awake` and `OnEnable` therefore run only when
+     the instance is spawned, never during a warmup.
+   - The instance is placed and activated, then `OnSpawn()` is called on its `IPoolable` components.
+4. **Placement**:
+   - `Spawn(prefab, parent: x)`, with neither a position nor a rotation, keeps the prefab's local transform under
+     the parent: local position or anchors, rotation and scale. Use it for UI and child objects. It is correct
+     whatever the parent's scale, for example a Canvas scaled by its CanvasScaler.
+   - With a position or rotation, the instance is placed in world space and keeps the prefab's scale.
+   - A default rotation `(0, 0, 0, 0)` means identity.
+5. **Despawn flow**:
+   - `OnDespawn()` is called, then the instance is deactivated and moved back under the root without keeping its
+     world transform.
+   - If `maxPoolSize` inactive instances are already pooled, the despawned instance is destroyed instead.
 
 ### Analytics & Tracking Features
 
@@ -50,6 +66,17 @@ The main pooling system that manages both GameObject and C# class pooling. It's 
 - **Peak Active**: Tracks maximum concurrent active objects
 - **Memory Estimation**: Calculates estimated memory usage based on `estimatedSizeBytes` config
 - **Events**: `OnObjectSpawned`, `OnObjectDespawned`, `OnPoolOverflow`
+- Turn off `enableAnalytics` on the manager to skip the statistics bookkeeping on every spawn and despawn.
+
+### Manager Settings
+
+| Field | Meaning |
+|-------|---------|
+| `rootPoolTransform` | Parent of the pooled (inactive) instances; created if empty |
+| `poolConfigs` / `warmupOnAwake` | Pools warmed up at initialization |
+| `delaysUseUnscaledTime` | Delayed despawns (`Despawn(obj, delay)`, auto recycle) count unscaled time, so they also run while the game is paused. Off by default: they wait with the gameplay |
+| `enableAnalytics` | Record statistics and analytics |
+| `enableLogging` | Verbose logs |
 
 ---
 
@@ -72,7 +99,9 @@ public interface IPoolable
 1. Implement `IPoolable` on any MonoBehaviour that needs pool awareness
 2. `OnSpawn()` is called when the object is retrieved from the pool and activated
 3. `OnDespawn()` is called when the object is returned to the pool and deactivated
-4. PoolManager finds all `IPoolable` components in children via `GetComponentsInChildren`
+4. The `IPoolable` components in the instance and its children are found once, when the instance is created.
+   Components added later are not notified.
+5. An exception thrown by a callback is logged; it does not break the spawn or the despawn.
 
 ### Analytics & Tracking
 
@@ -96,18 +125,25 @@ The `IPoolManager` is a facade that combines multiple specialized interfaces int
 ### Key Methods
 
 **IPoolOperations:**
-- `Spawn<T>(prefab, position, rotation, parent)` - Spawn pooled GameObject
-- `Despawn(obj, delay)` - Return to pool with optional delay
-- `SpawnClass<T>()` / `DespawnClass<T>()` - Pool C# classes
+- `Spawn<T>(prefab, position, rotation, parent)` - Spawn pooled GameObject (see the placement rules above)
+- `Despawn(obj, delay)` - Return to pool with optional delay; an object not spawned by the pool is destroyed
+- `IsSpawned(obj)` - Whether the object is currently spawned by the pool
+- `SpawnClass<T>()` / `DespawnClass(obj)` - Pool C# classes. The despawn finds the pool from the object, whatever
+  static type it is passed as. A second despawn is refused.
 
 **IPoolLifecycle:**
-- `WarmupPool(config)` / `WarmupPools()` - Pre-spawn objects
-- `ClearPool(prefab)` / `ClearAllPools()` - Remove pools
+- `WarmupPool(config)` / `WarmupPools()` - Create the pool, or apply the config to the existing pool, and top it up
+  to `preloadCount` inactive instances. An existing pool keeps its instances.
+- `ClearPool(prefab)` / `ClearAllPools()` - Destroy the inactive instances and forget the pool. Instances still
+  spawned are destroyed when they are despawned.
+- `ClearPool<T>()` - Forget a class pool; its instances still out are dropped on despawn
+- `ConfigureClassPool<T>(ClassPoolConfig)` - `maxSize`: instances kept in a class pool
 - `TrimExcess(keepMinimum)` - Reduce pool sizes
-- `CleanupUnused(seconds)` - Auto-cleanup unused pools
+- `CleanupUnused(seconds)` - Clear the pools with no active instance for that long
 
 **IPoolOrganization:**
-- `DespawnCategory(category, delay)` - Batch despawn by category
+- `DespawnCategory(category, delay)` - Despawn the instances spawned with that category, and every instance of a pool
+  configured with it. Other instances of the same prefab are left alone.
 - `ClearCategory(category)` - Remove category
 - `GetCategories()` / `GetCategoryCount(category)` - Query categories
 
@@ -138,7 +174,11 @@ pool.Spawn(bulletPrefab, new PoolSpawnOptions
 // Static helpers
 pool.Spawn(bulletPrefab, PoolSpawnOptions.At(position));
 pool.Spawn(bulletPrefab, PoolSpawnOptions.At(position, rotation).WithCategory("Effects"));
+pool.Spawn(itemPrefab, PoolSpawnOptions.WithParent(listContent)); // UI: prefab's local transform under the parent
 ```
+
+`KeepPrefabTransform` is the option behind `WithParent`: it keeps the prefab's local transform under `Parent`
+instead of placing the instance at `Position` / `Rotation`.
 
 ---
 
@@ -158,8 +198,8 @@ Per-prefab configuration that controls pool behavior, limits, and overflow handl
 | `maxPoolSize` | int | Max inactive objects in pool (0 = unlimited) |
 | `overflowBehavior` | OverflowBehavior | What to do when `maxSize` exceeded |
 | `category` | string | Optional category for grouping |
-| `enableAutoCleanup` | bool | Auto-cleanup when unused |
-| `cleanupInterval` | float | Seconds before cleanup (default 60s) |
+| `enableAutoCleanup` | bool | Clear the pool once it has had no active instance for `cleanupInterval` seconds (checked every second) |
+| `cleanupInterval` | float | Seconds without any active instance before the automatic cleanup (default 60s) |
 | `estimatedSizeBytes` | long | Memory estimate per object (for analytics) |
 
 ### How It Works
@@ -181,7 +221,7 @@ Helper extension methods and utilities that make pool usage more convenient and 
 
 **GameObject Extensions:**
 ```csharp
-// Return to pool (with optional delay)
+// Return to pool (with optional delay); destroyed, with a warning, when there is no PoolManager
 obj.ReturnToPool();
 obj.ReturnToPool(2f); // 2 second delay
 
@@ -218,7 +258,7 @@ projectileList.DespawnAndClear();
 
 | Class | Purpose |
 |-------|---------|
-| `AutoDespawnBehaviour` | Auto-returns object to pool when inactive |
+| `AutoDespawnBehaviour` | Returns the object to the pool when game code deactivates it (on the next update) |
 | `AutoDespawnParticle` | Auto-returns after ParticleSystem completes |
 | `AutoDespawnTimer` | Auto-returns after set lifetime |
 | `PoolStatsTracker` | OnGUI display of pool statistics |

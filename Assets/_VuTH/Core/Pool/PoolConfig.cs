@@ -3,64 +3,60 @@ using UnityEngine;
 
 namespace _VuTH.Core.Pool
 {
-    /// <summary>
-    /// Overflow behavior khi pool đầy
-    /// </summary>
+    /// <summary>What a spawn does when the pool already has <see cref="PoolConfig.maxSize"/> active instances.</summary>
     public enum OverflowBehavior
     {
-        [Tooltip("Tạo thêm object mới (mặc định)")]
+        [Tooltip("Create another instance (default).")]
         Expand,
-        [Tooltip("Trả về null khi pool đầy")]
+        [Tooltip("Return null.")]
         ReturnNull,
-        [Tooltip("Recycle object cũ nhất đang active")]
+        [Tooltip("Despawn the oldest active instance and reuse it.")]
         RecycleOldest
     }
-    
+
     /// <summary>
-    /// Configuration cho từng prefab pool - Warmup, Size limits, Overflow handling
+    /// Configuration of one prefab pool: warmup, size limits, overflow handling, category and automatic cleanup.
     /// </summary>
     [Serializable]
     public class PoolConfig
     {
         [Header("Prefab")]
         public GameObject prefab;
-        
+
         [Header("Pool Size")]
-        [Tooltip("Số lượng objects pre-spawn khi warmup")]
-        public int preloadCount = 5;
-        
-        [Tooltip("Giới hạn tối đa objects ACTIVE cùng lúc. 0 = unlimited")]
-        public int maxSize = 100;
-        
-        [Tooltip("Giới hạn tối đa objects trong pool (inactive). 0 = unlimited")]
-        public int maxPoolSize = 50;
-        
+        [Tooltip("Inactive instances created by the warmup.")]
+        [Min(0)] public int preloadCount = 5;
+
+        [Tooltip("Maximum ACTIVE instances at once; see the overflow behavior. 0 = unlimited.")]
+        [Min(0)] public int maxSize = 100;
+
+        [Tooltip("Maximum INACTIVE instances kept in the pool; extra despawned instances are destroyed. 0 = unlimited.")]
+        [Min(0)] public int maxPoolSize = 50;
+
         [Header("Overflow Handling")]
-        [Tooltip("Hành vi khi vượt quá maxSize")]
+        [Tooltip("What a spawn does when maxSize instances are active.")]
         public OverflowBehavior overflowBehavior = OverflowBehavior.Expand;
-        
+
         [Header("Category & Cleanup")]
-        [Tooltip("Category để group pools (optional)")]
+        [Tooltip("Optional category: DespawnCategory despawns every instance of this pool.")]
         public string category;
-        
-        [Tooltip("Tự động cleanup pool không sử dụng")]
-        public bool enableAutoCleanup = false;
-        
-        [Tooltip("Thời gian không sử dụng trước khi cleanup (seconds)")]
-        public float cleanupInterval = 60f;
-        
+
+        [Tooltip("Clear the pool (destroy its inactive instances) once it has had no active instance for cleanupInterval seconds.")]
+        public bool enableAutoCleanup;
+
+        [Tooltip("Seconds without any active instance before the automatic cleanup clears the pool.")]
+        [Min(1f)] public float cleanupInterval = 60f;
+
         [Header("Memory")]
-        [Tooltip("Ước tính size của 1 object (bytes) - dùng cho analytics")]
+        [Tooltip("Estimated size of one instance in bytes, for the memory estimate.")]
         public long estimatedSizeBytes = 1024;
     }
-    
-    /// <summary>
-    /// Configuration cho C# class pool
-    /// </summary>
+
+    /// <summary>Configuration of a C# class pool (<see cref="IPoolOperations.SpawnClass{T}"/>).</summary>
     [Serializable]
     public class ClassPoolConfig
     {
-        public int maxSize = 100;
-        public bool throwOnOverflow = false;
+        [Tooltip("Maximum instances kept in the pool; extra despawned instances are dropped. 0 = unlimited.")]
+        [Min(0)] public int maxSize = 100;
     }
 }

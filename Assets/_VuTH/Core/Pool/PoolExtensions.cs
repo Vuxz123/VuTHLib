@@ -7,7 +7,7 @@ using UnityEngine;
 namespace _VuTH.Core.Pool
 {
     /// <summary>
-    /// Extension methods và helper utilities cho Pool System
+    /// Extension methods and helpers for the pool system (they use the PoolManager set at its initialization)
     /// </summary>
     public static class PoolExtensions
     {
@@ -22,7 +22,7 @@ namespace _VuTH.Core.Pool
         #region GameObject Extensions
 
         /// <summary>
-        /// Tự động despawn GameObject này sau khi inactive
+        /// Despawns this GameObject when it gets deactivated
         /// Usage: myObject.AutoDespawnWhenInactive();
         /// </summary>
         public static void AutoDespawnWhenInactive(this GameObject obj, float checkInterval = 0.5f)
@@ -35,19 +35,25 @@ namespace _VuTH.Core.Pool
         }
 
         /// <summary>
-        /// Despawn object này về pool
+        /// Despawns this object (destroys it when there is no pool manager)
         /// Usage: myObject.ReturnToPool();
         /// </summary>
         public static void ReturnToPool(this GameObject obj, float delay = 0f)
         {
-            if (_poolManager != null)
+            if (obj == null) return;
+
+            if (_poolManager.IsAlive())
+            {
                 _poolManager.Despawn(obj, delay);
-            else
-                UnityEngine.Object.Destroy(obj);
+                return;
+            }
+
+            Debug.LogWarning($"[PoolExtensions] No PoolManager: {obj.name} is destroyed instead of pooled.");
+            UnityEngine.Object.Destroy(obj, delay);
         }
 
         /// <summary>
-        /// Despawn object này về pool sau khi chạy hết ParticleSystem
+        /// Despawns this object once its ParticleSystem finished
         /// Usage: particleObject.ReturnToPoolWhenParticleDone();
         /// </summary>
         public static void ReturnToPoolWhenParticleDone(this GameObject obj)
@@ -61,7 +67,7 @@ namespace _VuTH.Core.Pool
         }
 
         /// <summary>
-        /// Spawn nhiều objects cùng lúc
+        /// Spawns several objects at once
         /// Usage: bulletPrefab.SpawnMultiple(10, positions);
         /// </summary>
         public static T[] SpawnMultiple<T>(this T prefab, int count, Vector3[] positions = null, 
@@ -79,7 +85,7 @@ namespace _VuTH.Core.Pool
         }
 
         /// <summary>
-        /// Spawn object tại vị trí của transform này
+        /// Spawns an object at this transform
         /// Usage: spawnPoint.SpawnAt(bulletPrefab);
         /// </summary>
         public static T SpawnAt<T>(this Transform transform, T prefab) where T : Component
@@ -93,7 +99,7 @@ namespace _VuTH.Core.Pool
         #region Component Extensions
 
         /// <summary>
-        /// Spawn và attach vào component này
+        /// Spawns an object as a child of this component
         /// Usage: this.SpawnChild(effectPrefab);
         /// </summary>
         public static T SpawnChild<T>(this Component component, T prefab) where T : Component
@@ -104,7 +110,7 @@ namespace _VuTH.Core.Pool
         }
 
         /// <summary>
-        /// Despawn GameObject của component này
+        /// Despawns this component's GameObject
         /// Usage: this.DespawnSelf();
         /// </summary>
         public static void DespawnSelf(this Component component, float delay = 0f)
@@ -117,7 +123,7 @@ namespace _VuTH.Core.Pool
         #region Collection Extensions
 
         /// <summary>
-        /// Despawn tất cả objects trong collection
+        /// Despawns every object of the collection
         /// Usage: enemyList.DespawnAll();
         /// </summary>
         public static void DespawnAll<T>(this IEnumerable<T> collection, float delay = 0f) where T : Component
@@ -132,7 +138,7 @@ namespace _VuTH.Core.Pool
         }
 
         /// <summary>
-        /// Despawn và clear collection
+        /// Despawns every object of the list, then clears it
         /// Usage: projectileList.DespawnAndClear();
         /// </summary>
         public static void DespawnAndClear<T>(this List<T> list, float delay = 0f) where T : Component
@@ -146,7 +152,7 @@ namespace _VuTH.Core.Pool
         #region Utility Methods
 
         /// <summary>
-        /// Tạo pool pattern: Spawn -> Use -> Auto return
+        /// Spawn, use, then return automatically after <paramref name="lifetime"/>
         /// Usage: PoolExtensions.ExecuteWithPooledObject(bulletPrefab, bullet => bullet.Fire());
         /// </summary>
         public static void ExecuteWithPooledObject<T>(T prefab, Action<T> action, float lifetime = 5f) 
@@ -154,7 +160,11 @@ namespace _VuTH.Core.Pool
         {
             if (_poolManager == null) return;
             
+            if (prefab == null) return;
+
             var obj = _poolManager.Spawn(prefab);
+            if (obj == null) return; // pool full (ReturnNull)
+
             action?.Invoke(obj);
             _poolManager.Despawn(obj.gameObject, lifetime);
         }
@@ -180,36 +190,28 @@ namespace _VuTH.Core.Pool
     #region Helper Components
 
     /// <summary>
-    /// Component tự động despawn object khi inactive
+    /// Despawns its GameObject when it gets deactivated
     /// </summary>
     public class AutoDespawnBehaviour : MonoBehaviour
     {
         private IPoolManager _poolManager;
-        private float _checkInterval;
-        private float _lastCheckTime;
 
         public void Initialize(IPoolManager poolManager, float checkInterval)
         {
             _poolManager = poolManager;
-            _checkInterval = checkInterval;
         }
 
-        private void Update()
+        private void OnDisable()
         {
-            if (Time.time - _lastCheckTime < _checkInterval) return;
-            
-            _lastCheckTime = Time.time;
-            
-            if (!gameObject.activeInHierarchy)
-            {
-                _poolManager.OrNull()?.Despawn(gameObject);
-                Destroy(this);
-            }
+            // Update never runs on an inactive object: react to the deactivation itself. The hierarchy cannot change
+            // during OnDisable, so the despawn happens on the next update. A despawn by the pool is not spawned any more.
+            if (_poolManager.IsAlive() && _poolManager.IsSpawned(gameObject))
+                _poolManager.Despawn(gameObject, 0.0001f);
         }
     }
 
     /// <summary>
-    /// Component tự động despawn khi ParticleSystem play xong
+    /// Despawns its GameObject once its ParticleSystem finished
     /// </summary>
     [RequireComponent(typeof(ParticleSystem))]
     public class AutoDespawnParticle : MonoBehaviour, IPoolable
@@ -243,7 +245,7 @@ namespace _VuTH.Core.Pool
     }
 
     /// <summary>
-    /// Component tự động despawn sau một khoảng thời gian
+    /// Despawns its GameObject after a lifetime
     /// </summary>
     public class AutoDespawnTimer : MonoBehaviour, IPoolable
     {
@@ -288,7 +290,7 @@ namespace _VuTH.Core.Pool
 
         private void Start()
         {
-            _poolManager = FindFirstObjectByType<PoolManager>();
+            _poolManager = FindAnyObjectByType<PoolManager>();
         }
 
         private void Update()
@@ -323,7 +325,7 @@ namespace _VuTH.Core.Pool
     #region Advanced Patterns
 
     /// <summary>
-    /// Pool với lazy initialization pattern
+    /// Pool warmed up on first use
     /// </summary>
     public class LazyPool<T> where T : Component
     {
@@ -360,7 +362,7 @@ namespace _VuTH.Core.Pool
     }
 
     /// <summary>
-    /// Object pool pattern với auto-return using IDisposable
+    /// Pooled instance returned on Dispose
     /// Usage: using (var pooled = new PooledObject(prefab, poolManager)) { pooled.Instance.DoSomething(); }
     /// </summary>
     public class PooledObject<T> : IDisposable where T : Component
@@ -390,7 +392,7 @@ namespace _VuTH.Core.Pool
     }
 
     /// <summary>
-    /// Wave spawner với pool optimization
+    /// Spawns waves of pooled objects
     /// </summary>
     public class PooledWaveSpawner : MonoBehaviour
     {
@@ -404,7 +406,7 @@ namespace _VuTH.Core.Pool
 
         private void Start()
         {
-            _poolManager = FindFirstObjectByType<PoolManager>();
+            _poolManager = FindAnyObjectByType<PoolManager>();
             
             // Warmup pool
             _poolManager.OrNull()?.WarmupPool(prefab.gameObject, waveSize, waveSize * 2);

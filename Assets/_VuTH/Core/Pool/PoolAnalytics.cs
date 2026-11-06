@@ -69,7 +69,7 @@ namespace _VuTH.Core.Pool
         #region Queries
         
         /// <summary>
-        /// Hit rate cho prefab cụ thể (0-1)
+        /// Hit rate of one prefab (0-1)
         /// </summary>
         public float GetHitRate(int prefabId)
         {
@@ -79,7 +79,7 @@ namespace _VuTH.Core.Pool
         }
         
         /// <summary>
-        /// Hit rate tổng thể (0-1)
+        /// Overall hit rate (0-1)
         /// </summary>
         public float GetOverallHitRate()
         {
@@ -88,19 +88,19 @@ namespace _VuTH.Core.Pool
         }
         
         /// <summary>
-        /// Top N prefabs có hit rate thấp nhất (cần optimize)
+        /// The N prefabs with the lowest hit rate (worth optimizing)
         /// </summary>
         public IEnumerable<(int prefabId, float hitRate)> GetLowestHitRatePools(int count = 5)
         {
             return _prefabMetrics
-                .Where(kvp => kvp.Value.Hits + kvp.Value.Misses > 10) // Chỉ xét pools có đủ data
+                .Where(kvp => kvp.Value.Hits + kvp.Value.Misses > 10) // Only pools with enough data
                 .Select(kvp => (kvp.Key, GetHitRate(kvp.Key)))
                 .OrderBy(x => x.Item2)
                 .Take(count);
         }
         
         /// <summary>
-        /// Top N prefabs có nhiều overflow nhất
+        /// The N prefabs with the most overflows
         /// </summary>
         public IEnumerable<(int prefabId, int overflows)> GetMostOverflowPools(int count = 5)
         {
@@ -112,7 +112,7 @@ namespace _VuTH.Core.Pool
         }
         
         /// <summary>
-        /// Lấy summary cho debug
+        /// Summary for debugging
         /// </summary>
         public AnalyticsSummary GetSummary()
         {

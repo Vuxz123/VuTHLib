@@ -19,22 +19,22 @@ namespace _VuTH.Core.Pool
         public int peakActive;
         
         // Pool efficiency
-        public int poolHits;    // Lấy từ pool (reuse)
-        public int poolMisses;  // Phải tạo mới
+        public int poolHits;    // taken from the pool (reused)
+        public int poolMisses;  // had to be created
         
         // Timing
         public float lastAccessTime;
         public float createdTime;
         
         /// <summary>
-        /// Tỷ lệ reuse - cao = tốt
+        /// Share of spawns served from the pool; higher is better
         /// </summary>
         public float HitRate => (poolHits + poolMisses) > 0 
             ? (float)poolHits / (poolHits + poolMisses) 
             : 0f;
         
         /// <summary>
-        /// Tỷ lệ sử dụng lại objects
+        /// Despawns per spawn
         /// </summary>
         public float ReuseRate => totalSpawned > 0 
             ? (float)totalDespawned / totalSpawned 

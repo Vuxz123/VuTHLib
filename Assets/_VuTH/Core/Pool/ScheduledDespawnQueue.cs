@@ -1,62 +1,70 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace _VuTH.Core.Pool
 {
     /// <summary>
-    /// Pending delayed despawns. Stores (object, due time) pairs and, when processed with the current time,
-    /// hands every due object to a callback. Entries whose object was destroyed are dropped silently.
-    /// Time is passed in explicitly so the queue does not depend on <see cref="Time"/> and can be unit tested.
+    /// Pending delayed despawns. Each entry remembers the <see cref="PooledInstance.Generation"/> it was scheduled for:
+    /// once the instance is despawned (by hand or by an earlier schedule) and spawned again, the entry no longer applies
+    /// and is dropped instead of despawning an instance now used elsewhere. Time is passed in explicitly so the queue
+    /// can be unit tested.
     /// </summary>
     public sealed class ScheduledDespawnQueue
     {
-        private readonly List<ScheduledDespawn> _entries = new();
+        private readonly List<Entry> _entries = new();
 
         /// <summary>Number of pending entries.</summary>
         public int Count => _entries.Count;
 
-        /// <summary>Schedules <paramref name="obj"/> to be despawned once the time reaches <paramref name="despawnTime"/>.</summary>
-        public void Schedule(GameObject obj, float despawnTime)
+        /// <summary>Schedules the current life of <paramref name="instance"/> to be despawned at <paramref name="despawnTime"/>.</summary>
+        public void Schedule(PooledInstance instance, float despawnTime)
         {
-            _entries.Add(new ScheduledDespawn
-            {
-                Object = obj,
-                DespawnTime = despawnTime
-            });
+            _entries.Add(new Entry(instance, instance.Generation, despawnTime));
         }
 
         /// <summary>
-        /// Walks the entries from newest to oldest: destroyed objects are removed, and objects whose due time is
-        /// <c>&lt;= <paramref name="currentTime"/></c> are passed to <paramref name="despawn"/> and then removed.
+        /// Drops the entries that no longer apply (instance destroyed, despawned or respawned since), then passes every
+        /// due entry's instance to <paramref name="despawn"/>.
         /// </summary>
-        public void Process(float currentTime, Action<GameObject> despawn)
+        public void Process(float currentTime, Action<PooledInstance> despawn)
         {
-            for (int i = _entries.Count - 1; i >= 0; i--)
+            for (var i = _entries.Count - 1; i >= 0; i--)
             {
-                var scheduled = _entries[i];
+                // The despawn callback may change the list: re-check the bounds.
+                if (i >= _entries.Count) continue;
 
-                if (scheduled.Object == null)
+                var entry = _entries[i];
+                if (!IsCurrent(entry))
                 {
                     _entries.RemoveAt(i);
                     continue;
                 }
 
-                if (currentTime >= scheduled.DespawnTime)
-                {
-                    despawn(scheduled.Object);
-                    _entries.RemoveAt(i);
-                }
+                if (currentTime < entry.DespawnTime) continue;
+
+                _entries.RemoveAt(i);
+                despawn(entry.Instance);
             }
         }
 
         /// <summary>Drops all pending entries without despawning them.</summary>
         public void Clear() => _entries.Clear();
 
-        private struct ScheduledDespawn
+        private static bool IsCurrent(Entry entry) =>
+            entry.Instance.IsAlive && entry.Instance.IsActive && entry.Instance.Generation == entry.Generation;
+
+        private readonly struct Entry
         {
-            public GameObject Object;
-            public float DespawnTime;
+            public readonly PooledInstance Instance;
+            public readonly int Generation;
+            public readonly float DespawnTime;
+
+            public Entry(PooledInstance instance, int generation, float despawnTime)
+            {
+                Instance = instance;
+                Generation = generation;
+                DespawnTime = despawnTime;
+            }
         }
     }
 }

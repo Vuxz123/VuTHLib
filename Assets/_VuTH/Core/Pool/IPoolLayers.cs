@@ -17,6 +17,9 @@ namespace _VuTH.Core.Pool
             where T : Component;
         
         void Despawn(GameObject obj, float delay = 0f);
+
+        /// <summary>Whether <paramref name="obj"/> was spawned by the pool and not despawned since.</summary>
+        bool IsSpawned(GameObject obj);
         
         // C# class pooling
         T SpawnClass<T>() where T : class, new();
@@ -39,6 +42,9 @@ namespace _VuTH.Core.Pool
         // Cleanup
         void ClearPool(GameObject prefab);
         void ClearPool<T>() where T : class;
+
+        /// <summary>Sets the limits of the class pool of <typeparamref name="T"/>.</summary>
+        void ConfigureClassPool<T>(ClassPoolConfig config) where T : class;
         void ClearAllPools();
         void TrimExcess(int keepMinimum = 5);
         void CleanupUnused(float unusedTimeSeconds = 60f);
@@ -95,6 +101,12 @@ namespace _VuTH.Core.Pool
         public Transform Parent;
         public string Category;
         public float AutoRecycleTime;
+
+        /// <summary>
+        /// Keep the prefab's local transform under <see cref="Parent"/> (UI, child objects) instead of placing the
+        /// instance at the world <see cref="Position"/> / <see cref="Rotation"/>.
+        /// </summary>
+        public bool KeepPrefabTransform;
         
         public static PoolSpawnOptions Default => new()
         {
@@ -117,9 +129,12 @@ namespace _VuTH.Core.Pool
             AutoRecycleTime = -1f
         };
         
+        /// <summary>Under <paramref name="parent"/>, with the prefab's local transform.</summary>
         public static PoolSpawnOptions WithParent(Transform parent) => new()
         {
             Parent = parent,
+            Rotation = Quaternion.identity,
+            KeepPrefabTransform = true,
             AutoRecycleTime = -1f
         };
         

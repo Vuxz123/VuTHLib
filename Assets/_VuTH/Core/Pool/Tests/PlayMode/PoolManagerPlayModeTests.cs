@@ -195,7 +195,7 @@ namespace _VuTH.Core.Pool.Tests.PlayMode
 
         private static void CleanupManagers()
         {
-            foreach (var manager in Object.FindObjectsByType<PoolManager>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            foreach (var manager in Object.FindObjectsByType<PoolManager>(FindObjectsInactive.Include))
             {
                 if (manager)
                 {
