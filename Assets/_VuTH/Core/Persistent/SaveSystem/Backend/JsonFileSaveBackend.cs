@@ -1,6 +1,7 @@
 using UnityEngine.Scripting.APIUpdating;
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -12,6 +13,10 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
     /// <summary>
     /// Backend storing one JSON file per key in <see cref="Application.persistentDataPath"/> (or a custom folder).
     /// Writes go to a temporary file that is then swapped in, so a crash mid-write never leaves a truncated save.
+    /// <para>
+    /// Each write takes a ticket when it starts. A write that finishes after a newer one was already swapped in is
+    /// dropped: an async save started before an app-pause flush can no longer replace the flushed (newer) data.
+    /// </para>
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Backend", sourceAssembly: "VuTH.Persistant.SaveSystem")]
@@ -22,6 +27,30 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         private readonly string? _basePath = null;
 
         private string BasePath => _basePath ?? Application.persistentDataPath;
+
+        // Created on first use: an instance deserialized from a profile ([SerializeReference]) may skip initializers.
+        [NonSerialized] private Dictionary<string, long>? _committedTickets;
+        [NonSerialized] private long _lastTicket;
+
+        private long TakeTicket() => Interlocked.Increment(ref _lastTicket);
+
+        /// <summary>Swaps the temp file in unless a newer write of the same file already was; true if swapped.</summary>
+        private bool Commit(string tempPath, string filePath, long ticket)
+        {
+            lock (this)
+            {
+                _committedTickets ??= new Dictionary<string, long>();
+                if (_committedTickets.TryGetValue(filePath, out var committed) && committed > ticket)
+                {
+                    TryDelete(tempPath);
+                    return false;
+                }
+
+                SwapIn(tempPath, filePath);
+                _committedTickets[filePath] = ticket;
+                return true;
+            }
+        }
 
         public JsonFileSaveBackend()
         {
@@ -95,12 +124,13 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         /// <summary>Synchronous write used for app pause / quit flushes.</summary>
         public void SaveRaw(string key, string data)
         {
+            var ticket = TakeTicket();
             var filePath = GetFilePath(key);
             var tempPath = PrepareTempPath(filePath);
             try
             {
                 File.WriteAllText(tempPath, data);
-                SwapIn(tempPath, filePath);
+                Commit(tempPath, filePath, ticket);
             }
             catch
             {
@@ -111,12 +141,14 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
 
         public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
         {
+            // Taken before writing: a synchronous flush made while this write runs is newer and must win.
+            var ticket = TakeTicket();
             var filePath = GetFilePath(key);
             var tempPath = PrepareTempPath(filePath);
             try
             {
                 await File.WriteAllTextAsync(tempPath, data, cancellationToken);
-                SwapIn(tempPath, filePath);
+                Commit(tempPath, filePath, ticket);
             }
             catch
             {

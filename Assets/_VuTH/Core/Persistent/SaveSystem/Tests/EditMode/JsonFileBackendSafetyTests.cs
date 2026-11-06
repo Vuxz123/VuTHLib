@@ -60,6 +60,18 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.EditMode
         }
 
         [Test]
+        public async Task AsyncSaveStartedBeforeASyncFlush_DoesNotReplaceIt()
+        {
+            // Focus lost starts an async save; the pause that follows flushes newer data synchronously.
+            var olderAsync = _backend.SaveRawAsync("slot", "older");
+            _backend.SaveRaw("slot", "newer");
+            await olderAsync;
+
+            Assert.AreEqual("newer", await _backend.LoadRawAsync("slot"));
+            CollectionAssert.IsEmpty(Directory.GetFiles(_tempDir, "*.tmp"));
+        }
+
+        [Test]
         public async Task LoadRawAsync_MissingKey_ReturnsNull()
         {
             Assert.IsNull(await _backend.LoadRawAsync("missing"));

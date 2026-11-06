@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
@@ -24,7 +25,7 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// </summary>
     /// <typeparam name="TData">DTO type for serialization.</typeparam>
     public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, ISyncPersistencePackage,
-        IPackageLoadFailure, IDisposable
+        IPackageLoadFailure, IPersistentFieldOwner, IDisposable
         where TData : class
     {
         /// <summary>
@@ -48,6 +49,14 @@ namespace _VuTH.Core.Persistent.DataPackage
         private int _dirtyVersion;
         private bool _canSave = true;
         private bool _warnedChangeWhileLoading;
+        private readonly List<Action> _deferredChanges = new();
+        private readonly List<IDisposable> _fields = new();
+        private int _batchDepth;
+        private bool _batchDirty;
+        private bool _disposed;
+
+        /// <inheritdoc/>
+        public event Action<IPersistencePackage>? SaveBlocked;
 
         /// <inheritdoc/>
         public string BaseStorageKey { get; }
@@ -108,6 +117,9 @@ namespace _VuTH.Core.Persistent.DataPackage
             LoadStatus = null;
             _canSave = true;
             ClearDirty();
+
+            // Waiters must wait for the new slot's data, not see the previous load as done.
+            if (_loadedSource.Task.Status != UniTaskStatus.Pending) _loadedSource = new UniTaskCompletionSource<Exception?>();
         }
 
         #region Schema
@@ -166,26 +178,108 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             if (IsLoading)
             {
-                // The loaded data replaces the fields when the load completes: this change cannot be kept.
+                // The loaded data replaces the fields when the load completes: this change is lost. An error, not a
+                // warning: for data such as purchases it is real data loss. Use Modify, or await WaitUntilLoadedAsync.
                 if (!_warnedChangeWhileLoading)
                 {
                     _warnedChangeWhileLoading = true;
-                    this.LogWarning($"'{StorageKey}' changed while its data was loading; the loaded data will replace " +
-                                    "the change. Await WaitUntilLoadedAsync before modifying the package.");
+                    this.LogError($"'{StorageKey}' changed while its data was loading: the change is LOST (the loaded " +
+                                  "data replaces it). Wrap the change in Modify(...), which applies it after the load, " +
+                                  "or await WaitUntilLoadedAsync first.");
                 }
 
                 return;
             }
 
+            if (_batchDepth > 0)
+            {
+                _batchDirty = true; // Saved once, when the batch ends.
+                return;
+            }
+
             _dirtyVersion++;
             _isDirty = true;
-            _dirtySubject.OnNext(true);
+            if (!_disposed) _dirtySubject.OnNext(true);
         }
 
         private void ClearDirty()
         {
             _isDirty = false;
-            _dirtySubject.OnNext(false);
+            if (!_disposed) _dirtySubject.OnNext(false); // a save may finish after Dispose
+        }
+
+        /// <summary>
+        /// Applies <paramref name="change"/> now, or right after the load in progress (a change made during a load
+        /// would be replaced by the loaded data). Use it for changes that can come at any time, such as a purchase
+        /// restored at startup.
+        /// </summary>
+        public void Modify(Action change)
+        {
+            if (change == null) throw new ArgumentNullException(nameof(change));
+
+            if (IsLoading)
+            {
+                _deferredChanges.Add(change);
+                return;
+            }
+
+            change();
+        }
+
+        /// <summary>
+        /// Groups several changes into one: the package is marked dirty (and, with <see cref="SaveStrategy.Immediate"/>,
+        /// saved) once when the scope ends, never with half of the changes applied.
+        /// <code>using (package.BatchChanges()) { exp.Value += 50; level.Value++; }</code>
+        /// <para>
+        /// Not a transaction: if the block throws, the changes made before the exception stay in memory and are saved
+        /// when the scope is disposed. Validate first (e.g. <see cref="PersistentField{T}.TrySetValue"/>), then change.
+        /// </para>
+        /// </summary>
+        public IDisposable BatchChanges()
+        {
+            _batchDepth++;
+            return new BatchScope(this);
+        }
+
+        private void EndBatch()
+        {
+            if (_batchDepth == 0) return;
+            if (--_batchDepth > 0 || !_batchDirty) return;
+
+            _batchDirty = false;
+            MarkDirty();
+        }
+
+        private sealed class BatchScope : IDisposable
+        {
+            private PersistencePackage<TData>? _package;
+
+            public BatchScope(PersistencePackage<TData> package) => _package = package;
+
+            public void Dispose()
+            {
+                _package?.EndBatch();
+                _package = null;
+            }
+        }
+
+        private void ApplyDeferredChanges()
+        {
+            if (_deferredChanges.Count == 0) return;
+
+            var changes = _deferredChanges.ToArray();
+            _deferredChanges.Clear();
+            foreach (var change in changes)
+            {
+                try
+                {
+                    change();
+                }
+                catch (Exception ex)
+                {
+                    this.LogError($"A deferred change of '{StorageKey}' threw: {ex}");
+                }
+            }
         }
 
         #region Save
@@ -238,7 +332,7 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public async UniTask SaveNowAsync()
         {
-            if (_saveService == null || !_isDirty || !CheckCanSave())
+            if (_disposed || _saveService == null || !_isDirty || !CheckCanSave())
                 return;
 
             if (_isSaving)
@@ -316,6 +410,8 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public async UniTask LoadAsync()
         {
+            if (_disposed) return;
+
             if (_saveService == null)
             {
                 const string error = "it has no save service. Register it with the DataPersistenceManager, or call " +
@@ -349,7 +445,22 @@ namespace _VuTH.Core.Persistent.DataPackage
                 _pendingLoads--;
                 if (!IsLoading) _warnedChangeWhileLoading = false;
                 _operationLock.Release();
+                if (!IsLoading) ApplyDeferredChanges();
                 _loadedSource.TrySetResult(null);
+            }
+
+            if (!_canSave) RaiseSaveBlocked();
+        }
+
+        private void RaiseSaveBlocked()
+        {
+            try
+            {
+                SaveBlocked?.Invoke(this);
+            }
+            catch (Exception ex)
+            {
+                this.LogError($"A SaveBlocked subscriber of '{StorageKey}' threw: {ex}");
             }
         }
 
@@ -487,14 +598,39 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
         }
 
+        void IPersistentFieldOwner.RegisterField(IDisposable field)
+        {
+            // A generated field created on first use after Dispose: nothing would dispose it any more.
+            if (_disposed)
+            {
+                field.Dispose();
+                return;
+            }
+
+            _fields.Add(field);
+        }
+
         /// <summary>
-        /// Dispose the package.
+        /// Disposes the package and its <see cref="PersistentField{T}"/>s. The operation lock is not disposed: a save
+        /// still waiting for it must be able to finish.
         /// </summary>
         public virtual void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+
+            foreach (var field in _fields) field.Dispose();
+            _fields.Clear();
+            _deferredChanges.Clear();
+
             _dirtySubject.OnNext(false);
             _dirtySubject.Dispose();
-            _operationLock.Dispose();
         }
+    }
+
+    /// <summary>A package owning <see cref="PersistentField{T}"/>s, disposed with it.</summary>
+    internal interface IPersistentFieldOwner
+    {
+        void RegisterField(IDisposable field);
     }
 }

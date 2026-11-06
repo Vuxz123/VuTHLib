@@ -31,7 +31,8 @@ namespace _VuTH.Core.Persistent.DataPackage
                 case SaveStrategy.Debounced:
                     group.Add(package.DirtyObservable
                         .Where(dirty => dirty)
-                        .ThrottleLast(TimeSpan.FromSeconds(package.DebounceSeconds))
+                        // Explicit Unity time (main thread, ignoring timeScale): a paused game still saves.
+                        .ThrottleLast(TimeSpan.FromSeconds(package.DebounceSeconds), UnityTimeProvider.UpdateIgnoreTimeScale)
                         .Subscribe(_ => package.SaveNow()));
                     // Changes still waiting for the debounce window would be lost if the app is paused/killed.
                     if (lifecycleHook != null) group.Add(lifecycleHook.RegisterPackage(package));

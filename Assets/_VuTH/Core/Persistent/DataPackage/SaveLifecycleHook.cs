@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using _VuTH.Common.Log;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+#if VCONTAINER
 using VContainer;
 using VContainer.Unity;
+#endif
 
 namespace _VuTH.Core.Persistent.DataPackage
 {
@@ -18,20 +20,34 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// </list>
     /// Packages that cannot save synchronously (custom backend without <c>ISyncSaveBackend</c>) fall back to a
     /// best-effort async save.
+    /// <para>
+    /// With VContainer it is an entry point; without it, <see cref="DataPersistenceManager"/> creates and initializes its
+    /// own, so pause / quit flushes work either way.
+    /// </para>
     /// </summary>
-    public class SaveLifecycleHook : IInitializable, IDisposable
+    public class SaveLifecycleHook : IDisposable
+#if VCONTAINER
+        , IInitializable
+#endif
     {
         private readonly HashSet<IPersistencePackage> _packages = new();
         private ApplicationPauseRelay _pauseRelay;
         private bool _quitHandled;
+        private bool _initialized;
 
+#if VCONTAINER
         [Inject]
+#endif
         public SaveLifecycleHook()
         {
         }
 
+        /// <summary>Subscribes to focus / pause / quit. Called once (VContainer entry point, or the manager).</summary>
         public void Initialize()
         {
+            if (_initialized) return;
+            _initialized = true;
+
             Application.focusChanged += OnFocusChanged;
             Application.quitting += OnQuitting;
 
@@ -140,6 +156,7 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public void Dispose()
         {
+            _initialized = false;
             Application.focusChanged -= OnFocusChanged;
             Application.quitting -= OnQuitting;
 

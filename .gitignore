@@ -103,3 +103,8 @@ UserSettings
 .idea/
 /Assets/_Recovery/
 /Assets/_Recovery.meta
+
+# Source generator projects (build output; the Unity DLL is copied into Assets)
+Tools/**/bin/
+Tools/**/obj/
+!Tools/**/*.csproj

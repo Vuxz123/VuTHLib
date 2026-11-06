@@ -16,15 +16,16 @@ it was first backed up.
 2. [Save Slots](#save-slots)
 3. [Deleting Data](#deleting-data)
 4. [Persistence Package](#persistence-package)
-5. [PersistentField](#persistentfield)
-6. [SaveSystem](#savesystem)
-7. [Load Safety](#load-safety)
-8. [Save Strategies](#save-strategies)
-9. [Encryption](#encryption)
-10. [Migration](#migration)
-11. [Backends](#backends)
-12. [Configuration](#configuration)
-13. [Events](#events)
+5. [Generated Payload Mapping](#generated-payload-mapping)
+6. [PersistentField](#persistentfield)
+7. [SaveSystem](#savesystem)
+8. [Load Safety](#load-safety)
+9. [Save Strategies](#save-strategies)
+10. [Encryption](#encryption)
+11. [Migration](#migration)
+12. [Backends](#backends)
+13. [Configuration](#configuration)
+14. [Events](#events)
 
 ---
 
@@ -58,10 +59,13 @@ public interface IDataPersistenceManager : ICommonManager
     UniTask SwitchSlotAsync(string? slot, CancellationToken ct = default);
     UniTask DeleteSlotAsync(string? slot);
 
-    new bool IsInitialized { get; }
+    event Action<IPersistencePackage> OnSaveBlocked;             // a package's save could not be read: tell the player
     int PackageCount { get; }
 }
 ```
+
+Packages created from the DataPackage profile are made by `Activator`, not by the container. With VContainer their
+`[Inject]` members are injected once the root scope is built.
 
 If the manager cannot start (no save service), `WaitUntilReadyAsync()` and the packages' `WaitUntilLoadedAsync()`
 throw instead of waiting forever.
@@ -71,7 +75,9 @@ SaveService and 100 for DataPersistence.
 
 ### Lifecycle Hook
 
-`SaveLifecycleHook` is registered as an entry point. It flushes dirty `Debounced` and `OnAppClose` packages:
+`SaveLifecycleHook` flushes dirty `Debounced` and `OnAppClose` packages. With VContainer it is registered as an
+entry point. Without VContainer, or when the manager is not created through the root scope, the manager creates and
+disposes its own, so these packages are flushed in every setup:
 
 | Event | Save |
 |-------|------|
@@ -99,6 +105,10 @@ await manager.DeleteSlotAsync("2");
   before slots existed are the default slot.
 - Switching resets the slot-scoped packages to their defaults, then loads the new slot. A slot that was never saved
   starts from defaults.
+- `WaitUntilLoadedAsync()` after a switch waits for the new slot's data, never for the previous load.
+- Switches run one after another. The cancellation token is only honored before the switch starts. Once started,
+  every slot-scoped package moves, so they never end up split between two slots.
+- A change made while a package is being saved before the switch still goes to the slot being left.
 - A package registered later joins the active slot.
 
 ---
@@ -132,6 +142,7 @@ public interface IPersistencePackage
 
     SaveLoadStatus? LoadStatus { get; } // null until the first load completed
     bool CanSave { get; }               // false when overwriting would lose stored data (see Load Safety)
+    event Action<IPersistencePackage> SaveBlocked; // raised when a load leaves CanSave false
     UniTask WaitUntilLoadedAsync(CancellationToken ct = default); // throws if the package cannot load (no save service)
 
     void SetSaveService(ISaveService saveService);
@@ -149,8 +160,33 @@ public interface IPersistencePackage
 ### PersistencePackage&lt;TData&gt;
 
 This is the base class. Implement `ExtractPayload` and `InjectPayload` to map between your fields and a DTO.
-`InjectPayload` runs without marking the package dirty. A change made while the data is still loading is replaced by
-the loaded data and logs a warning, so await `WaitUntilLoadedAsync()` before changing a package.
+`InjectPayload` runs without marking the package dirty.
+
+**Changes during a load.** A change made while the data is still loading is replaced by the loaded data. This is
+real data loss, so it is logged as an error. When a change can happen at any time, for example a purchase restored
+at startup, use `Modify`, which applies it right after the load. Otherwise await `WaitUntilLoadedAsync()` first.
+
+```csharp
+profile.Modify(() => profile.Gold.Value += restoredGold);
+```
+
+**Batches.** `BatchChanges()` groups several changes into one. The package is marked dirty once, when the scope
+ends, so `Immediate` never saves a state with only some of the changes applied:
+
+```csharp
+using (profile.BatchChanges())
+{
+    profile.Exp.Value -= cost;
+    profile.Level.Value++;
+}
+```
+
+A batch is not a transaction. If the block throws, the changes made before the exception stay in memory and are
+saved when the scope ends. Validate first, for example with `TrySetValue`, then make the changes.
+
+**Save blocked.** When a load leaves `CanSave` false, the package raises `SaveBlocked` and the manager raises
+`OnSaveBlocked`. Tell the player, for example "your save could not be loaded, contact support". Otherwise the changes
+pile up in memory and are lost when the app closes.
 
 The loads, saves and deletes of one package run one after another, never interleaved. A load waits for a save that is
 still being written, and two loads never mix.
@@ -164,48 +200,202 @@ Override `CreateSchema()` to version the package's data on its own (see [Migrati
 public class PlayerProfileDTO
 {
     public string PlayerName = "Player";
-    public int Level = 1;
-    public long Gold;
+    [Min(1), RejectOutOfRange] public int Level = 1;
+    [Min(0), RejectOutOfRange] public long Gold;
 }
 
-public class PlayerProfilePackage : PersistencePackage<PlayerProfileDTO>
+[GeneratePersistentFields] // fields + ExtractPayload / InjectPayload generated from the DTO (see below)
+public partial class PlayerProfilePackage : PersistencePackage<PlayerProfileDTO>
 {
-    public PersistentField<string> PlayerName { get; }
-    public PersistentField<int> Level { get; }
-    public PersistentField<long> Gold { get; }
+    public PlayerProfilePackage() : base("player_profile", SaveStrategy.Immediate) { }
 
-    public PlayerProfilePackage() : base("player_profile", SaveStrategy.Immediate)
-    {
-        PlayerName = new PersistentField<string>(this, "Player");
-        Level = new PersistentField<int>(this, 1);
-        Gold = new PersistentField<long>(this, 0);
-    }
-
-    public override PlayerProfileDTO ExtractPayload() => new()
-    {
-        PlayerName = PlayerName.Value, Level = Level.Value, Gold = Gold.Value
-    };
-
-    public override void InjectPayload(PlayerProfileDTO data)
-    {
-        PlayerName.SetValueWithoutNotify(data.PlayerName);
-        Level.SetValueWithoutNotify(data.Level);
-        Gold.SetValueWithoutNotify(data.Gold);
-    }
+    // Gold: a generated RangedPersistentField<long> that refuses to go below 0.
+    public bool TrySpend(long price) => Gold.TrySetValue(Gold.Value - price);
 }
 ```
 
-A package needs a public parameterless constructor to be listed in the DataPackage profile.
+A package needs a public parameterless constructor to be listed in the DataPackage profile. Its `PersistentField`s
+register themselves and are disposed with the package, so you do not need to override `Dispose` for them.
+
+---
+
+## Generated Payload Mapping
+
+A source generator writes the boilerplate of a `partial` package. Two attributes select how much:
+
+| Attribute | Generated |
+|-----------|-----------|
+| `[GeneratePayloadMapping]` | `ExtractPayload` / `InjectPayload` for the `PersistentField`s you declare |
+| `[GeneratePersistentFields]` | The same, plus a field for every DTO member you do not declare |
+
+With `[GeneratePersistentFields]`, the DTO is the single source: adding a saved value only takes a DTO member.
+
+```csharp
+[Serializable]
+public sealed class AudioSettingsPayload
+{
+    public bool muted;
+    [Range(0f, 1f)] public float masterVolume = 1f;
+}
+
+[GeneratePersistentFields]
+public sealed partial class AudioSettingsPackage : PersistencePackage<AudioSettingsPayload>
+{
+    public AudioSettingsPackage() : base("audio_settings", SaveStrategy.Debounced) { }
+}
+
+// Generated: PersistentField<bool> Muted, RangedPersistentField<float> MasterVolume (0..1),
+// ExtractPayload, InjectPayload.
+```
+
+### Generated fields
+
+- **Name:** the member name in PascalCase: `masterVolume` → `MasterVolume`, `m_Gold` / `_gold` → `Gold`.
+- **Default value:** the member's value in a new DTO.
+- **Creation:** on first use, so the package needs no constructor code. To start from other values, call
+  `SetValueWithoutMarkingDirty` in the constructor, as `AudioSettingsPackage` does.
+- **Declared fields win:** a field you declare yourself is kept and only mapped. Do that when a field needs a custom
+  type or logic.
+
+### Unity attributes
+
+The generator reads Unity's attributes on the DTO members:
+
+| Attribute | Effect |
+|-----------|--------|
+| `[Range(min, max)]` | Generated field: `RangedPersistentField<T>` with the range min..max (any numeric `T`); `Min` / `Max` can drive a slider |
+| `[Min(min)]` | Generated field: `RangedPersistentField<T>` from min to `T.MaxValue` |
+| `[RejectOutOfRange]` (VuTH) | With `[Range]` / `[Min]`: refuse out-of-range values instead of clamping them (see below) |
+| `[ColorUsage(showAlpha, hdr)]` | Generated field: `ColorPersistentField`. Without alpha the alpha is 1; without HDR the channels stay within 0..1 |
+| `[NonSerialized]` | The member is never saved, so it gets no field. A declared field mapped to it is a warning |
+
+- On a field you declare as a plain `PersistentField<T>`, the generated `InjectPayload` still applies `[Range]`, `[Min]`
+  and `[ColorUsage]` to the loaded value. Only a ranged or color field also constrains the values the game sets.
+
+  If you declare a ranged or color field yourself on a member that also has a constraint, both apply and only values
+  inside both ranges are kept (VUTHP010). Keep one of the two.
+
+**Clamp or reject?** By default a ranged field **clamps** the values the game sets. That suits settings: a volume of
+1.2 becomes 1. It is wrong for currencies and counters, because it hides logic errors: spending 100 gold with 50 would
+silently leave 0, and the purchase would go through.
+
+Add `[RejectOutOfRange]` to such members. The field then **refuses** an out-of-range value: it keeps its current
+value, logs an error, and `TrySetValue` returns false, so check it before granting a purchase. Loaded data is still
+clamped in both modes, so a damaged save is repaired rather than lost.
+
+### Your own field attributes
+
+Two interfaces let your own attributes on DTO members shape the generated fields. The generator writes
+`new YourAttribute(args)` into the package, so there is no reflection at runtime, and it is safe with IL2CPP and code
+stripping:
+
+```csharp
+// A normalizer: constrains the value; several apply in declaration order, after Range / Min / ColorUsage.
+public sealed class StepAttribute : Attribute, IPersistentFieldNormalizer<float>
+{
+    private readonly float _step;
+    public StepAttribute(float step) => _step = step;
+    public float Normalize(float value) => Mathf.Round(value / _step) * _step;
+}
+
+// A factory: chooses the field type; the generated property has that type, with its own API.
+public sealed class CurrencyAttribute : Attribute, IPersistentFieldFactory<long, CurrencyField>
+{
+    public CurrencyField Create(IPersistencePackage owner, long defaultValue) => new CurrencyField(owner, defaultValue);
+}
+
+public class SettingsDto { [Range(0f, 1f), Step(0.05f)] public float volume = 1f; }
+public class WalletDto { [Currency] public long gems; }
+```
+
+**Rules:**
+
+- The interface's `T` must be the member's type (VUTHP011).
+- A member has at most one factory (VUTHP012). A factory builds the whole field, so the member's other constraints and
+  normalizers are ignored (VUTHP013).
+- The attribute and its constructor must be accessible from the package (VUTHP014). Its arguments are constants (a
+  C# rule), so they can always be written back into code, named arguments included.
+- On a declared field, normalizers apply to the loaded value, and factories are not used.
+- `Normalize` must be pure. `Create` must only construct the field: no subscription, no service lookup.
+
+To expose a type other than the saved one, for example a stored string shown as an enum, declare the field yourself.
+Converters between stored and exposed types are not supported.
+- The serializer itself follows the remaining serialization attributes:
+  - `[FormerlySerializedAs("old")]`: rename a DTO member without losing old saves;
+  - `[SerializeField]` private fields are saved.
+- Display-only attributes (`[Tooltip]`, `[Header]`, `[Space]`, `[Multiline]`, `[TextArea]`, `[Delayed]`,
+  `[HideInInspector]`, `[InspectorName]`) do not change saved data and are ignored.
+
+### Mapping rules
+
+- **Name:** exact name first, then a unique case-insensitive match, so `MasterVolume` maps to `masterVolume`.
+- **Rename:** `[PayloadMember("coins")]` maps a declared field to another DTO member name.
+- **Exclude:** `[PayloadIgnore]` leaves a declared field out, for example session-only state.
+- **Members:** the DTO member may be a field or a property, also inherited. Its type must be exactly `T`.
+- **Generated code:**
+  - `InjectPayload` uses `SetValueWithoutMarkingDirty` inside `LoadWithoutNotify`, so loading never marks the package
+    dirty.
+  - If you write one of the two methods yourself, only the other one is generated.
+
+### Diagnostics
+
+Problems show up at compile time:
+
+| Id | Severity | Problem |
+|----|----------|---------|
+| VUTHP001 | error | The class does not derive from `PersistencePackage<TData>` |
+| VUTHP002 | error | The package, or a class containing it, is not `partial` |
+| VUTHP003 | warning | A declared field has no DTO member of that name, so it is not saved |
+| VUTHP004 | error | The DTO member has another type |
+| VUTHP005 | error | The DTO has no parameterless constructor |
+| VUTHP006 | warning | The DTO member is read-only or not accessible |
+| VUTHP007 | warning | A declared field maps to a `[NonSerialized]` member, so it is not saved |
+| VUTHP008 | warning | The name of a field to generate is already a member of the package |
+| VUTHP009 | warning | `[Range]` / `[Min]` / `[ColorUsage]` is on a type it cannot constrain |
+| VUTHP010 | warning | A declared ranged / color field also gets the DTO member's constraint (values must satisfy both) |
+| VUTHP011 | error | A normalizer / factory attribute works on another type than the member's |
+| VUTHP012 | error | A member has several field factories |
+| VUTHP013 | warning | A field factory ignores the member's constraints / normalizers |
+| VUTHP014 | error | A normalizer / factory attribute cannot be instantiated from the package (not accessible, abstract) |
+| VUTHP015 | warning | `[RejectOutOfRange]` on a member without `[Range]` / `[Min]` |
+
+The generator is incremental: it keeps no symbol between steps, so editing unrelated code does not regenerate the
+packages.
+
+The generator works in `VuTH.Persistent.DataPackage` and in the assemblies that reference it. Its source and its tests
+are in `Tools/SourceGenerators` (see the README there).
 
 ---
 
 ## PersistentField&lt;T&gt;
 
 `PersistentField<T>` wraps a value in an R3 `ReactiveProperty`. Setting `Value` to a different value marks the owner
-package dirty. Setting an equal value does nothing, and `SetValueWithoutNotify` never marks it dirty.
+package dirty, and setting an equal value does nothing.
+
+`SetValueWithoutMarkingDirty` sets the value without saving, for example in `InjectPayload`. Subscribers are still
+notified, so the UI shows the loaded value. The old name, `SetValueWithoutNotify`, is obsolete because it was
+misleading.
 
 After changing a mutable value in place, for example adding to a list, call `NotifyChanged()`. It notifies the
 subscribers and marks the package dirty.
+
+**Constrained fields.** `RangedPersistentField<T>` (min..max, `RangeMode.Clamp` or `Reject`) and `ColorPersistentField`
+(`[ColorUsage]` rules) are the field types generated from attributes; they can also be created by hand.
+
+**Refusing values.** `TrySetValue(value)` returns false when the field refuses a value, for example a
+`RangeMode.Reject` field going out of range; setting `Value` does the same without reporting it. A subclass decides by
+overriding `AcceptsValue`. Only values set by the game are checked: the default and loaded data are normalized instead.
+A custom `IEqualityComparer<T>` (constructor argument) decides what counts as a change.
+
+A field created after its package was disposed is disposed at once.
+
+**Normalizer.** Any field can normalize every value it receives: the default, `Value`, and loaded data. A damaged or
+edited save then cannot put it out of range, and a generated `InjectPayload` needs no special code:
+
+```csharp
+MasterVolume = new PersistentField<float>(this, 1f, normalize: Mathf.Clamp01);
+MasterVolume.Value = 3f; // 1
+```
 
 ```csharp
 playerProfile.Gold.Observable
@@ -285,7 +475,8 @@ public enum SaveStrategy
 }
 ```
 
-`Debounced` is a throttle, not a "wait for quiet" debounce. Data that keeps changing is still saved every
+`Debounced` runs on Unity's update loop in unscaled time (`UnityTimeProvider.UpdateIgnoreTimeScale`), so a paused
+game still saves. It is a throttle, not a "wait for quiet" debounce. Data that keeps changing is still saved every
 `DebounceSeconds`, which defaults to 3 seconds. Override the `DebounceSeconds` property to change it.
 
 ---
@@ -409,7 +600,7 @@ public interface ISyncSaveBackend { void SaveRaw(string key, string data); } // 
 | Backend | Description |
 |---------|-------------|
 | `PlayerPrefsSaveBackend` | This is the default, the same one shipped builds have always used. It suits small saves only: data goes to the registry on Windows, and WebGL limits it to about 1 MB. `PlayerPrefs.Save()` rewrites every key, so async writes made in the same frame share one flush at the end of the frame. Each write still completes only once its data is on disk. Synchronous writes, used on pause and quit, flush immediately. |
-| `JsonFileSaveBackend` | One file per key in `persistentDataPath`. It writes to a temporary file and then swaps it in, so a crash never leaves a truncated save. A key with characters that are invalid in file names gets a hash suffix (`a/b` → `a_b-<hash>.json`), so it cannot collide with another key. Files written under the old name are still read. |
+| `JsonFileSaveBackend` | One file per key in `persistentDataPath`. It writes to a temporary file and then swaps it in, so a crash never leaves a truncated save. A key with characters that are invalid in file names gets a hash suffix (`a/b` → `a_b-<hash>.json`), so it cannot collide with another key. Files written under the old name are still read. Each write takes a ticket when it starts. An async write that finishes after a newer synchronous flush, for example a focus-lost save racing the pause flush, is dropped instead of replacing the newer data. |
 
 ---
 

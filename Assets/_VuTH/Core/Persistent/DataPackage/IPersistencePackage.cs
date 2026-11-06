@@ -68,6 +68,13 @@ namespace _VuTH.Core.Persistent.DataPackage
         bool CanSave { get; }
 
         /// <summary>
+        /// Raised when a load leaves <see cref="CanSave"/> false: the stored data cannot be read and changes will not be
+        /// saved. Tell the player (e.g. "your save could not be loaded, contact support") instead of letting them play on
+        /// and lose their progress.
+        /// </summary>
+        event System.Action<IPersistencePackage> SaveBlocked;
+
+        /// <summary>
         /// Completes when the first load finished, whatever its outcome (see <see cref="LoadStatus"/>).
         /// Changes made before that are overwritten by the loaded data. Throws if the package cannot load at all
         /// (no save service).

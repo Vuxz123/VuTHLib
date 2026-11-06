@@ -32,8 +32,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Serialize
                 // Formatting: No indentation for compact storage
                 Formatting = Formatting.None,
 
-                // Case-insensitive property matching via CamelCaseNamingStrategy
-                ContractResolver = new DefaultContractResolver
+                // Case-insensitive property matching via CamelCaseNamingStrategy; Unity serialization attributes
+                // ([FormerlySerializedAs], [SerializeField], [NonSerialized]) honored.
+                ContractResolver = new UnityContractResolver
                 {
                     NamingStrategy = namingStrategy,
                     IgnoreSerializableAttribute = false

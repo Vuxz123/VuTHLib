@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="VuTH.Persistent.Generators.Tests/VuTH.Persistent.Generators.Tests.csproj" />
+  <Project Path="VuTH.Persistent.Generators/VuTH.Persistent.Generators.csproj" />
+</Solution>

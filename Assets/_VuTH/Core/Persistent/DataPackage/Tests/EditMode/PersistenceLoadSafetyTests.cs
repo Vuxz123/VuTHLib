@@ -214,6 +214,7 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
 
             var loading = package.LoadAsync();
             var loaded = package.WaitUntilLoadedAsync();
+            LogAssert.Expect(LogType.Error, new Regex("is LOST"));
             package.Set(99); // too early: the load has not finished
             Assert.AreEqual(UniTaskStatus.Pending, loaded.Status);
 

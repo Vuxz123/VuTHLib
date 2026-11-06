@@ -7,9 +7,11 @@ using _VuTH.Common.Log;
 using _VuTH.Core.Persistent.SaveSystem;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+using ZLinq;
+#if VCONTAINER
 using VContainer;
 using VContainer.Unity;
-using ZLinq;
+#endif
 
 namespace _VuTH.Core.Persistent.DataPackage
 {
@@ -29,6 +31,8 @@ namespace _VuTH.Core.Persistent.DataPackage
     {
         private ISaveService? _saveService;
         private SaveLifecycleHook? _lifecycleHook;
+        private bool _ownsLifecycleHook;
+        private readonly SemaphoreSlim _slotGate = new(1, 1);
         private IReadOnlyList<IPersistencePackage>? _injectedPackages;
 
         private readonly List<IPersistencePackage> _configuredPackages = new();
@@ -61,11 +65,18 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public override void ConfigureRootScope(IContainerBuilder builder)
         {
-            foreach (var package in GetConfiguredPackages())
+            var configured = GetConfiguredPackages();
+            foreach (var package in configured)
             {
                 // Also as its concrete type, so consumers can inject e.g. PlayerProfilePackage directly.
                 builder.RegisterInstance(package).AsSelf();
             }
+
+            // Created by the profile (Activator), not by the container: inject their [Inject] members once it is built.
+            builder.RegisterBuildCallback(container =>
+            {
+                foreach (var package in configured) container.Inject(package);
+            });
 
             RegisterSelf(builder);
             RegisterLifecycleHook(builder);
@@ -90,6 +101,10 @@ namespace _VuTH.Core.Persistent.DataPackage
         protected override void InitializeBootstrap()
         {
             this.Log("Initializing Data Persistence Manager...");
+
+            // Without DI (or when the manager is not created through the root scope) nothing provides the hook:
+            // create one, otherwise OnAppClose / Debounced packages are never flushed on pause / quit.
+            EnsureLifecycleHook();
 
 #if VCONTAINER
             if (_saveService != null)
@@ -121,6 +136,15 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
 
             BeginInitializePackages(GetConfiguredPackages());
+        }
+
+        private void EnsureLifecycleHook()
+        {
+            if (_lifecycleHook != null) return;
+
+            _lifecycleHook = new SaveLifecycleHook();
+            _lifecycleHook.Initialize();
+            _ownsLifecycleHook = true;
         }
 
         /// <summary>Reports that packages cannot load, releasing whoever waits for them or for the manager.</summary>
@@ -207,13 +231,41 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             if (_registry.Contains(package)) return false;
 
+            // Checked before SetSlot, which resets the package's data: a rejected package must stay untouched.
+            var key = package.IsSlotScoped ? SaveSlots.GetKey(_activeSlot, package.BaseStorageKey) : package.StorageKey;
+            var owner = _registry.FindByKey(key);
+            if (owner != null)
+            {
+                this.LogError($"Package {package.GetType().Name} uses the storage key '{key}' of {owner.GetType().Name}; " +
+                              "it is not registered, as they would overwrite each other's save.");
+                return false;
+            }
+
             if (package.IsSlotScoped) package.SetSlot(_activeSlot);
+            if (!_registry.TryAdd(package, out var error))
+            {
+                if (error != null) this.LogError(error);
+                return false;
+            }
 
-            if (_registry.TryAdd(package, out var error)) return true;
-
-            if (error != null) this.LogError(error);
-            return false;
+            package.SaveBlocked += OnPackageSaveBlocked;
+            return true;
         }
+
+        private void OnPackageSaveBlocked(IPersistencePackage package)
+        {
+            try
+            {
+                OnSaveBlocked?.Invoke(package);
+            }
+            catch (Exception e)
+            {
+                this.LogError($"An OnSaveBlocked subscriber threw: {e}");
+            }
+        }
+
+        /// <inheritdoc />
+        public event Action<IPersistencePackage>? OnSaveBlocked;
 
         private async UniTask InitializePackageAsync(IPersistencePackage package, CancellationToken cancellationToken)
         {
@@ -298,6 +350,15 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             _savePipeline.Clear();
 
+            foreach (var package in _registry.Snapshot()) package.SaveBlocked -= OnPackageSaveBlocked;
+
+            if (_ownsLifecycleHook)
+            {
+                _lifecycleHook?.Dispose();
+                _lifecycleHook = null;
+                _ownsLifecycleHook = false;
+            }
+
             _initializationCts?.Cancel();
             _initializationCts?.Dispose();
             _initializationCts = null;
@@ -362,6 +423,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         public void UnregisterPackage(IPersistencePackage package)
         {
             if (!_registry.Remove(package)) return;
+            package.SaveBlocked -= OnPackageSaveBlocked;
 
             _initializedPackages.Remove(package);
             _initializingPackages.Remove(package);
@@ -458,42 +520,75 @@ namespace _VuTH.Core.Persistent.DataPackage
         public string? ActiveSlot => _activeSlot;
 
         /// <inheritdoc />
+        /// <remarks>
+        /// Switches run one after another. Cancellation is only honored before the switch starts: once started, every
+        /// slot-scoped package moves to the new slot, so they never end up split between two slots.
+        /// </remarks>
         public async UniTask SwitchSlotAsync(string? slot, CancellationToken cancellationToken = default)
         {
-            slot = string.IsNullOrEmpty(slot) ? null : slot;
-            if (slot == _activeSlot) return;
-
-            var scoped = _registry.Snapshot().AsValueEnumerable().Where(p => p.IsSlotScoped).ToList();
-
-            // Pending changes belong to the slot being left.
-            foreach (var package in scoped)
+            await _slotGate.WaitAsync(cancellationToken);
+            try
             {
-                if (!package.IsDirty) continue;
+                cancellationToken.ThrowIfCancellationRequested();
 
-                if (!package.CanSave)
+                slot = string.IsNullOrEmpty(slot) ? null : slot;
+                if (slot == _activeSlot) return;
+
+                // From here on the switch always completes. A package registered meanwhile joins the new slot.
+                _activeSlot = slot;
+                var scoped = _registry.Snapshot().AsValueEnumerable().Where(p => p.IsSlotScoped).ToList();
+                var loads = new List<UniTask>(scoped.Count);
+
+                foreach (var package in scoped)
                 {
-                    this.LogWarning($"Unsaved changes of '{package.StorageKey}' are dropped: saving it is disabled.");
-                    continue;
+                    // Pending changes belong to the slot being left...
+                    await SaveUntilCleanAsync(package);
+
+                    // ...and the package moves right after, with no await in between: no change can slip into the gap.
+                    package.SetSlot(slot);
+                    if (_saveService != null) package.SetSaveService(_saveService);
+                    loads.Add(package.LoadAsync()); // marks it loading at once: later changes wait for the new data
                 }
 
+                await UniTask.WhenAll(loads);
+                this.Log($"Switched to save slot '{slot ?? "(default)"}'.");
+            }
+            finally
+            {
+                _slotGate.Release();
+            }
+        }
+
+        /// <summary>Saves until nothing is pending (a change may arrive during the save); gives up after a few failures.</summary>
+        private async UniTask SaveUntilCleanAsync(IPersistencePackage package)
+        {
+            for (var attempt = 0; attempt < 3 && package.IsDirty && package.CanSave; attempt++)
+            {
                 await package.SaveNowAsync();
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            _activeSlot = slot;
-
-            foreach (var package in scoped)
+            if (package.IsDirty)
             {
-                package.SetSlot(slot);
-                if (_saveService != null) package.SetSaveService(_saveService);
-                await package.LoadAsync();
+                this.LogWarning($"Unsaved changes of '{package.StorageKey}' are dropped when leaving its slot: " +
+                                (package.CanSave ? "the save failed." : "saving it is disabled."));
             }
-
-            this.Log($"Switched to save slot '{slot ?? "(default)"}'.");
         }
 
         /// <inheritdoc />
         public async UniTask DeleteSlotAsync(string? slot)
+        {
+            await _slotGate.WaitAsync();
+            try
+            {
+                await DeleteSlotCoreAsync(slot);
+            }
+            finally
+            {
+                _slotGate.Release();
+            }
+        }
+
+        private async UniTask DeleteSlotCoreAsync(string? slot)
         {
             slot = string.IsNullOrEmpty(slot) ? null : slot;
             var saveService = _saveService ?? throw new InvalidOperationException("No save service.");

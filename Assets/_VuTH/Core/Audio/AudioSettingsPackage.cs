@@ -9,21 +9,21 @@ namespace _VuTH.Core.Audio
     public sealed class AudioSettingsPayload
     {
         public bool muted;
-        public float masterVolume = 1f;
-        public float musicVolume = 1f;
-        public float sfxVolume = 1f;
-        public float uiVolume = 1f;
+        [Range(0f, 1f)] public float masterVolume = 1f;
+        [Range(0f, 1f)] public float musicVolume = 1f;
+        [Range(0f, 1f)] public float sfxVolume = 1f;
+        [Range(0f, 1f)] public float uiVolume = 1f;
     }
 
-    public sealed class AudioSettingsPackage : PersistencePackage<AudioSettingsPayload>
+    /// <summary>
+    /// Audio settings. The fields (<c>Muted</c>, <c>MasterVolume</c>, …) and the payload mapping are generated from
+    /// <see cref="AudioSettingsPayload"/> ([GeneratePersistentFields]); its <c>[Range(0, 1)]</c> makes the volumes
+    /// <see cref="RangedPersistentField{T}"/>s clamped to 0..1, whether set by the game or loaded from a save.
+    /// </summary>
+    [GeneratePersistentFields]
+    public sealed partial class AudioSettingsPackage : PersistencePackage<AudioSettingsPayload>
     {
         public override float DebounceSeconds => 0.75f;
-
-        public PersistentField<bool> Muted { get; }
-        public PersistentField<float> MasterVolume { get; }
-        public PersistentField<float> MusicVolume { get; }
-        public PersistentField<float> SfxVolume { get; }
-        public PersistentField<float> UiVolume { get; }
 
         public AudioSettingsPackage()
             : this(false, 1f, 1f, 1f, 1f)
@@ -38,50 +38,12 @@ namespace _VuTH.Core.Audio
             float uiVolume = 1f)
             : base("audio_settings", SaveStrategy.Debounced)
         {
-            Muted = new PersistentField<bool>(this, muted);
-            MasterVolume = new PersistentField<float>(this, Mathf.Clamp01(masterVolume));
-            MusicVolume = new PersistentField<float>(this, Mathf.Clamp01(musicVolume));
-            SfxVolume = new PersistentField<float>(this, Mathf.Clamp01(sfxVolume));
-            UiVolume = new PersistentField<float>(this, Mathf.Clamp01(uiVolume));
-        }
-
-        public override AudioSettingsPayload ExtractPayload()
-        {
-            return new AudioSettingsPayload
-            {
-                muted = Muted.Value,
-                masterVolume = MasterVolume.Value,
-                musicVolume = MusicVolume.Value,
-                sfxVolume = SfxVolume.Value,
-                uiVolume = UiVolume.Value
-            };
-        }
-
-        public override void InjectPayload(AudioSettingsPayload data)
-        {
-            if (data == null)
-            {
-                return;
-            }
-
-            LoadWithoutNotify(() =>
-            {
-                Muted.SetValueWithoutNotify(data.muted);
-                MasterVolume.SetValueWithoutNotify(Mathf.Clamp01(data.masterVolume));
-                MusicVolume.SetValueWithoutNotify(Mathf.Clamp01(data.musicVolume));
-                SfxVolume.SetValueWithoutNotify(Mathf.Clamp01(data.sfxVolume));
-                UiVolume.SetValueWithoutNotify(Mathf.Clamp01(data.uiVolume));
-            });
-        }
-
-        public override void Dispose()
-        {
-            Muted.Dispose();
-            MasterVolume.Dispose();
-            MusicVolume.Dispose();
-            SfxVolume.Dispose();
-            UiVolume.Dispose();
-            base.Dispose();
+            // Initial values (e.g. the AudioManager defaults); the generated fields clamp them.
+            Muted.SetValueWithoutMarkingDirty(muted);
+            MasterVolume.SetValueWithoutMarkingDirty(masterVolume);
+            MusicVolume.SetValueWithoutMarkingDirty(musicVolume);
+            SfxVolume.SetValueWithoutMarkingDirty(sfxVolume);
+            UiVolume.SetValueWithoutMarkingDirty(uiVolume);
         }
     }
 }

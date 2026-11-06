@@ -12,7 +12,8 @@
         "ZLinq.Unity",
         "Newtonsoft.Json",
         "VuTH.Persistent.SaveSystem",
-        "R3"
+        "R3",
+        "R3.Unity"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

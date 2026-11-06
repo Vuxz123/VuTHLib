@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Reflection;
 using _VuTH.Core.Persistent.SaveSystem;
 using _VuTH.Core.Persistent.SaveSystem.Backend;
 using Cysharp.Threading.Tasks;
@@ -54,6 +55,55 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.PlayMode
             await UniTask.NextFrame();
             await StartAsync();
         }
+
+        public class OnCloseDto
+        {
+            public int Value;
+        }
+
+        /// <summary>Saved only on pause / quit.</summary>
+        public class OnClosePackage : PersistencePackage<OnCloseDto>
+        {
+            public int Value;
+
+            public OnClosePackage() : base("test_on_close", SaveStrategy.OnAppClose)
+            {
+            }
+
+            public void Set(int value)
+            {
+                Value = value;
+                MarkDirty();
+            }
+
+            public override OnCloseDto ExtractPayload() => new() { Value = Value };
+            public override void InjectPayload(OnCloseDto data) => Value = data.Value;
+        }
+
+        [UnityTest]
+        public IEnumerator WithoutDI_OnAppClosePackages_AreFlushedOnPause() => UniTask.ToCoroutine(async () =>
+        {
+            // The lifecycle hook used to come only from VContainer: without it, pause / quit flushed nothing.
+            var manager = await StartAsync();
+            var package = new OnClosePackage();
+            manager.RegisterPackage(package);
+            await package.WaitUntilLoadedAsync();
+            package.Set(5);
+
+            var hook = (SaveLifecycleHook)typeof(DataPersistenceManager)
+                .GetField("_lifecycleHook", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(manager);
+            Assert.IsNotNull(hook, "created by the manager itself");
+
+            Assert.AreEqual(1, hook.FlushAllImmediate(), "the pause / quit path writes the package");
+            Assert.IsFalse(package.IsDirty);
+
+            await RestartDataManagerAsync();
+            var reloaded = new OnClosePackage();
+            _dataManager.RegisterPackage(reloaded);
+            await reloaded.WaitUntilLoadedAsync();
+            Assert.AreEqual(5, reloaded.Value);
+        });
 
         [UnityTest]
         public IEnumerator ConfiguredPackage_IsLoaded_Saved_AndRestoredAfterRestart() => UniTask.ToCoroutine(async () =>

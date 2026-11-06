@@ -40,7 +40,11 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         /// <summary>Deletes the data of slot-scoped packages in <paramref name="slot"/> (resetting them if it is active).</summary>
         UniTask DeleteSlotAsync(string? slot);
-        new bool IsInitialized { get; }
+        /// <summary>
+        /// Raised when a package's load leaves it unable to save (<see cref="IPersistencePackage.CanSave"/> false): its
+        /// stored data could not be read. Tell the player instead of letting the changes pile up and be lost.
+        /// </summary>
+        event System.Action<IPersistencePackage> OnSaveBlocked;
         int PackageCount { get; }
     }
 }

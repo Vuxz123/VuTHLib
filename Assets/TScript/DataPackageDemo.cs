@@ -148,11 +148,11 @@ namespace TScript
         {
             LoadWithoutNotify(() =>
             {
-                SoundEnabled.SetValueWithoutNotify(data.soundEnabled);
-                MusicEnabled.SetValueWithoutNotify(data.musicEnabled);
-                SoundVolume.SetValueWithoutNotify(data.soundVolume);
-                MusicVolume.SetValueWithoutNotify(data.musicVolume);
-                QualityLevel.SetValueWithoutNotify(data.qualityLevel);
+                SoundEnabled.SetValueWithoutMarkingDirty(data.soundEnabled);
+                MusicEnabled.SetValueWithoutMarkingDirty(data.musicEnabled);
+                SoundVolume.SetValueWithoutMarkingDirty(data.soundVolume);
+                MusicVolume.SetValueWithoutMarkingDirty(data.musicVolume);
+                QualityLevel.SetValueWithoutMarkingDirty(data.qualityLevel);
             });
         }
 

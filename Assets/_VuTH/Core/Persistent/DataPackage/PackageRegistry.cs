@@ -16,6 +16,17 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public bool Contains(IPersistencePackage package) => _packages.Contains(package);
 
+        /// <summary>The package stored under <paramref name="storageKey"/>, or null.</summary>
+        public IPersistencePackage? FindByKey(string storageKey)
+        {
+            foreach (var package in _packages)
+            {
+                if (package.StorageKey == storageKey) return package;
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// Adds <paramref name="package"/>. Returns false if it is already registered (<paramref name="error"/> null) or
         /// its storage key is taken (<paramref name="error"/> says by whom).
