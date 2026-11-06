@@ -18,8 +18,9 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// process right after this callback without ever raising <c>Application.quitting</c>.</item>
     /// <item><b>Quit</b> → <b>synchronous</b> save: Unity does not wait for async continuations while quitting.</item>
     /// </list>
-    /// Packages that cannot save synchronously (custom backend without <c>ISyncSaveBackend</c>) fall back to a
-    /// best-effort async save.
+    /// Packages whose backend has no synchronous path (no <c>ISyncSaveBackend</c>) get an async save on pause, which
+    /// only completes if the app resumes, and are reported as not saved on quit. The manager warns about them at
+    /// startup.
     /// <para>
     /// With VContainer it is an entry point; without it, <see cref="DataPersistenceManager"/> creates and initializes its
     /// own, so pause / quit flushes work either way.
@@ -75,31 +76,41 @@ namespace _VuTH.Core.Persistent.DataPackage
         }
 
         /// <summary>
-        /// Synchronously flush every registered dirty package. Public so games can call it from their own
-        /// "about to be killed" paths (e.g. before a forced restart).
+        /// Synchronously flushes every registered dirty package, and only that: nothing is saved asynchronously. The
+        /// caller decides what to do with the packages that could not be written synchronously (see
+        /// <see cref="FlushReport.Unsupported"/>). Public so games can call it from their own "about to be killed" paths
+        /// (e.g. before a forced restart).
         /// </summary>
-        /// <returns>Number of packages written synchronously.</returns>
-        public int FlushAllImmediate()
+        public FlushReport FlushAllImmediate() => Flush(new List<IPersistencePackage>(_packages)); // copy: a save may (un)register
+
+        /// <summary>Saves each dirty package synchronously and sorts the outcomes.</summary>
+        internal static FlushReport Flush(IEnumerable<IPersistencePackage> packages)
         {
             var written = 0;
+            List<IPersistencePackage> unsupported = null;
+            List<IPersistencePackage> failed = null;
 
-            // Copy: a save may cause (un)registration through the manager.
-            foreach (var package in new List<IPersistencePackage>(_packages))
+            foreach (var package in packages)
             {
                 if (!package.IsDirty) continue;
 
-                if (package is ISyncPersistencePackage sync && sync.TrySaveImmediate())
+                var result = package is ISyncPersistencePackage sync ? sync.SaveImmediate() : SyncSaveResult.Unsupported;
+                switch (result)
                 {
-                    written++;
-                    continue;
+                    case SyncSaveResult.Written:
+                        written++;
+                        break;
+                    case SyncSaveResult.Unsupported:
+                        (unsupported ??= new List<IPersistencePackage>()).Add(package);
+                        break;
+                    case SyncSaveResult.Failed:
+                        (failed ??= new List<IPersistencePackage>()).Add(package);
+                        break;
+                    // NotNeeded, Loading, Blocked, NotReady: nothing to write, on purpose.
                 }
-
-                // No synchronous path available — best effort.
-                this.LogWarning($"Package '{package.StorageKey}' has no synchronous save path; falling back to async.");
-                package.SaveNow();
             }
 
-            return written;
+            return new FlushReport(written, unsupported, failed);
         }
 
         private sealed class LifecycleRegistration : IDisposable
@@ -132,7 +143,14 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             if (!paused) return;
             this.Log("App paused, flushing dirty packages...");
-            FlushAllImmediate();
+
+            // Best effort for packages without a sync path: the save only finishes if the app resumes. Said, not hidden.
+            foreach (var package in FlushAllImmediate().Unsupported)
+            {
+                this.LogWarning($"'{package.StorageKey}' is saved asynchronously on pause (its backend has no " +
+                                "synchronous save path): it completes only if the app resumes.");
+                package.SaveNowAsync().Forget();
+            }
         }
 
         private void OnQuitting()
@@ -141,7 +159,12 @@ namespace _VuTH.Core.Persistent.DataPackage
             _quitHandled = true;
 
             this.Log("App quitting, flushing dirty packages...");
-            FlushAllImmediate();
+
+            // Unity does not run async continuations while quitting: an async save would never complete.
+            foreach (var package in FlushAllImmediate().Unsupported)
+            {
+                this.LogError($"'{package.StorageKey}' was NOT saved on quit: its backend has no synchronous save path.");
+            }
         }
 
         private async UniTask SaveAllDirtyAsync()
@@ -172,5 +195,36 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             this.Log("SaveLifecycleHook disposed");
         }
+    }
+
+    /// <summary>The outcome of a synchronous flush (<see cref="SaveLifecycleHook.FlushAllImmediate"/>).</summary>
+    public readonly struct FlushReport
+    {
+        private static readonly IReadOnlyList<IPersistencePackage> None = Array.Empty<IPersistencePackage>();
+
+        private readonly IReadOnlyList<IPersistencePackage> _unsupported;
+        private readonly IReadOnlyList<IPersistencePackage> _failed;
+
+        public FlushReport(int written, IReadOnlyList<IPersistencePackage> unsupported, IReadOnlyList<IPersistencePackage> failed)
+        {
+            Written = written;
+            _unsupported = unsupported;
+            _failed = failed;
+        }
+
+        /// <summary>Packages written synchronously.</summary>
+        public int Written { get; }
+
+        /// <summary>
+        /// Dirty packages whose backend has no synchronous path: not saved. Only an async save can still write them,
+        /// and it completes only if the app keeps running.
+        /// </summary>
+        public IReadOnlyList<IPersistencePackage> Unsupported => _unsupported ?? None;
+
+        /// <summary>
+        /// Packages whose write threw: already reported through <see cref="IPersistencePackage.SaveFailed"/>, which
+        /// scheduled a retry. Do not save them again.
+        /// </summary>
+        public IReadOnlyList<IPersistencePackage> Failed => _failed ?? None;
     }
 }

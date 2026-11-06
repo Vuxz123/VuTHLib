@@ -274,7 +274,7 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
         [Test]
         public void SetSlot_OnASharedPackage_Throws()
         {
-            Assert.Throws<InvalidOperationException>(() => Create().SetSlot("1"));
+            Assert.Throws<InvalidOperationException>(() => ((IManagedPersistencePackage)Create()).SetSlot("1"));
         }
 
         // ---- PersistentField ----

@@ -65,6 +65,8 @@ namespace _VuTH.Core.Persistent.SaveSystem
             Service.DeleteAsync(key, cancellationToken);
 
         /// <inheritdoc />
+        public bool SupportsSyncSave => _saveService != null && _saveService.SupportsSyncSave;
+
         public bool TrySaveImmediate<T>(string key, T data)
         {
             return _saveService != null && _saveService.TrySaveImmediate(key, data);

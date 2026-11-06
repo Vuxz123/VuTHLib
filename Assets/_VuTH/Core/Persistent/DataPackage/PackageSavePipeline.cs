@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using R3;
 
 namespace _VuTH.Core.Persistent.DataPackage
@@ -25,7 +26,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                 case SaveStrategy.Immediate:
                     group.Add(package.DirtyObservable
                         .Where(dirty => dirty)
-                        .Subscribe(_ => package.SaveNow()));
+                        .Subscribe(_ => package.SaveNowAsync().Forget()));
                     break;
 
                 case SaveStrategy.Debounced:
@@ -33,7 +34,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                         .Where(dirty => dirty)
                         // Explicit Unity time (main thread, ignoring timeScale): a paused game still saves.
                         .ThrottleLast(TimeSpan.FromSeconds(package.DebounceSeconds), UnityTimeProvider.UpdateIgnoreTimeScale)
-                        .Subscribe(_ => package.SaveNow()));
+                        .Subscribe(_ => package.SaveNowAsync().Forget()));
                     // Changes still waiting for the debounce window would be lost if the app is paused/killed.
                     if (lifecycleHook != null) group.Add(lifecycleHook.RegisterPackage(package));
                     break;

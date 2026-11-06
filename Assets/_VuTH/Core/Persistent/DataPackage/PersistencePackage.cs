@@ -24,8 +24,8 @@ namespace _VuTH.Core.Persistent.DataPackage
     /// </para>
     /// </summary>
     /// <typeparam name="TData">DTO type for serialization.</typeparam>
-    public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, ISyncPersistencePackage,
-        IPackageLoadFailure, IPersistentFieldOwner, IDisposable
+    public abstract class PersistencePackage<TData> : IPersistencePackage<TData>, IManagedPersistencePackage,
+        ISyncPersistencePackage, IPackageLoadFailure, IPersistentFieldOwner, IDisposable
         where TData : class
     {
         /// <summary>
@@ -50,6 +50,10 @@ namespace _VuTH.Core.Persistent.DataPackage
         private bool _canSave = true;
         private bool _warnedChangeWhileLoading;
         private readonly List<Action> _deferredChanges = new();
+        // Changes made while saving is blocked: replayed on the data of the next successful load (or delete).
+        private readonly List<Action> _blockedChanges = new();
+        private int _failedSaves;
+        private bool _retryScheduled;
         private readonly List<IDisposable> _fields = new();
         private int _batchDepth;
         private bool _batchDirty;
@@ -57,6 +61,9 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         /// <inheritdoc/>
         public event Action<IPersistencePackage>? SaveBlocked;
+
+        /// <inheritdoc/>
+        public event Action<IPersistencePackage, Exception>? SaveFailed;
 
         /// <inheritdoc/>
         public string BaseStorageKey { get; }
@@ -102,8 +109,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             _saveService = saveService;
         }
 
-        /// <inheritdoc/>
-        public void SetSlot(string? slot)
+        void IManagedPersistencePackage.SetSlot(string? slot)
         {
             if (!IsSlotScoped)
                 throw new InvalidOperationException($"{GetType().Name} is not slot scoped (override IsSlotScoped).");
@@ -112,6 +118,13 @@ namespace _VuTH.Core.Persistent.DataPackage
             if (key == StorageKey) return;
 
             // The data in memory belongs to the previous slot: start the new one from defaults until it is loaded.
+            if (_blockedChanges.Count > 0)
+            {
+                this.LogError($"{_blockedChanges.Count} change(s) of '{StorageKey}' made while its save was blocked are " +
+                              "LOST: the package leaves that slot without having loaded it.");
+                _blockedChanges.Clear();
+            }
+
             StorageKey = key;
             InjectWithoutNotify(CreateDefaultPayload());
             LoadStatus = null;
@@ -151,20 +164,21 @@ namespace _VuTH.Core.Persistent.DataPackage
                 $"'{StorageKey}' declares its own schema, but {_saveService?.GetType().Name} does not implement " +
                 $"{nameof(IVersionedSaveService)}.");
 
-        private UniTask SaveToServiceAsync(TData payload)
+        // The key is taken with the payload: a slot switch during the write must not send it to the new slot.
+        private UniTask SaveToServiceAsync(string key, TData payload)
         {
             var schema = Schema;
-            if (schema == null) return _saveService!.SaveAsync(StorageKey, payload, CancellationToken.None);
+            if (schema == null) return _saveService!.SaveAsync(key, payload, CancellationToken.None);
 
-            return VersionedService.SaveAsync(StorageKey, payload, schema, CancellationToken.None);
+            return VersionedService.SaveAsync(key, payload, schema, CancellationToken.None);
         }
 
-        private UniTask<SaveLoadResult<TData>> LoadFromServiceAsync()
+        private UniTask<SaveLoadResult<TData>> LoadFromServiceAsync(string key)
         {
             var schema = Schema;
-            if (schema == null) return _saveService!.TryLoadAsync<TData>(StorageKey, CancellationToken.None);
+            if (schema == null) return _saveService!.TryLoadAsync<TData>(key, CancellationToken.None);
 
-            return VersionedService.TryLoadAsync<TData>(StorageKey, schema, CancellationToken.None);
+            return VersionedService.TryLoadAsync<TData>(key, schema, CancellationToken.None);
         }
 
         #endregion
@@ -212,6 +226,13 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// Applies <paramref name="change"/> now, or right after the load in progress (a change made during a load
         /// would be replaced by the loaded data). Use it for changes that can come at any time, such as a purchase
         /// restored at startup.
+        /// <para>
+        /// While saving is blocked (<see cref="CanSave"/> false: the stored data could not be loaded), the change is
+        /// applied (the game shows it) and kept: it is applied again on the data of the next successful load or of
+        /// <see cref="DeleteAsync"/>, so it is saved once the stored data is readable again. A change can therefore run
+        /// more than once, each time on different data: only use relative changes (add gold), never ones that read
+        /// state from elsewhere.
+        /// </para>
         /// </summary>
         public void Modify(Action change)
         {
@@ -224,6 +245,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
 
             change();
+            if (!_canSave) _blockedChanges.Add(change);
         }
 
         /// <summary>
@@ -263,12 +285,35 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
         }
 
-        private void ApplyDeferredChanges()
+        /// <summary>
+        /// After the loads: changes kept while saving was blocked are replayed on the new data, then those deferred
+        /// during the load are applied. If saving is (still) blocked they are all kept for the next successful load.
+        /// </summary>
+        private void ApplyPendingChanges()
         {
-            if (_deferredChanges.Count == 0) return;
-
-            var changes = _deferredChanges.ToArray();
+            var deferred = _deferredChanges.ToArray();
             _deferredChanges.Clear();
+
+            if (_canSave)
+            {
+                var blocked = _blockedChanges.ToArray();
+                _blockedChanges.Clear();
+                Apply(blocked);
+                Apply(deferred);
+                return;
+            }
+
+            Apply(deferred); // shown now, applied again once the stored data can be loaded
+            _blockedChanges.AddRange(deferred);
+            if (_blockedChanges.Count > 0)
+            {
+                this.LogWarning($"'{StorageKey}' cannot save: {_blockedChanges.Count} change(s) made through Modify are " +
+                                "kept and applied again after the next successful load.");
+            }
+        }
+
+        private void Apply(Action[] changes)
+        {
             foreach (var change in changes)
             {
                 try
@@ -293,11 +338,18 @@ namespace _VuTH.Core.Persistent.DataPackage
         }
 
         /// <inheritdoc/>
-        public bool TrySaveImmediate()
+        public bool TrySaveImmediate() => SaveImmediate() == SyncSaveResult.Written;
+
+        /// <inheritdoc/>
+        public SyncSaveResult SaveImmediate()
         {
+            if (!_isDirty) return SyncSaveResult.NotNeeded;
+            if (_disposed || _saveService == null) return SyncSaveResult.NotReady;
+
             // While loading, the fields are about to be replaced by the loaded data: nothing worth writing.
-            if (_saveService is not ISyncSaveService syncService || !_isDirty || IsLoading || !CheckCanSave())
-                return false;
+            if (IsLoading) return SyncSaveResult.Loading;
+            if (!CheckCanSave()) return SyncSaveResult.Blocked;
+            if (_saveService is not ISyncSaveService { SupportsSyncSave: true } syncService) return SyncSaveResult.Unsupported;
 
             var payload = ExtractPayload();
             var versionAtSaveStart = _dirtyVersion;
@@ -308,13 +360,16 @@ namespace _VuTH.Core.Persistent.DataPackage
                 var written = schema == null
                     ? syncService.TrySaveImmediate(StorageKey, payload)
                     : VersionedService.TrySaveImmediate(StorageKey, payload, schema);
-                if (!written) return false;
+                if (!written) return SyncSaveResult.Unsupported;
             }
             catch (Exception ex)
             {
                 this.LogError($"Immediate save failed for {StorageKey}: {ex.Message}");
-                return false;
+                OnSaveFailed(ex); // schedules the retry: callers must not save again
+                return SyncSaveResult.Failed;
             }
+
+            _failedSaves = 0;
 
             if (_isSaving)
             {
@@ -327,7 +382,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                 ClearDirty();
             }
 
-            return true;
+            return SyncSaveResult.Written;
         }
 
         public async UniTask SaveNowAsync()
@@ -344,6 +399,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
 
             _isSaving = true;
+            Exception? failure = null;
             var done = _saveLoopDone = new UniTaskCompletionSource();
             await _operationLock.WaitAsync();
             try
@@ -356,11 +412,13 @@ namespace _VuTH.Core.Persistent.DataPackage
                     if (_saveService == null || !_isDirty || !_canSave) break;
 
                     var payload = ExtractPayload();
+                    var key = StorageKey;
                     var versionAtSaveStart = _dirtyVersion;
 
                     try
                     {
-                        await SaveToServiceAsync(payload);
+                        await SaveToServiceAsync(key, payload);
+                        _failedSaves = 0;
 
                         if (_dirtyVersion == versionAtSaveStart)
                         {
@@ -374,7 +432,8 @@ namespace _VuTH.Core.Persistent.DataPackage
                     catch (Exception ex)
                     {
                         _isDirty = true;
-                        this.LogError($"Save failed for {StorageKey}: {ex.Message}");
+                        this.LogError($"Save failed for {key}: {ex.Message}");
+                        failure = ex;
                         break;
                     }
                 } while (_saveRequestedWhileSaving);
@@ -385,6 +444,56 @@ namespace _VuTH.Core.Persistent.DataPackage
                 _operationLock.Release();
                 done.TrySetResult();
             }
+
+            if (failure != null) OnSaveFailed(failure);
+        }
+
+        /// <summary>
+        /// Delay before saving again after <paramref name="failures"/> failed saves in a row (1 after the first
+        /// failure), or null to stop retrying (the next change and pause / quit still save). Default:
+        /// <c>1 &lt;&lt; failures</c> seconds, so 2, 4, 8, 16, 32, then stop.
+        /// </summary>
+        protected virtual TimeSpan? GetSaveRetryDelay(int failures) =>
+            failures > 5 ? null : TimeSpan.FromSeconds(1 << failures);
+
+        private void OnSaveFailed(Exception error)
+        {
+            _failedSaves++;
+            try
+            {
+                SaveFailed?.Invoke(this, error);
+            }
+            catch (Exception ex)
+            {
+                this.LogError($"A SaveFailed subscriber of '{StorageKey}' threw: {ex}");
+            }
+
+            // Without a retry, an Immediate package would only save again on its next change.
+            if (_retryScheduled || _disposed || Strategy == SaveStrategy.ManualOnly) return;
+
+            var delay = GetSaveRetryDelay(_failedSaves);
+            if (delay == null) return;
+
+            _retryScheduled = true;
+            RetrySaveAsync(delay.Value).Forget();
+        }
+
+        /// <summary>
+        /// Saves again after <paramref name="delay"/>. If a save loop is running by then, <see cref="SaveNowAsync"/> only
+        /// asks it for one more pass and waits for it: the retry never writes concurrently with another save.
+        /// </summary>
+        private async UniTaskVoid RetrySaveAsync(TimeSpan delay)
+        {
+            try
+            {
+                await UniTask.Delay(delay, DelayType.Realtime);
+            }
+            finally
+            {
+                _retryScheduled = false;
+            }
+
+            if (!_disposed && _isDirty && _canSave) await SaveNowAsync();
         }
 
         private bool CheckCanSave()
@@ -429,24 +538,40 @@ namespace _VuTH.Core.Persistent.DataPackage
 
             _pendingLoads++;
             await _operationLock.WaitAsync();
+            var key = StorageKey;
+            var stale = false;
             try
             {
-                var result = await LoadFromServiceAsync();
-                ApplyLoadResult(result);
+                var result = await LoadFromServiceAsync(key);
+
+                // The package moved to another slot while reading: this data belongs to the slot it left. The load
+                // started for the new slot (queued behind this one) applies the right data and releases the waiters.
+                stale = key != StorageKey;
+                if (!stale) ApplyLoadResult(result);
             }
             catch (Exception ex)
             {
-                LoadStatus = SaveLoadStatus.ReadFailed;
-                _canSave = false;
-                this.LogError($"Load failed for {StorageKey}: {ex.Message}");
+                stale = key != StorageKey;
+                if (!stale)
+                {
+                    LoadStatus = SaveLoadStatus.ReadFailed;
+                    _canSave = false;
+                    this.LogError($"Load failed for {StorageKey}: {ex.Message}");
+                }
             }
             finally
             {
                 _pendingLoads--;
                 if (!IsLoading) _warnedChangeWhileLoading = false;
                 _operationLock.Release();
-                if (!IsLoading) ApplyDeferredChanges();
-                _loadedSource.TrySetResult(null);
+                if (!IsLoading) ApplyPendingChanges();
+                if (!stale) _loadedSource.TrySetResult(null);
+            }
+
+            if (stale)
+            {
+                this.Log($"Ignored the data of '{key}' read before the package moved to '{StorageKey}'.");
+                return;
             }
 
             if (!_canSave) RaiseSaveBlocked();
@@ -547,6 +672,11 @@ namespace _VuTH.Core.Persistent.DataPackage
             {
                 _operationLock.Release();
             }
+
+            // Changes kept while the unreadable save blocked saving (e.g. a restored purchase) apply to the new data.
+            var blocked = _blockedChanges.ToArray();
+            _blockedChanges.Clear();
+            Apply(blocked);
         }
 
         /// <summary>
@@ -574,11 +704,6 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         /// <inheritdoc/>
         public abstract void InjectPayload(TData data);
-
-        // Explicit implementation for non-generic IPersistencePackage
-        object IPersistencePackage.ExtractPayload() => ExtractPayload()!;
-
-        void IPersistencePackage.InjectPayload(object data) => InjectPayload((TData)data);
 
         /// <summary>
         /// Runs <paramref name="loadAction"/> without marking the package dirty. Loading already does this around
@@ -622,6 +747,7 @@ namespace _VuTH.Core.Persistent.DataPackage
             foreach (var field in _fields) field.Dispose();
             _fields.Clear();
             _deferredChanges.Clear();
+            _blockedChanges.Clear();
 
             _dirtySubject.OnNext(false);
             _dirtySubject.Dispose();

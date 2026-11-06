@@ -13,7 +13,10 @@ namespace _VuTH.Core.Persistent.DataPackage
     {
         void RegisterPackage(IPersistencePackage package);
         void UnregisterPackage(IPersistencePackage package);
+        /// <summary>The package of type <typeparamref name="T"/>; logs a warning when there is none.</summary>
         T? GetPackage<T>() where T : class, IPersistencePackage;
+
+        /// <summary>The package of type <typeparamref name="T"/>, if any (no warning when there is none).</summary>
         bool TryGetPackage<T>(out T? package) where T : class, IPersistencePackage;
         void SaveAll();
         UniTask SaveAllAsync();
@@ -25,7 +28,9 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         /// <summary>
         /// Deletes the stored data of every package (shared ones, and slot-scoped ones in the active slot) and resets
-        /// them to their defaults. For "reset progress" or a player's data deletion request.
+        /// them to their defaults. For "reset progress" or a player's data deletion request. Waits for a slot switch in
+        /// progress. A package that fails does not stop the others: the failures are thrown together at the end
+        /// (<see cref="System.AggregateException"/>).
         /// </summary>
         UniTask DeleteAllAsync();
 
@@ -45,6 +50,12 @@ namespace _VuTH.Core.Persistent.DataPackage
         /// stored data could not be read. Tell the player instead of letting the changes pile up and be lost.
         /// </summary>
         event System.Action<IPersistencePackage> OnSaveBlocked;
+
+        /// <summary>
+        /// Raised when a package's save failed (<see cref="IPersistencePackage.SaveFailed"/>); the package retries on its
+        /// own. Use it to warn the player when the device is out of storage.
+        /// </summary>
+        event System.Action<IPersistencePackage, System.Exception> OnSaveFailed;
         int PackageCount { get; }
     }
 }

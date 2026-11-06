@@ -6,6 +6,7 @@ using _VuTH.Core.Persistent.SaveSystem;
 using _VuTH.Core.Persistent.SaveSystem.Backend;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using R3;
 using UnityEngine;
 using UnityEngine.TestTools;
 using Object = UnityEngine.Object;
@@ -95,7 +96,7 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.PlayMode
                 .GetValue(manager);
             Assert.IsNotNull(hook, "created by the manager itself");
 
-            Assert.AreEqual(1, hook.FlushAllImmediate(), "the pause / quit path writes the package");
+            Assert.AreEqual(1, hook.FlushAllImmediate().Written, "the pause / quit path writes the package");
             Assert.IsFalse(package.IsDirty);
 
             await RestartDataManagerAsync();
@@ -161,6 +162,102 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.PlayMode
 
             await RestartDataManagerAsync();
             Assert.AreEqual(SaveLoadStatus.NotFound, _dataManager.GetPackage<PlayerProfilePackage>().LoadStatus);
+        });
+
+        /// <summary>A backend with no synchronous path.</summary>
+        private sealed class AsyncOnlyBackend : ISaveBackend
+        {
+            private readonly System.Collections.Generic.Dictionary<string, string> _data = new();
+
+            public UniTask SaveRawAsync(string key, string data, System.Threading.CancellationToken cancellationToken = default)
+            {
+                _data[key] = data;
+                return UniTask.CompletedTask;
+            }
+
+            public UniTask<string> LoadRawAsync(string key, System.Threading.CancellationToken cancellationToken = default) =>
+                UniTask.FromResult(_data.TryGetValue(key, out var data) ? data : null);
+
+            public UniTask<bool> ExistsAsync(string key, System.Threading.CancellationToken cancellationToken = default) =>
+                UniTask.FromResult(_data.ContainsKey(key));
+
+            public UniTask DeleteAsync(string key, System.Threading.CancellationToken cancellationToken = default)
+            {
+                _data.Remove(key);
+                return UniTask.CompletedTask;
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator OnAppClosePackage_WithoutASyncBackend_IsWarnedAboutAtStartup() => UniTask.ToCoroutine(async () =>
+        {
+            _saveManager = new GameObject("SaveServiceManager").AddComponent<SaveServiceManager>();
+            _saveManager.WithBackend(new AsyncOnlyBackend());
+            var manager = await StartAsync();
+            Assert.IsFalse(_saveManager.SupportsSyncSave);
+
+            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex(
+                "'test_on_close' \\(OnAppClose\\) is flushed on pause / quit, but the save backend has no synchronous path"));
+            var package = new OnClosePackage();
+            manager.RegisterPackage(package);
+            await package.WaitUntilLoadedAsync();
+        });
+
+        private static bool IsDisposed(IPersistencePackage package)
+        {
+            for (var type = package.GetType(); type != null; type = type.BaseType)
+            {
+                var field = type.GetField("_disposed", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field != null) return (bool)field.GetValue(package);
+            }
+
+            throw new InvalidOperationException("No _disposed field.");
+        }
+
+        [UnityTest]
+        public IEnumerator ConfiguredPackages_AreFlushedThenDisposed_WithTheManager() => UniTask.ToCoroutine(async () =>
+        {
+            var manager = await StartAsync();
+            var profile = manager.GetPackage<PlayerProfilePackage>();
+            await profile.WaitUntilLoadedAsync();
+            var completed = false;
+            using var subscription = profile.Gold.Observable.Subscribe(_ => { }, _ => completed = true);
+
+            profile.Gold.Value = 70;
+            Object.DestroyImmediate(_dataManager.gameObject); // deinitialized right after the change
+            await UniTask.NextFrame();
+
+            Assert.IsTrue(IsDisposed(profile), "the manager created it from the profile, so it disposes it");
+            Assert.IsTrue(completed, "its fields are disposed with it, completing their subscriptions");
+
+            await StartAsync();
+            var restored = _dataManager.GetPackage<PlayerProfilePackage>();
+            Assert.AreNotSame(profile, restored, "a new initialization creates new instances");
+            Assert.IsFalse(IsDisposed(restored));
+            Assert.AreEqual(70, restored.Gold.Value, "the change was flushed before the package was disposed");
+        });
+
+        [UnityTest]
+        public IEnumerator PackageRegisteredByTheGame_IsNotDisposedWithTheManager() => UniTask.ToCoroutine(async () =>
+        {
+            var manager = await StartAsync();
+            var package = new OnClosePackage();
+            manager.RegisterPackage(package);
+            await package.WaitUntilLoadedAsync();
+            package.Set(3);
+
+            Object.DestroyImmediate(_dataManager.gameObject);
+            await UniTask.NextFrame();
+
+            Assert.IsFalse(IsDisposed(package), "the game owns it");
+            Assert.IsFalse(package.IsDirty, "still flushed on deinitialization");
+
+            await StartAsync();
+            var reloaded = new OnClosePackage();
+            _dataManager.RegisterPackage(reloaded);
+            await reloaded.WaitUntilLoadedAsync();
+            Assert.AreEqual(3, reloaded.Value);
+            package.Dispose();
         });
 
         [UnityTest]

@@ -13,6 +13,7 @@ namespace _VuTH.Core.Audio.Tests.EditMode
         {
             public readonly List<(string Key, bool Sync)> Saves = new();
             public bool SupportsSync = true;
+            public bool SupportsSyncSave => SupportsSync;
 
             public bool TrySaveImmediate<T>(string key, T data)
             {

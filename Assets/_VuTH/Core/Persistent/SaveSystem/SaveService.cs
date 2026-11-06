@@ -71,6 +71,9 @@ namespace _VuTH.Core.Persistent.SaveSystem
         #region Save
 
         /// <inheritdoc />
+        public bool SupportsSyncSave => _backend is ISyncSaveBackend;
+
+        /// <inheritdoc />
         public bool TrySaveImmediate<T>(string key, T data) => TrySaveImmediateCore(key, data, null);
 
         /// <inheritdoc />

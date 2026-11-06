@@ -44,6 +44,8 @@ namespace _VuTH.Core.Persistent.DataPackage
         private UniTaskCompletionSource _readySource = new();
         private string? _activeSlot;
         private bool _configuredPackagesLoaded;
+        // Created by this manager from the profile, disposed by it on deinitialization (no one else owns them).
+        private readonly HashSet<IPersistencePackage> _retiredPackages = new();
         private bool _initializationStarted;
         private bool _initialized;
 
@@ -83,10 +85,13 @@ namespace _VuTH.Core.Persistent.DataPackage
         }
 
         /// <summary>
-        /// Registers <see cref="SaveLifecycleHook"/> as an ENTRY POINT so VContainer calls its
-        /// <c>IInitializable.Initialize()</c> (subscribing to focus / pause / quit) and <c>Dispose()</c>.
-        /// A plain <c>Register&lt;SaveLifecycleHook&gt;()</c> is only resolvable as its concrete type: Initialize was
-        /// never called, so the pause / quit flushes never ran.
+        /// Registers <see cref="SaveLifecycleHook"/> as an entry point, so VContainer initializes it (subscribing to
+        /// focus / pause / quit) and disposes it with the scope.
+        /// <para>
+        /// The injected hook takes precedence: <see cref="Construct"/> runs before <see cref="InitializeBootstrap"/>, so
+        /// <c>EnsureLifecycleHook</c> finds it and creates none. The manager only creates (and disposes) its own hook
+        /// when nothing injected one, e.g. without VContainer.
+        /// </para>
         /// </summary>
         internal static void RegisterLifecycleHook(IContainerBuilder builder)
         {
@@ -163,9 +168,22 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         private void BeginInitializePackages(IReadOnlyList<IPersistencePackage> initialPackages)
         {
+            var replaced = false;
             foreach (var package in initialPackages)
             {
+                // Disposed by an earlier deinitialization: replaced by new instances from the profile.
+                if (_retiredPackages.Contains(package))
+                {
+                    replaced = true;
+                    continue;
+                }
+
                 TryAddPackage(package);
+            }
+
+            if (replaced && !ReferenceEquals(initialPackages, _configuredPackages))
+            {
+                foreach (var package in GetConfiguredPackages()) TryAddPackage(package);
             }
 
             if (_initializationStarted) return;
@@ -231,6 +249,12 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             if (_registry.Contains(package)) return false;
 
+            if (package is not IManagedPersistencePackage managed)
+            {
+                this.LogError($"Package {package.GetType().Name} is not registered: derive it from PersistencePackage<TData>.");
+                return false;
+            }
+
             // Checked before SetSlot, which resets the package's data: a rejected package must stay untouched.
             var key = package.IsSlotScoped ? SaveSlots.GetKey(_activeSlot, package.BaseStorageKey) : package.StorageKey;
             var owner = _registry.FindByKey(key);
@@ -241,7 +265,7 @@ namespace _VuTH.Core.Persistent.DataPackage
                 return false;
             }
 
-            if (package.IsSlotScoped) package.SetSlot(_activeSlot);
+            if (package.IsSlotScoped) managed.SetSlot(_activeSlot);
             if (!_registry.TryAdd(package, out var error))
             {
                 if (error != null) this.LogError(error);
@@ -249,8 +273,26 @@ namespace _VuTH.Core.Persistent.DataPackage
             }
 
             package.SaveBlocked += OnPackageSaveBlocked;
+            package.SaveFailed += OnPackageSaveFailed;
             return true;
         }
+
+        private static IManagedPersistencePackage Managed(IPersistencePackage package) => (IManagedPersistencePackage)package;
+
+        private void OnPackageSaveFailed(IPersistencePackage package, Exception error)
+        {
+            try
+            {
+                OnSaveFailed?.Invoke(package, error);
+            }
+            catch (Exception e)
+            {
+                this.LogError($"An OnSaveFailed subscriber threw: {e}");
+            }
+        }
+
+        /// <inheritdoc />
+        public event Action<IPersistencePackage, Exception>? OnSaveFailed;
 
         private void OnPackageSaveBlocked(IPersistencePackage package)
         {
@@ -288,7 +330,8 @@ namespace _VuTH.Core.Persistent.DataPackage
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                package.SetSaveService(_saveService);
+                Managed(package).SetSaveService(_saveService);
+                WarnIfNotSavedOnClose(package);
                 await package.LoadAsync();
 
                 if (!_registry.Contains(package))
@@ -304,6 +347,20 @@ namespace _VuTH.Core.Persistent.DataPackage
             {
                 _initializingPackages.Remove(package);
             }
+        }
+
+        /// <summary>
+        /// Saved on pause / quit only works synchronously: say so at startup, not when the data is already lost.
+        /// </summary>
+        private void WarnIfNotSavedOnClose(IPersistencePackage package)
+        {
+            if (package.Strategy is not (SaveStrategy.OnAppClose or SaveStrategy.Debounced)) return;
+            if (_saveService is ISyncSaveService { SupportsSyncSave: true }) return;
+
+            this.LogWarning($"'{package.StorageKey}' ({package.Strategy}) is flushed on pause / quit, but the save " +
+                            "backend has no synchronous path (ISyncSaveBackend): changes still pending then are likely " +
+                            (package.Strategy == SaveStrategy.OnAppClose ? "LOST. " : "lost. ") +
+                            "Use a backend implementing ISyncSaveBackend, or the Immediate strategy.");
         }
 
         private IReadOnlyList<IPersistencePackage> GetConfiguredPackages()
@@ -339,18 +396,24 @@ namespace _VuTH.Core.Persistent.DataPackage
         protected override void DeinitializeBootstrap()
         {
             // Deinit usually runs while the app is quitting / the scene is being torn down, where an async
-            // continuation may never run. Write synchronously when possible; async only as a fallback.
-            var dirtyPackages = _registry.Snapshot()
-                .AsValueEnumerable()
-                .Where(package => package.IsDirty &&
-                                  !(package is ISyncPersistencePackage sync && sync.TrySaveImmediate()))
-                .ToList();
+            // continuation may never run. Write synchronously; async only for packages without a sync path (a failed
+            // write already scheduled its retry, a blocked or loading package has nothing to write).
+            var dirtyPackages = SaveLifecycleHook.Flush(_registry.Snapshot()).Unsupported;
 
-            FlushDirtyPackagesAsync(dirtyPackages).Forget();
+            // The packages this manager created are disposed once flushed (their fields' subscriptions with them).
+            var owned = new List<IPersistencePackage>(_configuredPackages);
+            _retiredPackages.UnionWith(owned);
+            _configuredPackages.Clear();
+            _configuredPackagesLoaded = false;
+            FlushThenDisposeAsync(dirtyPackages, owned).Forget();
 
             _savePipeline.Clear();
 
-            foreach (var package in _registry.Snapshot()) package.SaveBlocked -= OnPackageSaveBlocked;
+            foreach (var package in _registry.Snapshot())
+            {
+                package.SaveBlocked -= OnPackageSaveBlocked;
+                package.SaveFailed -= OnPackageSaveFailed;
+            }
 
             if (_ownsLifecycleHook)
             {
@@ -375,11 +438,29 @@ namespace _VuTH.Core.Persistent.DataPackage
             this.Log("DataPersistenceManager deinitialized.");
         }
 
-        private static async UniTask FlushDirtyPackagesAsync(IReadOnlyList<IPersistencePackage> packages)
+        private async UniTask FlushThenDisposeAsync(IReadOnlyList<IPersistencePackage> dirty,
+            IReadOnlyList<IPersistencePackage> owned)
         {
-            foreach (var package in packages)
+            try
             {
-                await package.SaveNowAsync();
+                foreach (var package in dirty)
+                {
+                    await package.SaveNowAsync();
+                }
+            }
+            finally
+            {
+                foreach (var package in owned)
+                {
+                    try
+                    {
+                        (package as IDisposable)?.Dispose();
+                    }
+                    catch (Exception e)
+                    {
+                        this.LogError($"Disposing package '{package.StorageKey}' threw: {e}");
+                    }
+                }
             }
         }
 
@@ -424,6 +505,7 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             if (!_registry.Remove(package)) return;
             package.SaveBlocked -= OnPackageSaveBlocked;
+            package.SaveFailed -= OnPackageSaveFailed;
 
             _initializedPackages.Remove(package);
             _initializingPackages.Remove(package);
@@ -545,8 +627,9 @@ namespace _VuTH.Core.Persistent.DataPackage
                     await SaveUntilCleanAsync(package);
 
                     // ...and the package moves right after, with no await in between: no change can slip into the gap.
-                    package.SetSlot(slot);
-                    if (_saveService != null) package.SetSaveService(_saveService);
+                    var managed = Managed(package);
+                    managed.SetSlot(slot);
+                    if (_saveService != null) managed.SetSaveService(_saveService);
                     loads.Add(package.LoadAsync()); // marks it loading at once: later changes wait for the new data
                 }
 
@@ -593,20 +676,13 @@ namespace _VuTH.Core.Persistent.DataPackage
             slot = string.IsNullOrEmpty(slot) ? null : slot;
             var saveService = _saveService ?? throw new InvalidOperationException("No save service.");
 
-            foreach (var package in _registry.Snapshot())
+            await DeleteEachAsync(_registry.Snapshot().AsValueEnumerable().Where(p => p.IsSlotScoped).ToList(), package =>
             {
-                if (!package.IsSlotScoped) continue;
+                if (slot != _activeSlot) return saveService.DeleteAsync(SaveSlots.GetKey(slot, package.BaseStorageKey));
 
-                if (slot == _activeSlot)
-                {
-                    package.SetSaveService(saveService);
-                    await package.DeleteAsync();
-                }
-                else
-                {
-                    await saveService.DeleteAsync(SaveSlots.GetKey(slot, package.BaseStorageKey));
-                }
-            }
+                Managed(package).SetSaveService(saveService);
+                return package.DeleteAsync();
+            });
         }
 
         /// <inheritdoc />
@@ -614,11 +690,45 @@ namespace _VuTH.Core.Persistent.DataPackage
         {
             var saveService = _saveService ?? throw new InvalidOperationException("No save service.");
 
-            foreach (var package in _registry.Snapshot())
+            // Not during a slot switch: packages would be deleted in one slot and reset in the other.
+            await _slotGate.WaitAsync();
+            try
             {
-                package.SetSaveService(saveService);
-                await package.DeleteAsync();
+                await DeleteEachAsync(_registry.Snapshot(), package =>
+                {
+                    Managed(package).SetSaveService(saveService);
+                    return package.DeleteAsync();
+                });
             }
+            finally
+            {
+                _slotGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// Deletes every package even if some fail (a package that cannot create its defaults deletes nothing), then
+        /// throws the failures together.
+        /// </summary>
+        private async UniTask DeleteEachAsync(IReadOnlyList<IPersistencePackage> packages,
+            Func<IPersistencePackage, UniTask> delete)
+        {
+            List<Exception>? errors = null;
+            foreach (var package in packages)
+            {
+                try
+                {
+                    await delete(package);
+                }
+                catch (Exception e)
+                {
+                    this.LogError($"Could not delete '{package.StorageKey}': {e.Message}");
+                    (errors ??= new List<Exception>()).Add(e);
+                }
+            }
+
+            if (errors != null)
+                throw new AggregateException($"{errors.Count} of {packages.Count} package(s) could not be deleted.", errors);
         }
 
         #endregion
@@ -634,7 +744,7 @@ namespace _VuTH.Core.Persistent.DataPackage
 
         public bool TryGetPackage<T>(out T? package) where T : class, IPersistencePackage
         {
-            package = GetPackage<T>();
+            package = _registry.Find<T>(); // a Try method: not finding it is an expected outcome, no warning
             return package != null;
         }
 

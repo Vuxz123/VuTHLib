@@ -46,26 +46,31 @@ public interface IDataPersistenceManager : ICommonManager
 {
     void RegisterPackage(IPersistencePackage package);
     void UnregisterPackage(IPersistencePackage package);
-    T? GetPackage<T>() where T : class, IPersistencePackage;
-    bool TryGetPackage<T>(out T? package) where T : class, IPersistencePackage;
+    T? GetPackage<T>() where T : class, IPersistencePackage;     // warns when missing
+    bool TryGetPackage<T>(out T? package) where T : class, IPersistencePackage; // no warning
     void SaveAll();
     UniTask SaveAllAsync();
     void LoadAll(bool discardUnsavedChanges = false);
     UniTask LoadAllAsync(bool discardUnsavedChanges = false); // skips dirty packages unless discarding
     UniTask WaitUntilReadyAsync(CancellationToken ct = default); // throws if init failed (e.g. no save service)
-    UniTask DeleteAllAsync();                                    // see Deleting Data
+    UniTask DeleteAllAsync();                                    // see Deleting Data (waits for a slot switch)
 
     string? ActiveSlot { get; }                                  // see Save Slots
     UniTask SwitchSlotAsync(string? slot, CancellationToken ct = default);
     UniTask DeleteSlotAsync(string? slot);
 
     event Action<IPersistencePackage> OnSaveBlocked;             // a package's save could not be read: tell the player
+    event Action<IPersistencePackage, Exception> OnSaveFailed;   // a write failed (e.g. disk full); retried on its own
     int PackageCount { get; }
 }
 ```
 
 Packages created from the DataPackage profile are made by `Activator`, not by the container. With VContainer their
 `[Inject]` members are injected once the root scope is built.
+
+The manager owns these packages: when it is deinitialized, it flushes them, then disposes them with their fields. A
+new initialization creates new instances from the profile; a container built before still holds the disposed ones, so
+rebuild the scope too.
 
 If the manager cannot start (no save service), `WaitUntilReadyAsync()` and the packages' `WaitUntilLoadedAsync()`
 throw instead of waiting forever.
@@ -77,7 +82,8 @@ SaveService and 100 for DataPersistence.
 
 `SaveLifecycleHook` flushes dirty `Debounced` and `OnAppClose` packages. With VContainer it is registered as an
 entry point. Without VContainer, or when the manager is not created through the root scope, the manager creates and
-disposes its own, so these packages are flushed in every setup:
+disposes its own, so these packages are flushed in every setup. An injected hook always wins: the manager only creates
+one when nothing was injected.
 
 | Event | Save |
 |-------|------|
@@ -85,8 +91,20 @@ disposes its own, so these packages are flushed in every setup:
 | Pause (home button / app switch) | **synchronous**: the OS may kill the app right after |
 | Quit | **synchronous**: Unity does not wait for async work |
 
-A synchronous save needs a backend implementing `ISyncSaveBackend`, which both built-in backends do. Otherwise the
-hook falls back to a best-effort async save. Call `FlushAllImmediate()` yourself before a forced restart.
+A synchronous save needs a backend implementing `ISyncSaveBackend`, which both built-in backends do. Without one:
+
+- on pause, the package is saved asynchronously, with a warning: the save only completes if the app resumes;
+- on quit, the package is reported as **not saved** (an error): Unity runs no async work while quitting;
+- at startup, the manager already warns about every `OnAppClose` / `Debounced` package, since they rely on this flush.
+
+`FlushAllImmediate()` only does the synchronous part and returns a `FlushReport`: `Written`, `Unsupported` (dirty
+packages without a sync path, not saved; only an async save can still write them) and `Failed` (the write threw; already
+reported through `SaveFailed`, which retries, so do not save them again). Packages that are loading or whose saving is
+blocked have nothing to write and are in neither list. Call it yourself before a forced restart.
+
+`package.SaveImmediate()` gives the reason for one package as a `SyncSaveResult`: `Written`, `NotNeeded`, `Loading`,
+`Blocked`, `NotReady`, `Unsupported` or `Failed`. Only fall back to an async save on `Unsupported`.
+`TrySaveImmediate()` is the same as a bool (true when written).
 
 ---
 
@@ -119,6 +137,10 @@ await manager.DeleteSlotAsync("2");
 its defaults without saving and re-enables saving if a failed load had disabled it. `manager.DeleteAllAsync()` does
 this for every package: use it for "reset progress" or a player's data deletion request.
 
+`DeleteAllAsync()` waits for a slot switch in progress, so packages are never deleted in one slot and reset in the
+other. A package that fails, for example one whose `CreateDefaultPayload()` throws (it then deletes nothing), does not
+stop the others. The failures are thrown together at the end as an `AggregateException`.
+
 The defaults come from `CreateDefaultPayload()`, which by default is a new DTO (its field initializers). Override it
 when the package defaults differ from the DTO's.
 
@@ -134,7 +156,6 @@ public interface IPersistencePackage
     string StorageKey { get; }     // BaseStorageKey, prefixed with the save slot when slot scoped
     string BaseStorageKey { get; }
     bool IsSlotScoped { get; }
-    void SetSlot(string? slot);    // called by the manager
     SaveStrategy Strategy { get; }
     bool IsDirty { get; }
     Observable<bool> DirtyObservable { get; }
@@ -143,19 +164,22 @@ public interface IPersistencePackage
     SaveLoadStatus? LoadStatus { get; } // null until the first load completed
     bool CanSave { get; }               // false when overwriting would lose stored data (see Load Safety)
     event Action<IPersistencePackage> SaveBlocked; // raised when a load leaves CanSave false
+    event Action<IPersistencePackage, Exception> SaveFailed; // raised when a write fails; retried on its own
     UniTask WaitUntilLoadedAsync(CancellationToken ct = default); // throws if the package cannot load (no save service)
 
-    void SetSaveService(ISaveService saveService);
     void MarkDirty();
-    object ExtractPayload();
-    void InjectPayload(object data);
-    void SaveNow();
     UniTask SaveNowAsync();       // completes once the newest data is written, even when it joins a running save
-    void Load();
     UniTask LoadAsync();
     UniTask DeleteAsync();        // see Deleting Data
 }
 ```
+
+Moving a package to a save slot and giving it its save service are internal to the manager: game code cannot move a
+package to another slot without the save before and the load after. `PersistencePackage<TData>` still offers
+`SetSaveService` (to use a package without the manager, e.g. in tests) and the fire-and-forget `SaveNow()` / `Load()`.
+
+A load that was reading the previous slot when the package moved is ignored: the data of the slot being left is never
+shown, and `WaitUntilLoadedAsync()` waits for the load of the new slot.
 
 ### PersistencePackage&lt;TData&gt;
 
@@ -169,6 +193,11 @@ at startup, use `Modify`, which applies it right after the load. Otherwise await
 ```csharp
 profile.Modify(() => profile.Gold.Value += restoredGold);
 ```
+
+While saving is blocked (the stored data could not be loaded, see below), a `Modify` change is applied, so the game
+shows it, and kept. It is applied again on the data of the next successful load, or after `DeleteAsync()`, and then
+saved. Changes deferred by a load that fails are kept the same way. A change can therefore run more than once, each
+time on different data: only make relative changes (add the restored gold), never ones that copy state from elsewhere.
 
 **Batches.** `BatchChanges()` groups several changes into one. The package is marked dirty once, when the scope
 ends, so `Immediate` never saves a state with only some of the changes applied:
@@ -187,6 +216,11 @@ saved when the scope ends. Validate first, for example with `TrySetValue`, then 
 **Save blocked.** When a load leaves `CanSave` false, the package raises `SaveBlocked` and the manager raises
 `OnSaveBlocked`. Tell the player, for example "your save could not be loaded, contact support". Otherwise the changes
 pile up in memory and are lost when the app closes.
+
+**Save failed.** When a write fails (disk full, I/O error), the package stays dirty and raises `SaveFailed`; the
+manager raises `OnSaveFailed`. `Immediate` and `Debounced` packages retry on their own after 2, 4, 8, 16 and 32 seconds,
+then stop until the next change or pause / quit. A successful save resets the count. Override
+`GetSaveRetryDelay(failures)` to change the delays; return null to stop. `ManualOnly` packages are never retried.
 
 The loads, saves and deletes of one package run one after another, never interleaved. A load waits for a save that is
 still being written, and two loads never mix.

@@ -93,6 +93,8 @@ namespace _VuTH.Core.Persistent.DataPackage.Tests.EditMode
                 return UniTask.CompletedTask;
             }
 
+            public bool SupportsSyncSave => true;
+
             public bool TrySaveImmediate<T>(string key, T data)
             {
                 Saves.Add(((Dto)(object)data).Value);
