@@ -20,6 +20,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 
         public XorEncryptor(string keyString)
         {
+            if (string.IsNullOrEmpty(keyString))
+                throw new ArgumentException("Key cannot be null or empty.", nameof(keyString));
             // Generate a consistent key from the string
             _key = GenerateKey(keyString);
         }

@@ -67,6 +67,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
         /// <inheritdoc />
         public bool SupportsSyncSave => _saveService != null && _saveService.SupportsSyncSave;
 
+        /// <inheritdoc />
         public bool TrySaveImmediate<T>(string key, T data)
         {
             return _saveService != null && _saveService.TrySaveImmediate(key, data);

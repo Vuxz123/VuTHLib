@@ -7,6 +7,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Serialize
     /// <summary>
     /// JSON-based serializer using System.Text.Json.
     /// Pluggable implementation of ISerializer.
+    /// Unity's SerializeField and FormerlySerializedAs attributes are not supported: private Unity fields and
+    /// renamed-field aliases require NewtonsoftJsonSerializer with UnityContractResolver instead.
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Serialize", sourceAssembly: "VuTH.Persistant.SaveSystem")]

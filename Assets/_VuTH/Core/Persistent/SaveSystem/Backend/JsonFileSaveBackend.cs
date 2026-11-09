@@ -3,6 +3,7 @@ using UnityEngine.Scripting.APIUpdating;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
@@ -20,7 +21,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Backend", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class JsonFileSaveBackend : ISaveBackend, ISyncSaveBackend
+    public class JsonFileSaveBackend : IOrderedSaveBackend, ISyncSaveBackend
     {
         private const string Extension = ".json";
 
@@ -32,7 +33,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         [NonSerialized] private Dictionary<string, long>? _committedTickets;
         [NonSerialized] private long _lastTicket;
 
-        private long TakeTicket() => Interlocked.Increment(ref _lastTicket);
+        public long ReserveWrite() => Interlocked.Increment(ref _lastTicket);
 
         /// <summary>Swaps the temp file in unless a newer write of the same file already was; true if swapped.</summary>
         private bool Commit(string tempPath, string filePath, long ticket)
@@ -64,10 +65,27 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         #region Paths
 
         /// <summary>
-        /// File of a key. Keys with characters that are invalid in file names get a hash suffix, so two keys that
-        /// sanitize to the same name ("a/b" and "a_b") never share a file.
+        /// Versioned SHA-256 name for every key, with no literal-key names in the new namespace. Lowercase hex
+        /// preserves case-sensitive key identity on Windows and bounds filename length for long Unicode keys.
         /// </summary>
         internal string GetFilePath(string key)
+        {
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            // Encode code units directly so even unpaired surrogates remain distinct (UTF8 replacement would not).
+            var bytes = new byte[key.Length * 2];
+            for (var i = 0; i < key.Length; i++)
+            {
+                bytes[i * 2] = (byte)key[i];
+                bytes[i * 2 + 1] = (byte)(key[i] >> 8);
+            }
+            using var hash = SHA256.Create();
+            var encoded = new StringBuilder(64);
+            foreach (var b in hash.ComputeHash(bytes)) encoded.Append(b.ToString("x2"));
+            return Path.Combine(BasePath, ".vuth-keys-v2", encoded + Extension);
+        }
+
+        // Historical names are read-only: their key identity was ambiguous, so never modify them.
+        private string GetPreviousFilePath(string key)
         {
             var sanitized = Sanitize(key);
             var fileName = sanitized == key ? key : $"{sanitized}-{StableHash(key):x8}";
@@ -88,6 +106,11 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         {
             var path = GetFilePath(key);
             if (File.Exists(path)) return path;
+            if (File.Exists(path + ".deleted")) return null;
+
+            var previous = GetPreviousFilePath(key);
+            if (File.Exists(previous)) return previous;
+            if (File.Exists(previous + ".deleted")) return null;
 
             var legacy = GetLegacyFilePath(key);
             return legacy != null && File.Exists(legacy) ? legacy : null;
@@ -124,12 +147,12 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         /// <summary>Synchronous write used for app pause / quit flushes.</summary>
         public void SaveRaw(string key, string data)
         {
-            var ticket = TakeTicket();
+            var ticket = ReserveWrite();
             var filePath = GetFilePath(key);
             var tempPath = PrepareTempPath(filePath);
             try
             {
-                File.WriteAllText(tempPath, data);
+                WriteDurably(tempPath, data);
                 Commit(tempPath, filePath, ticket);
             }
             catch
@@ -139,15 +162,24 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             }
         }
 
-        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
+        public UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default) =>
+            SaveRawOrderedAsync(key, data, ReserveWrite(), cancellationToken);
+
+        public async UniTask SaveRawOrderedAsync(string key, string data, long ticket, CancellationToken cancellationToken = default)
         {
-            // Taken before writing: a synchronous flush made while this write runs is newer and must win.
-            var ticket = TakeTicket();
+            cancellationToken.ThrowIfCancellationRequested();
             var filePath = GetFilePath(key);
             var tempPath = PrepareTempPath(filePath);
             try
             {
-                await File.WriteAllTextAsync(tempPath, data, cancellationToken);
+                var bytes = Encoding.UTF8.GetBytes(data);
+                using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                           4096, useAsync: true))
+                {
+                    await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken);
+                    stream.Flush(flushToDisk: true);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
                 Commit(tempPath, filePath, ticket);
             }
             catch
@@ -155,6 +187,14 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
                 TryDelete(tempPath);
                 throw;
             }
+        }
+
+        private static void WriteDurably(string path, string data)
+        {
+            var bytes = Encoding.UTF8.GetBytes(data);
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(flushToDisk: true);
         }
 
         /// <summary>Unique per write: a sync flush and an in-flight async save never share a temp file.</summary>
@@ -173,16 +213,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
                 return;
             }
 
-            try
-            {
-                // Atomic rename on Windows / Unix (Android, iOS, macOS).
-                File.Replace(tempPath, filePath, destinationBackupFileName: null);
-            }
-            catch (Exception ex) when (ex is PlatformNotSupportedException or IOException)
-            {
-                File.Copy(tempPath, filePath, overwrite: true);
-                File.Delete(tempPath);
-            }
+            // Fail safely on platforms without atomic replacement; never truncate the live save as a fallback.
+            File.Replace(tempPath, filePath, destinationBackupFileName: null);
         }
 
         private static void TryDelete(string path)
@@ -229,7 +261,25 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
             // The legacy file is not deleted: its name is also the file of the key it sanitized to ("a/b" → "a_b"),
             // which may hold another key's data.
             var filePath = GetFilePath(key);
-            if (File.Exists(filePath)) File.Delete(filePath);
+            lock (this)
+            {
+                // Persist before deleting the current file. A later save wins over the marker, but deleting that
+                // save must still block legacy fallback after a restart. Never remove the marker on writes.
+                if (!File.Exists(filePath + ".deleted"))
+                {
+                    var marker = filePath + ".deleted";
+                    var temp = PrepareTempPath(marker);
+                    try
+                    {
+                        WriteDurably(temp, string.Empty);
+                        SwapIn(temp, marker);
+                    }
+                    finally { TryDelete(temp); }
+                }
+                if (File.Exists(filePath)) File.Delete(filePath);
+                _committedTickets ??= new Dictionary<string, long>();
+                _committedTickets[filePath] = ReserveWrite();
+            }
 
             return UniTask.CompletedTask;
         }

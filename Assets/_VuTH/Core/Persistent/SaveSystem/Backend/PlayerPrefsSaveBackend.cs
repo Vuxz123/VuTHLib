@@ -1,6 +1,7 @@
 using UnityEngine.Scripting.APIUpdating;
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
@@ -19,21 +20,39 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
     /// </summary>
     [Serializable]
     [MovedFrom(true, sourceNamespace: "_VuTH.Core.Persistant.SaveSystem.Backend", sourceAssembly: "VuTH.Persistant.SaveSystem")]
-    public class PlayerPrefsSaveBackend : ISaveBackend, ISyncSaveBackend
+    public class PlayerPrefsSaveBackend : IOrderedSaveBackend, ISyncSaveBackend
     {
         [NonSerialized] private UniTaskCompletionSource? _pendingFlush;
+        [NonSerialized] private long _lastTicket;
+        [NonSerialized] private Dictionary<string, long>? _writtenTickets;
+
+        public long ReserveWrite() => Interlocked.Increment(ref _lastTicket);
+
+        // Accessed only on Unity's main thread, like PlayerPrefs itself.
+        private bool Write(string key, string data, long ticket)
+        {
+            _writtenTickets ??= new Dictionary<string, long>();
+            if (_writtenTickets.TryGetValue(key, out var written) && written > ticket) return false;
+            PlayerPrefs.SetString(key, data);
+            _writtenTickets[key] = ticket;
+            return true;
+        }
 
         /// <summary>Synchronous write for app pause / quit. Must be called on the main thread.</summary>
         public void SaveRaw(string key, string data)
         {
-            PlayerPrefs.SetString(key, data);
+            Write(key, data, ReserveWrite());
             PlayerPrefs.Save();
         }
 
-        public async UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
+        public UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default) =>
+            SaveRawOrderedAsync(key, data, ReserveWrite(), cancellationToken);
+
+        public async UniTask SaveRawOrderedAsync(string key, string data, long ticket, CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
-            PlayerPrefs.SetString(key, data);
+            cancellationToken.ThrowIfCancellationRequested();
+            Write(key, data, ticket);
             await FlushAsync();
         }
 
@@ -59,6 +78,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Backend
         {
             await UniTask.SwitchToMainThread(cancellationToken);
 
+            _writtenTickets ??= new Dictionary<string, long>();
+            _writtenTickets[key] = ReserveWrite();
             if (!PlayerPrefs.HasKey(key)) return;
 
             PlayerPrefs.DeleteKey(key);

@@ -1,11 +1,14 @@
 using System;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using _VuTH.Core.Persistent.SaveSystem.Backend;
 using _VuTH.Core.Persistent.SaveSystem.Encrypt;
 using _VuTH.Core.Persistent.SaveSystem.Migrate;
 using _VuTH.Core.Persistent.SaveSystem.Serialize;
 using NUnit.Framework;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -34,6 +37,51 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
 
         private static void ExpectLoadError(string status) =>
             LogAssert.Expect(LogType.Error, new Regex(status));
+
+        private sealed class CancelBackupBackend : ISaveBackend
+        {
+            private readonly InMemorySaveBackend _storage;
+            private readonly CancellationTokenSource _cancellation;
+
+            public CancelBackupBackend(InMemorySaveBackend storage, CancellationTokenSource cancellation)
+            {
+                _storage = storage;
+                _cancellation = cancellation;
+            }
+
+            public UniTask SaveRawAsync(string key, string data, CancellationToken cancellationToken = default)
+            {
+                // The read and decode have already completed; cancel exactly when the backup starts.
+                _cancellation.Cancel();
+                return UniTask.FromCanceled(cancellationToken);
+            }
+
+            public UniTask<string> LoadRawAsync(string key, CancellationToken cancellationToken = default) =>
+                _storage.LoadRawAsync(key, cancellationToken);
+            public UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) =>
+                _storage.ExistsAsync(key, cancellationToken);
+            public UniTask DeleteAsync(string key, CancellationToken cancellationToken = default) =>
+                _storage.DeleteAsync(key, cancellationToken);
+        }
+
+        [TestCase("garbage")]
+        [TestCase("{\"schemaVersion\":1,\"payload\":\"not-json\"}")]
+        public async Task TryLoad_CancelledDuringBackup_PropagatesCancellation(string raw)
+        {
+            await _backend.SaveRawAsync("k", raw);
+            using var cancellation = new CancellationTokenSource();
+            var service = new SaveService(new CancelBackupBackend(_backend, cancellation), _serializer,
+                new NoOpEncryptor(), eventPublisher: _events);
+
+            var error = Assert.CatchAsync<OperationCanceledException>(async () =>
+                await service.TryLoadAsync<TestData>("k", cancellation.Token));
+
+            Assert.AreEqual(cancellation.Token, error.CancellationToken);
+            Assert.AreEqual(raw, _backend.Raw("k"));
+            Assert.IsNull(_backend.Raw(SaveService.GetCorruptedBackupKey("k")));
+            Assert.AreEqual(0, _events.OnLoadFailedCallCount);
+            Assert.AreEqual(0, _events.OnLoadSuccessCallCount);
+        }
 
         [Test]
         public async Task TryLoad_Saved_IsLoaded()
@@ -67,7 +115,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
 
             Assert.AreEqual(SaveLoadStatus.Corrupted, result.Status);
             Assert.IsTrue(result.CanOverwrite);
-            Assert.AreEqual("not base64 at all!", _backend.Raw("k" + SaveService.CorruptedBackupSuffix));
+            Assert.AreEqual("not base64 at all!", _backend.Raw(SaveService.GetCorruptedBackupKey("k")));
             Assert.AreEqual(1, _events.OnLoadFailedCallCount);
         }
 
@@ -108,7 +156,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
 
             Assert.AreEqual(SaveLoadStatus.ReadFailed, result.Status);
             Assert.IsFalse(result.CanOverwrite);
-            Assert.IsNull(_backend.Raw("k" + SaveService.CorruptedBackupSuffix));
+            Assert.IsNull(_backend.Raw(SaveService.GetCorruptedBackupKey("k")));
         }
 
         [Test]
@@ -146,7 +194,7 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
             var result = await CreateService(schemaVersion: 2, chain: chain).TryLoadAsync<TestData>("k");
 
             Assert.AreEqual(SaveLoadStatus.MigrationFailed, result.Status);
-            Assert.IsNull(_backend.Raw("k" + SaveService.CorruptedBackupSuffix), "not treated as damaged data");
+            Assert.IsNull(_backend.Raw(SaveService.GetCorruptedBackupKey("k")), "not treated as damaged data");
         }
 
         [Test]

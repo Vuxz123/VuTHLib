@@ -7,6 +7,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
     /// <summary>
     /// Main save service contract exposed to DataManager and other consumers.
     /// Handles serialization, encryption, and versioning transparently.
+    /// Application keys must not start with SaveService.CorruptedBackupPrefix; that namespace stores raw backups.
     /// </summary>
     public interface ISaveService
     {

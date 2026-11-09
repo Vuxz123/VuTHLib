@@ -122,12 +122,12 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
             await _backend.SaveRawAsync("k", "garbage");
             LogAssert.Expect(LogType.Error, new Regex("Corrupted"));
             await _service.TryLoadAsync<Profile>("k");
-            Assert.IsNotNull(_backend.Raw("k" + SaveService.CorruptedBackupSuffix));
+            Assert.IsNotNull(_backend.Raw(SaveService.GetCorruptedBackupKey("k")));
 
             await _service.DeleteAsync("k");
 
             Assert.IsNull(_backend.Raw("k"));
-            Assert.IsNull(_backend.Raw("k" + SaveService.CorruptedBackupSuffix));
+            Assert.IsNull(_backend.Raw(SaveService.GetCorruptedBackupKey("k")));
         }
     }
 }

@@ -20,10 +20,10 @@ namespace _VuTH.Core.Persistent.SaveSystem.Serialize
         public NewtonsoftJsonSerializer()
         {
             // Configure CamelCaseNamingStrategy for case-insensitive property matching
-            // and to process dictionary keys while preserving specified names
+            // while preserving dictionary keys and explicitly specified member names.
             var namingStrategy = new CamelCaseNamingStrategy
             {
-                ProcessDictionaryKeys = true,
+                ProcessDictionaryKeys = false,
                 OverrideSpecifiedNames = false
             };
 

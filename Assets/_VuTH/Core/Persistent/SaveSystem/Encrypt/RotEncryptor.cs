@@ -23,7 +23,8 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
         /// <param name="rotation">Number of positions to rotate (default 13 for ROT13).</param>
         public RotEncryptor(int rotation)
         {
-            _rotation = rotation;
+            // 130 is the common period of letters (26) and digits (10); normalization also avoids overflow.
+            _rotation = rotation % 130;
         }
 
         public string Encrypt(string plainText)
@@ -46,16 +47,16 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 
             foreach (char c in input)
             {
-                if (char.IsLetter(c))
+                if (c is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
                 {
                     // Rotate letters
-                    char basis = char.IsUpper(c) ? 'A' : 'a';
+                    char basis = c <= 'Z' ? 'A' : 'a';
                     int offset = c - basis;
                     offset = (offset + rotation) % 26;
                     if (offset < 0) offset += 26;
                     result.Append((char)(basis + offset));
                 }
-                else if (char.IsDigit(c))
+                else if (c is >= '0' and <= '9')
                 {
                     // Rotate digits
                     int offset = c - '0';

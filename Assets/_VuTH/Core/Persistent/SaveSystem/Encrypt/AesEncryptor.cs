@@ -10,14 +10,15 @@ namespace _VuTH.Core.Persistent.SaveSystem.Encrypt
 {
     /// <summary>
     /// AES-256-CBC with a random IV per save and an HMAC-SHA256 tag (encrypt-then-MAC): the same data never encrypts
-    /// to the same text, and any modification of the save is detected (reported as corrupted).
+    /// to the same text. Modifications to authenticated-format ciphertext are detected (reported as corrupted).
     /// <para>
     /// The key ships inside the game build, so this is strong obfuscation against casual save editing, not protection
     /// against someone who extracts the key from the binary. Never rely on it for purchases or other server-trusted data.
     /// </para>
     /// <para>
     /// Saves written by the previous format (fixed IV, no tag) are still read; they are re-written in the new format on
-    /// the next save.
+    /// the next save. Legacy CBC data is unauthenticated; accepting it for compatibility does not guarantee tamper
+    /// detection for every input, including inputs presented as legacy saves.
     /// </para>
     /// </summary>
     [Serializable]

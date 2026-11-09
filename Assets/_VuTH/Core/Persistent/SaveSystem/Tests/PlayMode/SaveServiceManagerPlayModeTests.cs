@@ -21,6 +21,30 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
         private SaveServiceManager _manager;
         private string _tempDir;
 
+        [UnityTest]
+        public IEnumerator PlayerPrefs_OlderReservedWriteCannotReplaceImmediateSave() => UniTask.ToCoroutine(async () =>
+        {
+            var key = "VuTH_Ordering_" + Guid.NewGuid().ToString("N");
+            var backend = new PlayerPrefsSaveBackend();
+            try
+            {
+                var olderTicket = backend.ReserveWrite();
+                backend.SaveRaw(key, "new");
+                await backend.SaveRawOrderedAsync(key, "old", olderTicket);
+                Assert.AreEqual("new", await backend.LoadRawAsync(key));
+
+                olderTicket = backend.ReserveWrite();
+                await backend.DeleteAsync(key);
+                await backend.SaveRawOrderedAsync(key, "resurrected", olderTicket);
+                Assert.IsFalse(await backend.ExistsAsync(key));
+            }
+            finally
+            {
+                PlayerPrefs.DeleteKey(key);
+                PlayerPrefs.Save();
+            }
+        });
+
         [SetUp]
         public void SetUp()
         {
@@ -119,7 +143,9 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.PlayMode
 
             yield return _manager.SaveAsync("plain", new TestPlayData { Score = 7 }).ToCoroutine();
 
-            var stored = File.ReadAllText(Path.Combine(_tempDir, "plain.json"));
+            string stored = null;
+            yield return new JsonFileSaveBackend(_tempDir).LoadRawAsync("plain")
+                .ContinueWith(raw => stored = raw).ToCoroutine();
             StringAssert.Contains("schemaVersion", stored, "NoOpEncryptor stores the JSON as is");
         }
 

@@ -17,7 +17,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
     /// Load: read -> Decrypt -> unwrap -> Migrate -> Deserialize.
     /// <para>
     /// Loading never silently replaces stored data: unreadable data is reported (<see cref="SaveLoadStatus"/>), and
-    /// corrupted data is copied to <c>key + </c><see cref="CorruptedBackupSuffix"/> before the caller may overwrite it.
+    /// corrupted data is copied to <see cref="GetCorruptedBackupKey"/> before the caller may overwrite it.
     /// </para>
     /// <para>
     /// The schema version and migrators given to the constructor apply to every key. Data that changes format on its
@@ -29,8 +29,25 @@ namespace _VuTH.Core.Persistent.SaveSystem
         /// <summary>Schema version used when none is configured.</summary>
         public const int DefaultSchemaVersion = 1;
 
-        /// <summary>Suffix of the key that receives a raw copy of corrupted data.</summary>
+        /// <summary>Historical backup suffix. New backups use a reserved namespace.</summary>
+        [Obsolete("Use GetCorruptedBackupKey(key). The .corrupt suffix is no longer used for backups.")]
         public const string CorruptedBackupSuffix = ".corrupt";
+
+        /// <summary>Reserved backend key prefix. Application keys starting with it are rejected by this service.</summary>
+        public const string CorruptedBackupPrefix = "__VuTH_Internal_Backup__/";
+
+        public static string GetCorruptedBackupKey(string key)
+        {
+            ValidateApplicationKey(key);
+            return CorruptedBackupPrefix + key;
+        }
+
+        private static void ValidateApplicationKey(string key)
+        {
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            if (key.StartsWith(CorruptedBackupPrefix, StringComparison.Ordinal))
+                throw new ArgumentException("The key uses the reserved backup namespace.", nameof(key));
+        }
 
         private readonly ISaveBackend _backend;
         private readonly ISerializer _serializer;
@@ -82,6 +99,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         private bool TrySaveImmediateCore<T>(string key, T data, SaveSchema? schema)
         {
+            ValidateApplicationKey(key);
             if (_backend is not ISyncSaveBackend syncBackend)
                 return false;
 
@@ -108,12 +126,18 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         private async UniTask SaveCoreAsync<T>(string key, T data, SaveSchema? schema, CancellationToken cancellationToken)
         {
+            ValidateApplicationKey(key);
             try
             {
                 // Serialized before any await: the save is a snapshot of the data at the time of the call.
+                var ordered = _backend as IOrderedSaveBackend;
+                var ticket = ordered?.ReserveWrite() ?? 0;
                 var plain = Wrap(data, schema);
                 var encrypted = await TransformAsync(plain, _encryptor.Encrypt, cancellationToken);
-                await _backend.SaveRawAsync(key, encrypted, cancellationToken);
+                if (ordered != null)
+                    await ordered.SaveRawOrderedAsync(key, encrypted, ticket, cancellationToken);
+                else
+                    await _backend.SaveRawAsync(key, encrypted, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -127,6 +151,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         private string Wrap<T>(T data, SaveSchema? schema)
         {
+            if (data is null) throw new ArgumentNullException(nameof(data));
             var wrapper = new SavePayloadWrapper(schema?.Version ?? _currentSchemaVersion, _serializer.Serialize(data));
             return _serializer.Serialize(wrapper);
         }
@@ -186,6 +211,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         private async UniTask<SaveLoadResult<T>> LoadCoreAsync<T>(string key, SaveSchema? schema, CancellationToken cancellationToken)
         {
+            ValidateApplicationKey(key);
             var targetVersion = schema?.Version ?? _currentSchemaVersion;
             var migrationChain = schema?.Migrations ?? _migrationChain;
 
@@ -248,7 +274,9 @@ namespace _VuTH.Core.Persistent.SaveSystem
             // 5. Deserialize. After a migration a failure points at the migrator, not at damaged data.
             try
             {
-                return SaveLoadResult<T>.Success(_serializer.Deserialize<T>(payload));
+                var data = _serializer.Deserialize<T>(payload);
+                if (data is null) throw new InvalidDataException("The save payload deserialized to null.");
+                return SaveLoadResult<T>.Success(data);
             }
             catch (Exception ex)
             {
@@ -265,10 +293,14 @@ namespace _VuTH.Core.Persistent.SaveSystem
         private async UniTask<SaveLoadResult<T>> BackUpCorruptedAsync<T>(
             string key, string raw, Exception error, CancellationToken cancellationToken)
         {
-            var backupKey = key + CorruptedBackupSuffix;
+            var backupKey = GetCorruptedBackupKey(key);
             try
             {
                 await _backend.SaveRawAsync(backupKey, raw, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception backupError)
             {
@@ -285,14 +317,16 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         public UniTask<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
         {
+            ValidateApplicationKey(key);
             return _backend.ExistsAsync(key, cancellationToken);
         }
 
         /// <summary>Deletes the data, and the backup of a corrupted version of it if there is one.</summary>
         public async UniTask DeleteAsync(string key, CancellationToken cancellationToken = default)
         {
+            ValidateApplicationKey(key);
             await _backend.DeleteAsync(key, cancellationToken);
-            await _backend.DeleteAsync(key + CorruptedBackupSuffix, cancellationToken);
+            await _backend.DeleteAsync(GetCorruptedBackupKey(key), cancellationToken);
         }
 
         private void Publish(Action<ISaveEventPublisher> publish)

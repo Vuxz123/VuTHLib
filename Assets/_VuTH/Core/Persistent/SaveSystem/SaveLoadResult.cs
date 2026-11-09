@@ -11,7 +11,7 @@ namespace _VuTH.Core.Persistent.SaveSystem
 
         /// <summary>
         /// The stored data could not be decoded (decryption or deserialization failed). A raw copy was written to
-        /// <c>key + </c><see cref="SaveService.CorruptedBackupSuffix"/> first, so overwriting the key is safe.
+        /// <see cref="SaveService.GetCorruptedBackupKey"/> first. Check CanOverwrite to confirm the backup succeeded.
         /// </summary>
         Corrupted,
 

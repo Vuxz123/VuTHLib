@@ -16,6 +16,24 @@ namespace _VuTH.Core.Persistent.SaveSystem.Tests.Runtime
     {
         private const string Plain = "{\"schemaVersion\":1,\"payload\":\"{\\\"value\\\":42}\"}";
 
+        [TestCase(13)]
+        [TestCase(int.MinValue)]
+        [TestCase(int.MaxValue)]
+        public void Rot_PreservesUnicode_AndRoundTripsEveryRotation(int rotation)
+        {
+            const string text = "Vu Tiếng Việt é 中文 ١２ 😀 Az09";
+            var encryptor = new RotEncryptor(rotation);
+            Assert.AreEqual(text, encryptor.Decrypt(encryptor.Encrypt(text)));
+            Assert.AreEqual("é中文١２😀", encryptor.Encrypt("é中文١２😀"));
+        }
+
+        [TestCase(null)]
+        [TestCase("")]
+        public void Xor_RejectsMissingKey(string key)
+        {
+            Assert.Throws<ArgumentException>(() => new XorEncryptor(key));
+        }
+
         private static IEncryptor[] RoundTripEncryptors() => new IEncryptor[]
         {
             new XorEncryptor(), new Base64Encryptor(), new Rot13Encryptor(), new NoOpEncryptor(),

@@ -5,6 +5,17 @@ using Cysharp.Threading.Tasks;
 namespace _VuTH.Core.Persistent.SaveSystem.Backend
 {
     /// <summary>
+    /// Optional write ordering across preprocessing and storage. Tickets belong to this backend instance;
+    /// reserve before asynchronous encryption, then pass the ticket to the write. A completed newer write
+    /// must not be replaced by an older ticket for the same key. All write entry points share this ordering.
+    /// </summary>
+    public interface IOrderedSaveBackend : ISaveBackend
+    {
+        long ReserveWrite();
+        UniTask SaveRawOrderedAsync(string key, string data, long ticket, CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
     /// Backend contract for storage operations.
     /// Only handles raw string data - no serialization or encryption.
     /// </summary>
