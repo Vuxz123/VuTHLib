@@ -4,7 +4,11 @@
     "references": [
         "UnityEngine.TestRunner",
         "VuTH.Screen",
-        "UniTask"
+        "UniTask",
+        "VuTH.Common",
+        "Unity.Addressables",
+        "Unity.ResourceManager",
+        "Unity.ugui"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

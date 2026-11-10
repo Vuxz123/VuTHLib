@@ -1,5 +1,4 @@
-﻿using _VuTH.Common.Log;
-using Cysharp.Threading.Tasks;
+﻿using Cysharp.Threading.Tasks;
 using PrimeTween;
 using UnityEngine;
 using UnityEngine.UI;
@@ -65,40 +64,32 @@ namespace _VuTH.Core.GameCycle.Screen.Loading
 
         private async UniTask FadeIn()
         {
+            if (_currentTween.isAlive) _currentTween.Stop();
+            SetVisible(true);
             if (!canvasGroup)
             {
-                this.LogWarning("No CanvasGroup assigned for fade-in animation.");
                 return;
             }
 
             canvasGroup.gameObject.SetActive(true);
 
-            if (_currentTween.isAlive)
-            {
-                _currentTween.Stop();
-            }
-
-            _currentTween = Tween.Alpha(canvasGroup, 0, 1, animationDuration, ease: Ease.OutCirc);
+            _currentTween = Tween.Alpha(canvasGroup, 0, 1, animationDuration, ease: Ease.OutCirc, useUnscaledTime: true);
             await _currentTween;
         }
 
         private async UniTask FadeOut()
         {
+            if (_currentTween.isAlive) _currentTween.Stop();
             if (!canvasGroup)
             {
-                this.LogWarning("No CanvasGroup assigned for fade-out animation.");
+                SetVisible(false);
                 return;
             }
 
             canvasGroup.gameObject.SetActive(true);
 
-            if (_currentTween.isAlive)
-            {
-                _currentTween.Stop();
-            }
-
-            _currentTween = Tween.Alpha(canvasGroup, 1, 0, animationDuration, ease: Ease.InCirc)
-                .OnComplete(() => { canvasGroup.gameObject.SetActive(false); });
+            _currentTween = Tween.Alpha(canvasGroup, canvasGroup.alpha, 0, animationDuration, ease: Ease.InCirc, useUnscaledTime: true)
+                .OnComplete(() => SetVisible(false));
             await _currentTween;
         }
 
@@ -107,9 +98,15 @@ namespace _VuTH.Core.GameCycle.Screen.Loading
             if (root) root.SetActive(visible);
 
             if (!canvasGroup) return;
+            if (visible) canvasGroup.gameObject.SetActive(true);
             canvasGroup.alpha = visible ? 1f : 0f;
             canvasGroup.interactable = visible;
             canvasGroup.blocksRaycasts = visible;
+        }
+
+        private void OnDestroy()
+        {
+            if (_currentTween.isAlive) _currentTween.Stop();
         }
 
 #if UNITY_EDITOR

@@ -42,6 +42,23 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         /// </summary>
         public bool IsOverriding => Override != null;
 
+        /// <summary>Current screen below the override, without changing navigation state.</summary>
+        public ScreenModel UnderlyingCurrent => _screenStack.Count > 0 ? _screenStack.Peek() : Base;
+
+        /// <summary>Screen beneath the stack top, without removing either entry.</summary>
+        public ScreenModel BelowTop => _screenStack.Count > 1 ? _screenStack.ToArray()[1] : null;
+
+        /// <summary>All scene owners, including hidden stack entries.</summary>
+        public IEnumerable<ScreenModel> OwnedScreens
+        {
+            get
+            {
+                if (Base) yield return Base;
+                foreach (var screen in _screenStack) if (screen) yield return screen;
+                if (Override) yield return Override;
+            }
+        }
+
         /// <summary>
         /// The effective current screen: override if active, otherwise the stack top, otherwise the base screen.
         /// </summary>
@@ -50,7 +67,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             get
             {
                 if (Override) return Override;
-                return _screenStack.Count > 0 ? _screenStack.Peek() : Base;
+                return UnderlyingCurrent;
             }
         }
 

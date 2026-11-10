@@ -67,7 +67,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
         // Addressables cache: AssetGUID -> SceneInstance (created lazily: uses this as log origin).
         private AddressableSceneCache _sceneCache;
-        private AddressableSceneCache SceneCache => _sceneCache ??= new AddressableSceneCache(this);
+        private AddressableSceneCache SceneCache => _sceneCache ??= new AddressableSceneCache(this, () => _nav.OwnedScreens);
 
         public event Action<TransitionCompletedEventArgs> OnTransitionCompleted;
 
@@ -185,25 +185,25 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             _isTransitioning = true;
 
-            // Capture current effective before we reset stack.
+            // PreExit and loading.Show must still observe the existing navigation. Do not discard it until closing.
             var from = _nav.EffectiveCurrent;
-
-            // Enter starts a NEW flow: snapshot everything that has to be closed (stack top-down + override),
-            // then reset navigation to [target].
-            var stackToClose = _nav.TakeAll();
-            _nav.Override = null;
-            _nav.Previous = from;
-            _nav.Base = target;
-            _nav.Push(target);
 
             try
             {
                 // Old screens are closed INSIDE the transition: after PreExit has been raised (their listeners still
                 // exist) and after the loading UI is up (no empty frames between unload and loading screen).
-                // Shared additive scenes are kept via smart look-ahead on the target.
+                // Main and additive scenes still needed by the target are kept loaded.
                 await TransitionWithLoadingInternal(from, target, showLoading: target.showLoadingScreen,
                     closePrevious: async () =>
                     {
+                        // Commit the new owners immediately before the first close operation. From here, a failure
+                        // can follow a partial unload, so rolling back to the old stack would be unsafe.
+                        var stackToClose = _nav.TakeAll();
+                        _nav.Override = null;
+                        _nav.Previous = from;
+                        _nav.Base = target;
+                        _nav.Push(target);
+
                         foreach (var screen in stackToClose)
                         {
                             await SceneCache.UnloadScreenAsync(screen, nextToShow: target);
@@ -218,8 +218,8 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             }
             catch (Exception e)
             {
-                // Old screens may already be unloaded, so there is nothing consistent to roll back to:
-                // navigation stays on the target. Callers (e.g. ScreenFlowActor) get the exception.
+                // Before closing starts, navigation is untouched. Once closing starts it remains on the target:
+                // restoring the old stack could refer to scenes that have already been unloaded.
                 this.LogError($"Enter({target.name}) failed: {e.Message}");
                 throw;
             }
@@ -332,18 +332,20 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 return;
             }
 
-            var curr = _nav.Pop();
-            var prev = _nav.Peek();
+            var curr = _nav.Peek();
+            var prev = _nav.BelowTop;
 
             _isTransitioning = true;
             try
             {
-                _nav.Previous = curr;
-
                 var exitArgs = new ScreenEventArgs(curr, prev);
                 EventDispatcher.NotifyGlobalPreExit(exitArgs);
                 EventDispatcher.NotifyLocalClosing(exitArgs);
 
+                // Commit only after pre-close callbacks succeed. Never resurrect this entry after a close attempt.
+                _nav.Pop();
+                _nav.Previous = curr;
+                _nav.Base = _nav.BottomOfStack;
                 await SceneCache.UnloadScreenAsync(curr, nextToShow: prev);
                 SceneCache.ShowScreen(prev);
 
@@ -353,13 +355,6 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 EventDispatcher.NotifyGlobalPreEnter(enterArgs);
                 EventDispatcher.NotifyLocalOpening(enterArgs);
                 EventDispatcher.NotifyGlobalPostEnter(enterArgs);
-
-                _nav.Base = _nav.BottomOfStack;
-            }
-            catch
-            {
-                _nav.Push(curr);
-                throw;
             }
             finally
             {
@@ -451,17 +446,20 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             }
 
             var exitingOverride = _nav.Override;
-            _nav.Override = null;
-            var to = _nav.EffectiveCurrent;
+            var to = _nav.UnderlyingCurrent;
 
             _isTransitioning = true;
+            var closed = false;
             try
             {
                 var exitArgs = new ScreenEventArgs(exitingOverride, to);
                 EventDispatcher.NotifyGlobalPreExit(exitArgs);
                 EventDispatcher.NotifyLocalClosing(exitArgs);
 
+                // Keep the override current through PreExit/Closing. Remove ownership only when closing scenes.
+                _nav.Override = null;
                 await SceneCache.UnloadScreenAsync(exitingOverride, nextToShow: to);
+                closed = true;
                 SceneCache.ShowScreen(to);
 
                 EventDispatcher.NotifyGlobalPostExit(exitArgs);
@@ -470,6 +468,13 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 EventDispatcher.NotifyGlobalPreEnter(enterArgs);
                 EventDispatcher.NotifyLocalOpening(enterArgs);
                 EventDispatcher.NotifyGlobalPostEnter(enterArgs);
+            }
+            catch
+            {
+                // Before scene closure the override is still usable and must remain closable on a retry.
+                // After closure, retain the underlying navigation even if a post-event listener throws.
+                if (!closed) _nav.Override = exitingOverride;
+                throw;
             }
             finally
             {
