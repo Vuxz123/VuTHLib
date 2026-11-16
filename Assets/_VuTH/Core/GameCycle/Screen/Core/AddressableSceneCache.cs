@@ -14,6 +14,13 @@ using VContainer.Unity;
 
 namespace _VuTH.Core.GameCycle.Screen.Core
 {
+    /// <summary>Scene storage boundary; implementations throw when loading or unloading fails.</summary>
+    public interface IScreenSceneOperations
+    {
+        UniTask<SceneInstance> LoadAsync(AssetReference reference);
+        UniTask UnloadAsync(SceneInstance instance);
+    }
+
     /// <summary>
     /// Owns the Addressables scene cache (AssetGUID -> <see cref="SceneInstance"/>) used by <see cref="ScreenManager"/>:
     /// additive loading (optionally parented to the core VContainer scope), show/hide of scene roots,
@@ -24,6 +31,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
     {
         private readonly object _logOwner;
         private readonly Func<IEnumerable<ScreenModel>> _owners;
+        private readonly IScreenSceneOperations _operations;
         private readonly HashSet<ScreenModel> _hiddenScreens = new();
         private readonly Dictionary<int, Dictionary<GameObject, bool>> _hiddenRootStates = new();
 
@@ -31,10 +39,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         private readonly Dictionary<string, SceneInstance> _cachedAddressableScenes = new();
 
         /// <param name="logOwner">Origin object used for log messages (normally the ScreenManager).</param>
-        public AddressableSceneCache(object logOwner, Func<IEnumerable<ScreenModel>> owners = null)
+        public AddressableSceneCache(object logOwner, Func<IEnumerable<ScreenModel>> owners = null,
+            IScreenSceneOperations operations = null)
         {
             _logOwner = logOwner;
             _owners = owners;
+            _operations = operations ?? new AddressableSceneOperations();
         }
 
 #if VCONTAINER
@@ -52,8 +62,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             var key = GetAssetGuid(sceneRef);
             if (string.IsNullOrEmpty(key))
             {
-                _logOwner.LogError("Addressables sceneRef has no AssetGUID (is it an addressable scene asset?)");
-                return;
+                throw new ArgumentException("Addressables sceneRef has no AssetGUID.", nameof(sceneRef));
             }
 
             if (_cachedAddressableScenes.TryGetValue(key, out var cached))
@@ -78,17 +87,11 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             using (LifetimeScope.EnqueueParent(CoreLifetimeScope))
             {
 #endif
-                var handle = Addressables.LoadSceneAsync(sceneRef, LoadSceneMode.Additive, activateOnLoad: true);
-                await handle.Task;
-
-                if (handle.Status != AsyncOperationStatus.Succeeded)
-                {
-                    _logOwner.LogError($"Failed to load addressable scene: {sceneRef.RuntimeKey}");
-                    return;
-                }
-
-                _cachedAddressableScenes[key] = handle.Result;
-                SetSceneRootActive(handle.Result.Scene, true);
+                var instance = await _operations.LoadAsync(sceneRef);
+                if (!instance.Scene.IsValid() || !instance.Scene.isLoaded)
+                    throw new InvalidOperationException($"Scene load returned no loaded scene: {key}");
+                _cachedAddressableScenes[key] = instance;
+                SetSceneRootActive(instance.Scene, true);
 #if VCONTAINER
             }
 #endif
@@ -181,7 +184,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         {
             foreach (var kv in _cachedAddressableScenes)
             {
-                Addressables.UnloadSceneAsync(kv.Value);
+                _operations.UnloadAsync(kv.Value).Forget(error => _logOwner.LogError($"Scene release failed: {error.Message}"));
             }
             _cachedAddressableScenes.Clear();
             _hiddenRootStates.Clear();
@@ -203,14 +206,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             var owners = _owners?.Invoke();
             if (owners != null)
             {
-                var retained = false;
                 foreach (var owner in owners)
                 {
                     if (!IsSceneUsedByScreen(owner, key)) continue;
-                    retained = true;
-                }
-                if (retained)
-                {
                     SetSceneRootActive(sceneRef, false);
                     return;
                 }
@@ -226,13 +224,48 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             if (_cachedAddressableScenes.TryGetValue(key, out var instance))
             {
-                await Addressables.UnloadSceneAsync(instance).Task;
+                await _operations.UnloadAsync(instance);
                 _hiddenRootStates.Remove(instance.Scene.handle);
                 _cachedAddressableScenes.Remove(key);
             }
         }
 
         private static string GetAssetGuid(AssetReference reference) => reference?.AssetGUID;
+
+        private sealed class AddressableSceneOperations : IScreenSceneOperations
+        {
+            public async UniTask<SceneInstance> LoadAsync(AssetReference reference)
+            {
+                var handle = Addressables.LoadSceneAsync(reference, LoadSceneMode.Additive, activateOnLoad: true);
+                try
+                {
+                    await handle.Task;
+                    if (handle.Status != AsyncOperationStatus.Succeeded)
+                        throw new InvalidOperationException($"Failed to load addressable scene: {reference.RuntimeKey}", handle.OperationException);
+                    return handle.Result;
+                }
+                catch
+                {
+                    if (handle.IsValid()) Addressables.Release(handle);
+                    throw;
+                }
+            }
+
+            public async UniTask UnloadAsync(SceneInstance instance)
+            {
+                var handle = Addressables.UnloadSceneAsync(instance, autoReleaseHandle: false);
+                try
+                {
+                    await handle.Task;
+                    if (handle.Status != AsyncOperationStatus.Succeeded)
+                        throw new InvalidOperationException("Failed to unload addressable scene.", handle.OperationException);
+                }
+                finally
+                {
+                    if (handle.IsValid()) Addressables.Release(handle);
+                }
+            }
+        }
 
         private bool IsSceneNeededVisible(string key, ScreenModel keepVisibleFor)
         {
@@ -283,11 +316,13 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 return;
             }
 
-            if (_hiddenRootStates.ContainsKey(scene.handle)) return;
             var roots = scene.GetRootGameObjects();
-            var states = new Dictionary<GameObject, bool>();
-            _hiddenRootStates.Add(scene.handle, states);
-            foreach (var root in roots) if (root) states[root] = root.activeSelf;
+            if (!_hiddenRootStates.TryGetValue(scene.handle, out var states))
+            {
+                states = new Dictionary<GameObject, bool>();
+                _hiddenRootStates.Add(scene.handle, states);
+            }
+            foreach (var root in roots) if (root && !states.ContainsKey(root)) states[root] = root.activeSelf;
             foreach (var t in roots)
             {
                 if (t) t.SetActive(active);

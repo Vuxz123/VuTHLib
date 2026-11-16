@@ -187,6 +187,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
             // PreExit and loading.Show must still observe the existing navigation. Do not discard it until closing.
             var from = _nav.EffectiveCurrent;
+            var closingStarted = false;
 
             try
             {
@@ -203,16 +204,23 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                         _nav.Previous = from;
                         _nav.Base = target;
                         _nav.Push(target);
+                        closingStarted = true;
 
-                        foreach (var screen in stackToClose)
+                        try
                         {
-                            await SceneCache.UnloadScreenAsync(screen, nextToShow: target);
+                            foreach (var screen in stackToClose)
+                                await SceneCache.UnloadScreenAsync(screen, nextToShow: target);
+
+                            // A baseline screen that was never pushed (e.g. bootstrap) or an active override.
+                            if (from && from != target && Array.IndexOf(stackToClose, from) < 0)
+                                await SceneCache.UnloadScreenAsync(from, nextToShow: target);
                         }
-
-                        // A baseline screen that was never pushed (e.g. bootstrap) or an active override.
-                        if (from && from != target && Array.IndexOf(stackToClose, from) < 0)
+                        catch
                         {
-                            await SceneCache.UnloadScreenAsync(from, nextToShow: target);
+                            // Enter may not have loaded its destination yet. Best-effort recovery must not claim
+                            // a successful transition or replace the original partial-unload exception.
+                            await TryLoadAndRevealDestination(target);
+                            throw;
                         }
                     });
             }
@@ -225,6 +233,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             }
             finally
             {
+                if (closingStarted) TryRevealDestination(target);
                 _isTransitioning = false;
             }
 
@@ -279,7 +288,11 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 return;
             }
 
+            if (_nav.Contains(target))
+                throw new InvalidOperationException($"Screen '{target.name}' is already on the navigation stack.");
+
             _isTransitioning = true;
+            var previous = _nav.Previous;
             try
             {
                 _nav.Push(target);
@@ -297,6 +310,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             catch
             {
                 _nav.PopIfTop(target);
+                _nav.Previous = previous;
+                SceneCache.HideScreen(target, from);
+                TryRevealDestination(from);
                 throw;
             }
             finally
@@ -336,6 +352,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             var prev = _nav.BelowTop;
 
             _isTransitioning = true;
+            var closingStarted = false;
             try
             {
                 var exitArgs = new ScreenEventArgs(curr, prev);
@@ -346,6 +363,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 _nav.Pop();
                 _nav.Previous = curr;
                 _nav.Base = _nav.BottomOfStack;
+                closingStarted = true;
                 await SceneCache.UnloadScreenAsync(curr, nextToShow: prev);
                 SceneCache.ShowScreen(prev);
 
@@ -358,6 +376,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             }
             finally
             {
+                if (closingStarted) TryRevealDestination(prev);
                 _isTransitioning = false;
             }
 
@@ -390,9 +409,14 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 return;
             }
 
+            if (_nav.Contains(target))
+            {
+                throw new InvalidOperationException($"Screen '{target.name}' is already on the navigation stack.");
+            }
             _isTransitioning = true;
             var prevOverride = _nav.Override;
-            var prevOverrideClosed = false;
+            var previous = _nav.Previous;
+            var prevOverrideClosingStarted = false;
             try
             {
                 _nav.Override = target;
@@ -405,8 +429,8 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 {
                     closePrevious = async () =>
                     {
+                        prevOverrideClosingStarted = true;
                         await SceneCache.UnloadScreenAsync(prevOverride, nextToShow: target);
-                        prevOverrideClosed = true;
                     };
                 }
 
@@ -415,11 +439,14 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             }
             catch
             {
-                _nav.Override = prevOverrideClosed ? null : prevOverride;
+                _nav.Override = prevOverrideClosingStarted ? null : prevOverride;
+                if (!prevOverrideClosingStarted) _nav.Previous = previous;
+                SceneCache.HideScreen(target, _nav.EffectiveCurrent);
                 throw;
             }
             finally
             {
+                if (prevOverrideClosingStarted && !_nav.Override) TryRevealDestination(_nav.UnderlyingCurrent);
                 _isTransitioning = false;
             }
 
@@ -449,7 +476,7 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             var to = _nav.UnderlyingCurrent;
 
             _isTransitioning = true;
-            var closed = false;
+            var closingStarted = false;
             try
             {
                 var exitArgs = new ScreenEventArgs(exitingOverride, to);
@@ -458,8 +485,8 @@ namespace _VuTH.Core.GameCycle.Screen.Core
 
                 // Keep the override current through PreExit/Closing. Remove ownership only when closing scenes.
                 _nav.Override = null;
+                closingStarted = true;
                 await SceneCache.UnloadScreenAsync(exitingOverride, nextToShow: to);
-                closed = true;
                 SceneCache.ShowScreen(to);
 
                 EventDispatcher.NotifyGlobalPostExit(exitArgs);
@@ -473,11 +500,12 @@ namespace _VuTH.Core.GameCycle.Screen.Core
             {
                 // Before scene closure the override is still usable and must remain closable on a retry.
                 // After closure, retain the underlying navigation even if a post-event listener throws.
-                if (!closed) _nav.Override = exitingOverride;
+                if (!closingStarted) _nav.Override = exitingOverride;
                 throw;
             }
             finally
             {
+                if (closingStarted) TryRevealDestination(to);
                 _isTransitioning = false;
             }
 
@@ -505,14 +533,13 @@ namespace _VuTH.Core.GameCycle.Screen.Core
                 EventDispatcher.NotifyLocalClosing(args);
             }
 
-            if (showLoading)
-            {
-                await _loading.Show();
-                _loading.SetProgress(0f);
-            }
-
             try
             {
+                if (showLoading)
+                {
+                    await _loading.Show();
+                    _loading.SetProgress(0f);
+                }
                 if (closePrevious != null)
                 {
                     await closePrevious();
@@ -664,6 +691,47 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         #endregion
 
         #region Helpers
+
+        private async UniTask TryLoadAndRevealDestination(ScreenModel screen)
+        {
+            if (!screen) return;
+            var previousMembership = ScreenSceneMembership.Loading;
+            ScreenSceneMembership.Loading = screen;
+            try
+            {
+                var main = screen.mainSceneRef;
+                if (main != null && main.RuntimeKeyIsValid() && !SceneCache.GetLoadedScene(main).isLoaded)
+                    await SceneCache.LoadOrShowSceneAsync(main);
+                if (screen.additiveScene != null)
+                {
+                    foreach (var additive in screen.additiveScene)
+                    {
+                        var reference = additive.sceneRef;
+                        if (reference != null && reference.RuntimeKeyIsValid() && !SceneCache.GetLoadedScene(reference).isLoaded)
+                            await SceneCache.LoadOrShowSceneAsync(reference);
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                this.LogError($"Destination recovery failed for '{screen.name}': {error.Message}");
+            }
+            finally
+            {
+                ScreenSceneMembership.Loading = previousMembership;
+                TryRevealDestination(screen);
+            }
+        }
+
+        private void TryRevealDestination(ScreenModel screen)
+        {
+            try { SceneCache.ShowScreen(screen); }
+            catch (Exception error)
+            {
+                // Recovery must not replace the original unload/callback error.
+                this.LogError($"Could not reveal destination screen '{screen?.name}': {error.Message}");
+            }
+        }
 
         private void NotifyTransitionCompleted(TransitionKind kind, IScreenDefinition from, IScreenDefinition to, TransitionContext context)
         {

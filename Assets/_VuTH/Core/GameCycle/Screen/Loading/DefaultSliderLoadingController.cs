@@ -65,15 +65,13 @@ namespace _VuTH.Core.GameCycle.Screen.Loading
         private async UniTask FadeIn()
         {
             if (_currentTween.isAlive) _currentTween.Stop();
-            SetVisible(true);
+            SetActiveAndInput(true);
             if (!canvasGroup)
             {
                 return;
             }
 
-            canvasGroup.gameObject.SetActive(true);
-
-            _currentTween = Tween.Alpha(canvasGroup, 0, 1, animationDuration, ease: Ease.OutCirc, useUnscaledTime: true);
+            _currentTween = Tween.Alpha(canvasGroup, canvasGroup.alpha, 1, animationDuration, ease: Ease.OutCirc, useUnscaledTime: true);
             await _currentTween;
         }
 
@@ -86,8 +84,6 @@ namespace _VuTH.Core.GameCycle.Screen.Loading
                 return;
             }
 
-            canvasGroup.gameObject.SetActive(true);
-
             _currentTween = Tween.Alpha(canvasGroup, canvasGroup.alpha, 0, animationDuration, ease: Ease.InCirc, useUnscaledTime: true)
                 .OnComplete(() => SetVisible(false));
             await _currentTween;
@@ -95,11 +91,16 @@ namespace _VuTH.Core.GameCycle.Screen.Loading
 
         public void SetVisible(bool visible)
         {
-            if (root) root.SetActive(visible);
-
+            SetActiveAndInput(visible);
             if (!canvasGroup) return;
-            if (visible) canvasGroup.gameObject.SetActive(true);
             canvasGroup.alpha = visible ? 1f : 0f;
+        }
+
+        private void SetActiveAndInput(bool visible)
+        {
+            if (root) root.SetActive(visible);
+            if (!canvasGroup) return;
+            canvasGroup.gameObject.SetActive(visible);
             canvasGroup.interactable = visible;
             canvasGroup.blocksRaycasts = visible;
         }

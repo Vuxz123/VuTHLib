@@ -46,7 +46,17 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         public ScreenModel UnderlyingCurrent => _screenStack.Count > 0 ? _screenStack.Peek() : Base;
 
         /// <summary>Screen beneath the stack top, without removing either entry.</summary>
-        public ScreenModel BelowTop => _screenStack.Count > 1 ? _screenStack.ToArray()[1] : null;
+        public ScreenModel BelowTop
+        {
+            get
+            {
+                using var entries = _screenStack.GetEnumerator();
+                if (!entries.MoveNext()) return null;
+                return entries.MoveNext() ? entries.Current : null;
+            }
+        }
+
+        public bool Contains(ScreenModel screen) => _screenStack.Contains(screen);
 
         /// <summary>All scene owners, including hidden stack entries.</summary>
         public IEnumerable<ScreenModel> OwnedScreens
@@ -78,8 +88,9 @@ namespace _VuTH.Core.GameCycle.Screen.Core
         {
             get
             {
-                var arr = _screenStack.ToArray();
-                return arr.Length > 0 ? arr[^1] : null;
+                ScreenModel bottom = null;
+                foreach (var screen in _screenStack) bottom = screen;
+                return bottom;
             }
         }
 

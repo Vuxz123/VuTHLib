@@ -120,8 +120,12 @@ namespace _VuTH.Core.GameCycle.Screen.Tests.PlayMode
             return host.AddComponent<ScreenManager>();
         }
 
-        private (AddressableSceneCache cache, Scene scene, GameObject active, GameObject inactive) CacheScene(ScreenManager manager, AssetReference reference)
+        private (AddressableSceneCache cache, Scene scene, GameObject active, GameObject inactive) CacheScene(ScreenManager manager, AssetReference reference,
+            IScreenSceneOperations operations = null)
         {
+            if (operations != null)
+                Set(manager, "_sceneCache", new AddressableSceneCache(manager,
+                    () => Get<ScreenNavigationState>(manager, "_nav").OwnedScreens, operations));
             var cache = (AddressableSceneCache)typeof(ScreenManager).GetProperty("SceneCache", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
             var scene = SceneManager.CreateScene("ScreenSafety_" + Guid.NewGuid().ToString("N"));
             _scenes.Add(scene);
@@ -206,9 +210,140 @@ namespace _VuTH.Core.GameCycle.Screen.Tests.PlayMode
             public void OnPostScreenEnter(ScreenEventArgs args) { }
         }
 
+        private sealed class FaultingSceneOperations : IScreenSceneOperations
+        {
+            public Scene FailUnload;
+            public readonly Dictionary<string, SceneInstance> Loads = new();
+            public UniTask<SceneInstance> LoadAsync(AssetReference reference) =>
+                Loads.TryGetValue(reference.AssetGUID, out var instance) ? UniTask.FromResult(instance) :
+                    UniTask.FromException<SceneInstance>(new InvalidOperationException("load failed"));
+            public async UniTask UnloadAsync(SceneInstance instance)
+            {
+                if (instance.Scene == FailUnload) throw new InvalidOperationException("additive unload failed");
+                if (instance.Scene.isLoaded) await SceneManager.UnloadSceneAsync(instance.Scene).ToUniTask();
+            }
+        }
+
+        [UnityTest] public IEnumerator Pop_PartialUnloadFailure() => PartialUnloadFailure("Pop").ToCoroutine();
+        [UnityTest] public IEnumerator PopOverride_PartialUnloadFailure() => PartialUnloadFailure("PopOverride").ToCoroutine();
+        [UnityTest] public IEnumerator Enter_PartialUnloadFailure() => PartialUnloadFailure("Enter").ToCoroutine();
+        [UnityTest] public IEnumerator Enter_PartialUnloadFailureLoadsUncachedDestination() => PartialUnloadFailure("Enter", true).ToCoroutine();
+        [UnityTest] public IEnumerator ReplaceOverride_PartialUnloadFailure() => PartialUnloadFailure("ReplaceOverride").ToCoroutine();
+
+        private async UniTask PartialUnloadFailure(string operation, bool uncachedDestination = false)
+        {
+            var manager = Manager();
+            var nav = Get<ScreenNavigationState>(manager, "_nav");
+            var destination = Screen("Destination"); var closing = Screen("Closing");
+            destination.mainSceneRef = new AssetReference(Guid.NewGuid().ToString("N"));
+            closing.mainSceneRef = new AssetReference(Guid.NewGuid().ToString("N"));
+            var additive = new AssetReference(Guid.NewGuid().ToString("N"));
+            closing.additiveScene = new[] { new AdditiveSceneAddressableData { sceneRef = additive, unloadOnClose = true } };
+            var operations = new FaultingSceneOperations();
+            var target = CacheScene(manager, destination.mainSceneRef, operations);
+            var main = CacheScene(manager, closing.mainSceneRef);
+            var extra = CacheScene(manager, additive);
+            operations.FailUnload = extra.scene;
+            if (operation == "Enter") { nav.Base = closing; nav.Push(closing); }
+            else
+            {
+                nav.Base = destination; nav.Push(destination);
+                if (operation == "Pop") nav.Push(closing); else nav.Override = closing;
+            }
+            target.cache.HideScreen(destination, closing);
+            if (uncachedDestination)
+            {
+                var cache = Get<Dictionary<string, SceneInstance>>(target.cache, "_cachedAddressableScenes");
+                operations.Loads[destination.mainSceneRef.AssetGUID] = cache[destination.mainSceneRef.AssetGUID];
+                cache.Remove(destination.mainSceneRef.AssetGUID);
+            }
+            var completed = 0;
+            manager.OnTransitionCompleted += _ => completed++;
+            if (operation == "Enter")
+            {
+                if (uncachedDestination && typeof(AddressableSceneCache).GetProperty("CoreLifetimeScope") != null)
+                    LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("Core LifetimeScope is null"));
+                LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("Enter.*failed"));
+            }
+            InvalidOperationException error = null;
+            try
+            {
+                switch (operation)
+                {
+                    case "Pop": await manager.Pop(); break;
+                    case "PopOverride": await manager.PopOverride(); break;
+                    case "Enter": await manager.Enter(destination); break;
+                    default: await manager.PushOverride(Screen("Replacement")); break;
+                }
+            }
+            catch (InvalidOperationException ex) { error = ex; }
+            Assert.IsNotNull(error, "The unload error must reach the navigation caller");
+            Assert.AreEqual("additive unload failed", error.Message);
+            Assert.IsFalse(main.scene.isLoaded, "The main scene really unloaded before the additive failure");
+            Assert.AreSame(destination, manager.Current);
+            Assert.IsFalse(manager.IsOverriding);
+            Assert.IsTrue(target.active.activeSelf);
+            Assert.IsFalse(target.inactive.activeSelf);
+            Assert.IsFalse(manager.IsTransitioning);
+            Assert.AreEqual(0, completed);
+        }
+
+        [Test]
+        public void InvalidSceneReference_ThrowsInsteadOfReportingSuccess()
+        {
+            var cache = new AddressableSceneCache(this);
+            Assert.ThrowsAsync<ArgumentException>(async () => await cache.LoadOrShowSceneAsync(new AssetReference("")));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DuplicatePush_IsRejectedBeforeChangingVisibility(bool asOverride)
+        {
+            var manager = Manager(); var nav = Get<ScreenNavigationState>(manager, "_nav");
+            var a = Screen("A"); var b = Screen("B");
+            nav.Base = a; nav.Push(a); nav.Push(b);
+            Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                if (asOverride) await manager.PushOverride(a); else await manager.Push(a);
+            });
+            Assert.AreSame(b, manager.Current);
+            Assert.AreEqual(2, nav.StackCount);
+        }
+
+        [Test]
+        public void Rehide_DisablesRootsReactivatedWhileHiddenWithoutReplacingSnapshot()
+        {
+            var screen = Screen("Hidden"); screen.mainSceneRef = new AssetReference(Guid.NewGuid().ToString("N"));
+            var cached = CacheScene(Manager(), screen.mainSceneRef);
+            cached.cache.HideScreen(screen, null);
+            cached.active.SetActive(true); cached.inactive.SetActive(true);
+            cached.cache.HideScreen(screen, null);
+            Assert.IsFalse(cached.active.activeSelf); Assert.IsFalse(cached.inactive.activeSelf);
+            cached.cache.ShowScreen(screen);
+            Assert.IsTrue(cached.active.activeSelf); Assert.IsFalse(cached.inactive.activeSelf);
+        }
+
+        [UnityTest]
+        public IEnumerator InterruptedFade_ContinuesFromCurrentAlphaAndDisablesVisualWhenHidden()
+        {
+            var ui = Loading(true);
+            Set(ui.controller, "animationDuration", 0.2f);
+            yield return Completes(ui.controller.Show().AsTask());
+            var hide = ui.controller.Hide().AsTask();
+            yield return new WaitForSecondsRealtime(0.08f);
+            var alpha = ui.group.alpha;
+            var show = ui.controller.Show().AsTask();
+            Assert.AreEqual(alpha, ui.group.alpha, 0.01f, "Interrupting fade-out must not restart at zero");
+            yield return Completes(show);
+            yield return Completes(hide);
+            yield return Completes(ui.controller.Hide().AsTask());
+            Assert.IsFalse(ui.group.gameObject.activeSelf);
+        }
+
         private sealed class ThrowAtPhase : IScreenEventListener
         {
             public string Phase;
+            public int PostEnterCount;
             private void Notify(string phase)
             {
                 if (Phase == phase) throw new InvalidOperationException("failed at " + phase);
@@ -216,8 +351,37 @@ namespace _VuTH.Core.GameCycle.Screen.Tests.PlayMode
             public void OnPreScreenExit(ScreenEventArgs args) => Notify("PreExit");
             public void OnPostScreenExit(ScreenEventArgs args) => Notify("PostExit");
             public void OnPreScreenEnter(ScreenEventArgs args) => Notify("PreEnter");
-            public void OnPostScreenEnter(ScreenEventArgs args) => Notify("PostEnter");
+            public void OnPostScreenEnter(ScreenEventArgs args) { PostEnterCount++; Notify("PostEnter"); }
         }
+
+        [UnityTest]
+        public IEnumerator FailedSceneLoad_DoesNotPublishSuccessfulEnterOrCompleteNavigation() => UniTask.ToCoroutine(async () =>
+        {
+            var manager = Manager(); var nav = Get<ScreenNavigationState>(manager, "_nav");
+            var from = Screen("Visible"); var target = Screen("Fails loading");
+            from.mainSceneRef = new AssetReference(Guid.NewGuid().ToString("N"));
+            target.mainSceneRef = new AssetReference(Guid.NewGuid().ToString("N"));
+            var cached = CacheScene(manager, from.mainSceneRef, new FaultingSceneOperations());
+            nav.Base = from; nav.Push(from);
+            var listener = new ThrowAtPhase();
+            var profile = Track(ScriptableObject.CreateInstance<GlobalScreenEventProfile>());
+            profile.RegisterListener(listener);
+            Set(manager, "eventProfile", new[] { profile });
+            var completed = 0;
+            manager.OnTransitionCompleted += _ => completed++;
+            if (typeof(AddressableSceneCache).GetProperty("CoreLifetimeScope") != null)
+                LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("Core LifetimeScope is null"));
+            InvalidOperationException failure = null;
+            try { await manager.Push(target); }
+            catch (InvalidOperationException error) { failure = error; }
+            Assert.IsNotNull(failure);
+            Assert.AreEqual("load failed", failure.Message);
+            Assert.AreEqual(0, listener.PostEnterCount);
+            Assert.AreEqual(0, completed);
+            Assert.AreSame(from, manager.Current);
+            Assert.IsTrue(cached.active.activeSelf);
+            Assert.IsFalse(manager.IsTransitioning);
+        });
 
         private sealed class FailingLoadingController : ILoadingController
         {
